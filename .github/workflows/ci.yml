@@ -1,0 +1,36 @@
+name: ci
+
+# Every push and PR: build, unit tests, and the two end-to-end smoke harnesses.
+# The smokes need no Ollama — they run against stdlib mock nodes.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: build + test + smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --locked
+
+      - name: Unit tests
+        run: cargo test --locked
+
+      - name: Smoke — placement, streaming, failover, health
+        run: ./scripts/smoke.sh
+
+      - name: Smoke — federation, hop guard, cycle safety
+        run: ./scripts/smoke_federation.sh

@@ -1,0 +1,7 @@
+/target
+*.jsonl
+/benchmarks/results_*.json
+benchmarks/repo_cache/
+benchmarks/logs/
+# machine-local runtime config
+stoke.toml

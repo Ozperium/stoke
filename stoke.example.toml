@@ -1,0 +1,118 @@
+# Stoke — Example Configuration
+# Copy to stoke.toml and edit for your setup.
+# Stoke rejects all requests without auth: set STOKE_API_KEYS=key1,key2
+# (or STOKE_DEV=1 for local-only development).
+
+[server]
+host = "127.0.0.1"   # use 0.0.0.0 to serve other machines on your LAN (auth required)
+port = 8787
+
+# Top-level defaults (must sit above the first [section] header)
+routing = "single"        # "single" (node-aware placement) or "auto" (classify then route)
+default_model = "qwen3:8b"
+
+# ─── Providers ──────────────────────────────────────────────────
+
+[[providers]]
+name = "ollama"
+type = "openai_compatible"
+base_url = "http://127.0.0.1:11434/v1"
+tier = "local"
+
+# Another Stoke gateway on your LAN (federation).
+# Imports its models, warm state, and live load via its authenticated /v1/nodes.
+# The remote's Ollama can stay bound to 127.0.0.1 — its Stoke is the only door.
+# [[providers]]
+# name = "studio"
+# type = "stoke"
+# base_url = "http://192.168.1.33:8787/v1"
+# api_key_env = "STUDIO_STOKE_KEY"
+# tier = "remote"
+
+# A raw remote Ollama (no Stoke in front) — note port 11434, not 8787.
+# [[providers]]
+# name = "remote-gpu"
+# type = "openai_compatible"
+# base_url = "http://192.168.1.40:11434/v1"
+# tier = "remote"
+# models = ["llama3.3:70b", "gemma4:e4b-mlx"]
+
+# Cloud tier (optional). Only configure it if you accept that automatic
+# failover may use it — if prompts must never leave your machines, omit it.
+# [[providers]]
+# name = "openrouter"
+# type = "openai_compatible"
+# base_url = "https://openrouter.ai/api/v1"
+# api_key_env = "OPENROUTER_API_KEY"
+# tier = "cloud"
+# models = ["glm-5.2:cloud"]
+
+# Anthropic upstream — enables the /v1/messages endpoint so Claude Code can
+# point ANTHROPIC_BASE_URL=http://localhost:8787 and run under Stoke's caps.
+# [[providers]]
+# name = "anthropic"
+# type = "anthropic"
+# base_url = "https://api.anthropic.com"
+# api_key_env = "ANTHROPIC_API_KEY"
+# tier = "cloud"
+
+# ─── Auto-routing roles (for routing = "auto") ───────────────────
+# Explicit role → model choices. Anything not set is resolved from models
+# DISCOVERED on your own nodes (Stoke ships with no model names). For agent
+# harnesses, set `coder` to a model that emits structured tool_calls.
+
+# Roles accept one model or an ORDERED LIST: first = preference (quality
+# floor); later entries are alternates the optimizer may pick for cost/speed.
+# Modes: request model "auto" (balanced), "auto-cheap", or "auto-fast".
+# [auto_route]
+# fast = "your-small-model"          # chat / fallback for unresolved roles
+# coder = ["your-35b-coder", "your-8b-coder"]  # agents need structured tool_calls
+# reasoner = "your-reasoning-model"
+# long_context = "your-128k-model"
+# quality = "your-cloud-model"       # quality-mode target + receipts counterfactual
+# hedge = false                      # race small prompts across idle zero-marginal nodes
+
+# ─── Per-key enforcement policy ──────────────────────────────────
+# Each key here must also appear in STOKE_API_KEYS. Applied at startup.
+# budget_usd: hard cumulative spend cap; over it, requests are refused (429).
+#   Note: spend currently accrues on non-streaming responses; streamed-request
+#   cost accounting is on the roadmap. Loop detection and rate limits enforce on
+#   ALL traffic (streaming included), so runaway loops are stopped regardless.
+# rate_limit_rpm: max requests per rolling 60s window (0/omitted = unlimited).
+# (Loop detection is always on; its thresholds are global — per-key tuning is roadmap.)
+
+# [[keys]]
+# key = "team-alpha"
+# budget_usd = 50.0
+# rate_limit_rpm = 120
+
+# ─── Built-in plugins ────────────────────────────────────────────
+
+# [builtins.prompt_harness]
+# mode = "prepend"
+#
+# [builtins.prompt_harness.prompts]
+# code = "You are an expert code generator. Write clean, idiomatic, well-tested code."
+# reasoning = "Think step by step. Show your reasoning before giving the final answer."
+
+# ─── Plugin system ──────────────────────────────────────────────
+
+# HTTP webhooks (any language, any service)
+# [plugins]
+# pre_request = ["http://127.0.0.1:9100/"]
+# prompt_filter = ["http://127.0.0.1:9100/filter"]
+# post_response = ["http://127.0.0.1:9100/post"]
+
+# JS/TS plugins (requires `cargo build --features js-plugins`)
+# [plugins]
+# scripts = ["plugins/pii-redact.js"]
+
+# ─── Route profiles (multi-endpoint) ────────────────────────────
+# Each profile is its own POST endpoint with a fixed model and builtins.
+
+# [[routes]]
+# name = "code"
+# path = "/v1/code/completions"
+# model = "qwen3:8b"
+# routing = "single"
+# builtins = ["prompt_harness", "code_formatter"]

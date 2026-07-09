@@ -1,0 +1,118 @@
+name: release
+
+# Two channels:
+#   - tag  v*      -> a real GitHub Release (this is what `latest` resolves to,
+#                     and therefore what the one-line installer downloads)
+#   - push to main -> a rolling `nightly` prerelease, rebuilt every commit.
+#                     Prereleases are excluded from `latest`, so nightly never
+#                     hijacks the stable install path. Get it with:
+#                       curl -sSf https://stokegate.com/install | sh -s -- --version nightly
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest,  target: aarch64-apple-darwin,       name: stoke-macos-arm64 }
+          - { os: macos-latest,  target: x86_64-apple-darwin,        name: stoke-macos-x64 }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl,  name: stoke-linux-x64 }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, name: stoke-linux-arm64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # musl static builds need the cross linker; rustls means no OpenSSL to cross-compile.
+      - name: Install musl tools
+        if: contains(matrix.target, 'linux-musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+          fi
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} --bin stoke --bin stoke-cli
+
+      - name: Package
+        run: |
+          dir="${{ matrix.name }}"
+          mkdir "$dir"
+          cp "target/${{ matrix.target }}/release/stoke" "target/${{ matrix.target }}/release/stoke-cli" "$dir/"
+          cp README.md LICENSE stoke.example.toml "$dir/"
+          tar czf "${{ matrix.name }}.tar.gz" "$dir"
+          shasum -a 256 "${{ matrix.name }}.tar.gz" > "${{ matrix.name }}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            ${{ matrix.name }}.tar.gz
+            ${{ matrix.name }}.tar.gz.sha256
+
+  # Tagged builds become the stable release that `latest` points at.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+  # Every commit on main refreshes a rolling `nightly` prerelease. The old tag
+  # is deleted first so the tag actually moves to the new commit.
+  nightly:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+      - name: Reset the rolling nightly tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete nightly --cleanup-tag --yes || true
+      - name: Publish nightly prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: "nightly (${{ github.sha }})"
+          body: |
+            Rolling build of `main` — unstable, rebuilt on every commit.
+            Install: `curl -sSf https://stokegate.com/install | sh -s -- --version nightly`
+          prerelease: true
+          files: dist/*
