@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="mask-icon" href="/favicon.svg" color="#3bdb78">
+<meta name="theme-color" content="#0a0a0b">
+<title>Expose Ollama to Your Network Safely — Stoke</title>
+<meta name="description" content="Setting OLLAMA_HOST=0.0.0.0 publishes an unauthenticated model server to your whole LAN. Put an authenticated Stoke gateway in front of Ollama instead.">
+<link rel="canonical" href="https://stokegate.com/guides/expose-ollama-to-your-network-safely/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Expose Ollama to Your Network Safely">
+<meta property="og:description" content="Setting OLLAMA_HOST=0.0.0.0 publishes an unauthenticated model server to your whole LAN. Put an authenticated Stoke gateway in front of Ollama instead.">
+<meta property="og:url" content="https://stokegate.com/guides/expose-ollama-to-your-network-safely/">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Expose Ollama to Your Network Safely","description":"Setting OLLAMA_HOST=0.0.0.0 publishes an unauthenticated model server to your whole LAN. Put an authenticated Stoke gateway in front of Ollama instead.","url":"https://stokegate.com/guides/expose-ollama-to-your-network-safely/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-07-10"}</script>
+<style>
+:root{--bg:#0a0a0b;--bg2:#131316;--bg3:#1a1a20;--border:#2a2a32;--text:#e4e4e7;--muted:#8a8a96;--accent:#3bdb78;--red:#ff5454;
+--font:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+nav{border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(10,10,11,.85);backdrop-filter:blur(8px);z-index:10}
+.nav-inner{max-width:860px;margin:0 auto;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.logo{font-weight:700;font-size:17px;color:var(--text)}
+.nav-links{display:flex;gap:20px}.nav-links a{color:var(--muted);font-size:14px}
+main{max-width:760px;margin:0 auto;padding:56px 24px 80px}
+h1{font-size:40px;line-height:1.15;letter-spacing:-.02em;margin-bottom:16px}
+h2{font-size:24px;margin:44px 0 14px;letter-spacing:-.01em;scroll-margin-top:80px}
+h3{font-size:18px;margin:28px 0 10px}
+p{margin:14px 0;color:#c9c9d1}
+ul,ol{margin:14px 0 14px 22px}li{margin:7px 0;color:#c9c9d1}
+code{font-family:var(--mono);font-size:.88em;color:var(--accent);background:var(--bg3);padding:2px 6px;border-radius:5px}
+pre{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;overflow-x:auto;margin:18px 0}
+pre code{background:none;color:#d9d9e3;padding:0;font-size:13.5px;line-height:1.65}
+blockquote{border-left:3px solid var(--accent);background:var(--bg2);padding:12px 18px;margin:18px 0;border-radius:0 8px 8px 0;color:var(--muted)}
+table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14.5px}
+th,td{border:1px solid var(--border);padding:9px 12px;text-align:left}
+th{background:var(--bg2);font-weight:600}
+hr{border:0;border-top:1px solid var(--border);margin:36px 0}
+.lede{color:var(--muted);font-size:18px;margin-bottom:8px}
+.crumb{font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:22px}
+.cta{margin-top:52px;border:1px solid var(--border);background:var(--bg2);border-radius:14px;padding:26px}
+.cta h3{margin-top:0}
+.btn{display:inline-block;background:var(--accent);color:#07120b;font-weight:650;padding:11px 20px;border-radius:9px;margin-top:10px}
+.btn:hover{text-decoration:none;opacity:.92}
+footer{border-top:1px solid var(--border);padding:28px 24px;color:var(--muted);font-size:13.5px;text-align:center}
+@media(max-width:640px){h1{font-size:31px}main{padding:36px 20px 60px}.nav-links{display:none}}
+
+/* syntax tokens (build-time highlighted; no client JS) */
+.tok-com{color:var(--muted);font-style:italic}
+.tok-str{color:#7dd3fc}
+.tok-num{color:#e8b339}
+.tok-kw{color:#3bdb78;font-weight:600}
+.tok-bi{color:#6ee7a8}
+.tok-var{color:#e8b339}
+.tok-key{color:#e4e4e7}
+.tok-sec{color:#3bdb78;font-weight:600}
+.tok-flag{color:#8a8a96}
+
+/* guide index cards */
+.gwrap{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:36px}
+.gcard{display:block;border:1px solid var(--border);background:var(--bg2);border-radius:16px;overflow:hidden;transition:border-color .18s,transform .18s}
+.gcard:hover{border-color:rgba(59,219,120,.45);transform:translateY(-2px);text-decoration:none}
+.gart{height:118px;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 120%,rgba(59,219,120,.14),transparent 68%);border-bottom:1px solid var(--border)}
+.gart svg{width:52px;height:52px;color:var(--accent);opacity:.92}
+.gbody{padding:20px 22px 22px}
+.gchip{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--border);border-radius:99px;padding:3px 9px;margin-bottom:11px}
+.gcard h2{font-size:18px;margin:0 0 7px;color:var(--text);letter-spacing:-.01em;line-height:1.35}
+.gcard p{font-size:14px;color:var(--muted);margin:0 0 14px;line-height:1.6}
+.gcard .go{font-size:13.5px;color:var(--accent);font-weight:600}
+@media(max-width:700px){.gwrap{grid-template-columns:1fr}}
+
+</style>
+</head>
+<body>
+<nav><div class="nav-inner">
+  <a href="/" class="logo">⬡ Stoke</a>
+  <div class="nav-links">
+    <a href="/guides/">Guides</a>
+    <a href="https://github.com/Ozperium/stoke">GitHub</a>
+  </div>
+</div></nav>
+<main>
+<div class="crumb"><a href="/">Stoke</a> / <a href="/guides/">Guides</a></div>
+<h1>Expose Ollama to Your Network Safely</h1>
+<p>You want to reach the Ollama running on your desktop from your laptop. Every answer online says the same thing: set <code>OLLAMA_HOST=0.0.0.0</code> and restart. It works — and it also opens an unauthenticated inference server to every device on the network. Anyone who can reach that IP can run generation on your GPU, enumerate every model you've pulled, and pin your machine at 100% util. There is no password, no token, no allow-list. This guide shows the safer pattern: leave Ollama bound to <code>127.0.0.1</code> and put an authenticated gateway in front of it as the only network-facing door.</p>
+<h2 id="what-ollama-host-0-0-0-0-actually-does">What <code>OLLAMA_HOST=0.0.0.0</code> actually does</h2>
+<p>Ollama's OpenAI-compatible server has no auth. Binding it to <code>0.0.0.0</code> means it accepts connections on every interface, from anyone who can route to the host. From a second machine on the same LAN (or the same coffee-shop wifi), this now works with no credentials:</p>
+<pre><code class="lang-bash"><span class="tok-com"># From any other device on the network, once you've set 0.0.0.0:</span>
+<span class="tok-kw">curl</span> http://<span class="tok-num">192.168</span>.<span class="tok-num">1.20</span>:<span class="tok-num">11434</span>/api/tags        <span class="tok-com"># your full model inventory</span>
+<span class="tok-kw">curl</span> http://<span class="tok-num">192.168</span>.<span class="tok-num">1.20</span>:<span class="tok-num">11434</span>/v1/chat/completions \
+ <span class="tok-flag"> -H</span> <span class="tok-str">'Content-Type: application/json'</span> \
+ <span class="tok-flag"> -d</span> <span class="tok-str">'{"model":"qwen3:8b","messages":[{"role":"user","content":"hi"}]}'</span></code></pre>
+<p>Both succeed. The first is reconnaissance — it tells an attacker exactly which models you run. The second burns your electricity and GPU on their prompt. There is no rate limit and nothing to stop a script from looping it. That's the cost of the one-line fix.</p>
+<h2 id="the-safer-topology">The safer topology</h2>
+<p>Keep Ollama private. Put Stoke — a single ~5.5 MB Rust binary that sits between agents and model APIs — on the network edge instead:</p>
+<pre><code>other machine ──HTTP+auth──▶  Stoke :8787 (0.0.0.0)  ──localhost──▶  Ollama :11434 (127.0.0.1)
+                              the only open door,               never leaves the loopback
+                              every request needs a key</code></pre>
+<p>Ollama stays on <code>127.0.0.1</code>, unreachable from the LAN. Stoke listens on the network, and every request except a liveness check must carry a bearer token. Stoke fails closed: if you forget to configure keys, it rejects everything rather than serving openly.</p>
+<h2 id="step-1-leave-ollama-on-localhost">Step 1: leave Ollama on localhost</h2>
+<p>Make sure <code>OLLAMA_HOST</code> is <strong>not</strong> set to <code>0.0.0.0</code>. The default is <code>127.0.0.1</code>, which is what you want. If you set it earlier, unset it and restart the daemon:</p>
+<pre><code class="lang-bash"><span class="tok-kw">unset</span> OLLAMA_HOST
+<span class="tok-com"># macOS note: quitting the Ollama menu-bar app does NOT stop `ollama serve`.</span>
+<span class="tok-com"># Kill the daemon so it picks up the change:</span>
+<span class="tok-kw">pkill</span> ollama
+<span class="tok-kw">ollama</span> serve</code></pre>
+<p>While you're here, raise the context window if you need it — Ollama's default is small, and it can only be set server-side (the OpenAI-compatible API can't change it):</p>
+<pre><code class="lang-bash"><span class="tok-var">OLLAMA_CONTEXT_LENGTH</span>=<span class="tok-num">8192</span> ollama serve</code></pre>
+<h2 id="step-2-write-stoke-toml">Step 2: write <code>stoke.toml</code></h2>
+<p>Generate a starter config and point Stoke's listener at the network while the provider stays on loopback:</p>
+<pre><code class="lang-bash"><span class="tok-kw">stoke</span>-cli init<span class="tok-flag"> --bind-all</span><span class="tok-flag"> --output</span> stoke.toml</code></pre>
+<p><code>--bind-all</code> sets the server host to <code>0.0.0.0</code>. <code>stoke-cli init</code> also discovers a default model from your own Ollama at generation time — Stoke ships zero model names of its own. The result looks like this (trimmed):</p>
+<pre><code class="lang-toml"><span class="tok-key">routing</span> = <span class="tok-str">"single"</span>
+<span class="tok-key">default_model</span> = <span class="tok-str">"qwen3:8b"</span>   <span class="tok-com"># whatever `ollama list` shows on your box</span>
+<span class="tok-sec">
+[server]</span>
+<span class="tok-key">host</span> = <span class="tok-str">"0.0.0.0"</span>        <span class="tok-com"># Stoke faces the LAN</span>
+<span class="tok-key">port</span> = <span class="tok-num">8787</span>
+<span class="tok-sec">
+[[providers]]</span>
+<span class="tok-key">name</span> = <span class="tok-str">"ollama"</span>
+<span class="tok-key">type</span> = <span class="tok-str">"openai_compatible"</span>
+<span class="tok-key">base_url</span> = <span class="tok-str">"http://127.0.0.1:11434/v1"</span>   <span class="tok-com"># stays on loopback</span>
+<span class="tok-key">tier</span> = <span class="tok-str">"local"</span></code></pre>
+<p>Note the top-level defaults (<code>routing</code>, <code>default_model</code>) sit <em>above</em> the first <code>[section]</code> header — that's a TOML requirement, and it's how <code>stoke init</code> emits them. The whole point is on two lines: <code>host = "0.0.0.0"</code> for Stoke, <code>base_url = "http://127.0.0.1:11434/v1"</code> for the provider. The outside world talks to Stoke; only Stoke talks to Ollama.</p>
+<h2 id="step-3-start-stoke-with-an-api-key">Step 3: start Stoke with an API key</h2>
+<p>Stoke rejects all traffic unless <code>STOKE_API_KEYS</code> is set (or <code>STOKE_DEV=1</code>, which is local-dev only — do not use it for a network-facing server). Mint a key and start the server:</p>
+<pre><code class="lang-bash"><span class="tok-kw">export</span> STOKE_API_KEYS=<span class="tok-str">"stk-$(openssl rand -hex 16)"</span>
+<span class="tok-kw">echo</span> <span class="tok-str">"$STOKE_API_KEYS"</span>     <span class="tok-com"># copy this; the other machine needs it</span>
+<span class="tok-kw">stoke</span>-cli serve            <span class="tok-com"># reads stoke.toml from the current directory</span></code></pre>
+<p>That's the minimum for authenticated access. If you also want a hard dollar ceiling and a rate limit per key, add a <code>[[keys]]</code> block — the key must appear in both <code>stoke.toml</code> and <code>STOKE_API_KEYS</code>:</p>
+<pre><code class="lang-toml"><span class="tok-sec">[[keys]]</span>
+<span class="tok-key">key</span> = <span class="tok-str">"stk-...your-key..."</span>
+<span class="tok-key">budget_usd</span> = <span class="tok-num">5.0</span>        <span class="tok-com"># hard cap on metered (priced) traffic</span>
+<span class="tok-key">rate_limit_rpm</span> = <span class="tok-num">120</span>    <span class="tok-com"># max requests per rolling 60s</span></code></pre>
+<p>Enforcement runs <em>before</em> any call reaches Ollama: over-budget requests get <code>429 Budget exceeded</code>, and a loop breaker blocks a key that fires 5 near-identical requests in 60 seconds. Local inference has no per-request dollar price, so the USD cap is a no-op for it — but the rate limit and loop breaker still apply, which is what actually protects your GPU.</p>
+<h2 id="verify-it-worked">Verify it worked</h2>
+<p>First, confirm Ollama is <strong>not</strong> reachable from the other machine. This should now fail (connection refused), proving it's back on loopback:</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> --max-time</span> <span class="tok-num">3</span> http://<span class="tok-num">192.168</span>.<span class="tok-num">1.20</span>:<span class="tok-num">11434</span>/api/tags
+<span class="tok-com"># curl: (7) Failed to connect ... Connection refused   ← good</span></code></pre>
+<p>Now hit Stoke from the other machine. Health is the only open endpoint:</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span> http://<span class="tok-num">192.168</span>.<span class="tok-num">1.20</span>:<span class="tok-num">8787</span>/health
+<span class="tok-com"># {"service":"stoke","status":"ok"}</span></code></pre>
+<p>Try inference <strong>without</strong> a key — you should be refused:</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -s</span><span class="tok-flag"> -o</span> /dev/null<span class="tok-flag"> -w</span> <span class="tok-str">'%{http_code}\n'</span> \
+  http://<span class="tok-num">192.168</span>.<span class="tok-num">1.20</span>:<span class="tok-num">8787</span>/v1/chat/completions \
+ <span class="tok-flag"> -H</span> <span class="tok-str">'Content-Type: application/json'</span> \
+ <span class="tok-flag"> -d</span> <span class="tok-str">'{"model":"qwen3:8b","messages":[{"role":"user","content":"hi"}]}'</span>
+<span class="tok-com"># 401        ← body: "Invalid or missing API key"</span></code></pre>
+<p>Now <strong>with</strong> the key:</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span> http://<span class="tok-num">192.168</span>.<span class="tok-num">1.20</span>:<span class="tok-num">8787</span>/v1/chat/completions \
+ <span class="tok-flag"> -H</span> <span class="tok-str">"Authorization: Bearer $STOKE_API_KEYS"</span> \
+ <span class="tok-flag"> -H</span> <span class="tok-str">'Content-Type: application/json'</span> \
+ <span class="tok-flag"> -d</span> <span class="tok-str">'{"model":"qwen3:8b","messages":[{"role":"user","content":"say hi"}]}'</span>
+<span class="tok-com"># 200 with a normal chat completion; non-streaming responses also carry</span>
+<span class="tok-com"># stoke_cost and stoke_route.</span></code></pre>
+<p>401 without the key, 200 with it, and Ollama's own port dead from the LAN — that's the whole property you wanted.</p>
+<h2 id="the-model-list-is-reconnaissance-too">The model list is reconnaissance too</h2>
+<p>A common mistake is to authenticate inference but leave status endpoints open. Stoke doesn't: <code>GET /v1/nodes</code> — the live registry of which models are pulled, which are warm in memory, in-flight counts, and measured latency — requires the bearer key like everything else. Model inventory is exactly the data an attacker wants first, so it lives inside the protected surface:</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span> http://<span class="tok-num">192.168</span>.<span class="tok-num">1.20</span>:<span class="tok-num">8787</span>/v1/nodes            <span class="tok-com"># 401</span>
+<span class="tok-kw">curl</span> http://<span class="tok-num">192.168</span>.<span class="tok-num">1.20</span>:<span class="tok-num">8787</span>/v1/nodes<span class="tok-flag"> -H</span> <span class="tok-str">"Authorization: Bearer $STOKE_API_KEYS"</span>   <span class="tok-com"># 200</span></code></pre>
+<h2 id="multi-machine-variant-two-gateways-federation">Multi-machine variant: two gateways (federation)</h2>
+<p>If you have several machines, you don't have to expose any Ollama. Run Stoke on each box, keep every Ollama on <code>127.0.0.1</code>, and add the peer to your config as a <code>stoke</code>-type provider pointing at its <code>/v1</code>:</p>
+<pre><code class="lang-toml"><span class="tok-sec">[[providers]]</span>
+<span class="tok-key">name</span> = <span class="tok-str">"studio"</span>
+<span class="tok-key">type</span> = <span class="tok-str">"stoke"</span>
+<span class="tok-key">base_url</span> = <span class="tok-str">"http://192.168.1.33:8787/v1"</span>   <span class="tok-com"># the peer's Stoke, not its Ollama</span>
+<span class="tok-key">api_key_env</span> = <span class="tok-str">"STUDIO_STOKE_KEY"</span>
+<span class="tok-key">tier</span> = <span class="tok-str">"remote"</span></code></pre>
+<p>Stoke imports the peer's models, warm state, and live load through its authenticated <code>/v1/nodes</code>, so you still get warm-aware placement across machines — but the only open port on each host is an authenticated Stoke. Forwarded requests carry an <code>x-stoke-hop</code> header and federation depth is exactly one hop, so an A↔B pair can't loop.</p>
+<h2 id="what-this-doesn-t-do">What this doesn't do</h2>
+<ul><li><strong>It's not a public-internet gateway.</strong> This is a LAN pattern. Stoke checks a bearer token; it doesn't do TLS termination or user management. Don't port-forward it to the open internet without a reverse proxy handling TLS.</li><li><strong>Streaming requests aren't dollar-metered.</strong> Spend accrues from non-streaming responses only. Auth, rate limits, and the loop breaker <em>do</em> cover streaming traffic, so runaway loops are still stopped.</li><li><strong>Local inference is never "free."</strong> It costs the electricity and the GPU you already own. Budget caps in USD apply to metered API keys, not to local models.</li><li><strong>No cross-model fallback.</strong> Failover retries the <em>same</em> model on the next healthy node; it won't silently switch you to a different model or vendor.</li></ul>
+<h2 id="next-steps">Next steps</h2>
+<p>Install Stoke and try the pattern on two machines:</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -sSf</span> https://stokegate.com/install | sh<span class="tok-flag"> -s</span> --<span class="tok-flag"> --version</span> nightly</code></pre>
+<p>There's no stable tag yet — a bare <code>| sh</code> resolves <code>latest</code> and compiles from source, so pin <code>--version nightly</code> for the checksum-verified static binary (macOS arm64/x64, Linux x64/arm64). Source and full config reference: https://github.com/Ozperium/stoke</p>
+<div class="cta">
+  <h3>Put a control point in front of your agents</h3>
+  <p>Stoke is a single Rust binary: hard budget caps, a runaway-loop kill switch, and local-first routing — enforced before a provider is ever called. Open source, MIT.</p>
+  <a class="btn" href="https://github.com/Ozperium/stoke">Get Stoke on GitHub</a>
+</div>
+</main>
+<footer>MIT licensed · <a href="https://stokegate.com">stokegate.com</a> · <a href="https://github.com/Ozperium/stoke">GitHub</a></footer>
+</body>
+</html>

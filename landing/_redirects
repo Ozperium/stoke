@@ -1,0 +1,9 @@
+# Cloudflare Pages routing.
+# `curl -sSf https://stokegate.com/install | sh` must return the SCRIPT, not
+# the landing page. A 200 here is a rewrite (proxy), not a redirect, so curl
+# receives the file body directly without following anything.
+/install     /install.sh   200
+
+# Browsers that ignore <link rel=icon> still probe /favicon.ico; serve the
+# SVG there rather than letting it fall through to the landing page's HTML.
+/favicon.ico /favicon.svg 200

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="mask-icon" href="/favicon.svg" color="#3bdb78">
+<meta name="theme-color" content="#0a0a0b">
+<title>Run Ollama Across Two Machines Without Exposing It — Stoke</title>
+<meta name="description" content="Run Ollama across two machines by federating two Stoke gateways. Your desktop GPU serves the laptop over LAN while Ollama stays bound to 127.0.0.1.">
+<link rel="canonical" href="https://stokegate.com/guides/run-ollama-across-two-machines/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Run Ollama Across Two Machines Without Exposing It">
+<meta property="og:description" content="Run Ollama across two machines by federating two Stoke gateways. Your desktop GPU serves the laptop over LAN while Ollama stays bound to 127.0.0.1.">
+<meta property="og:url" content="https://stokegate.com/guides/run-ollama-across-two-machines/">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Run Ollama Across Two Machines Without Exposing It","description":"Run Ollama across two machines by federating two Stoke gateways. Your desktop GPU serves the laptop over LAN while Ollama stays bound to 127.0.0.1.","url":"https://stokegate.com/guides/run-ollama-across-two-machines/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-07-10"}</script>
+<style>
+:root{--bg:#0a0a0b;--bg2:#131316;--bg3:#1a1a20;--border:#2a2a32;--text:#e4e4e7;--muted:#8a8a96;--accent:#3bdb78;--red:#ff5454;
+--font:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+nav{border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(10,10,11,.85);backdrop-filter:blur(8px);z-index:10}
+.nav-inner{max-width:860px;margin:0 auto;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.logo{font-weight:700;font-size:17px;color:var(--text)}
+.nav-links{display:flex;gap:20px}.nav-links a{color:var(--muted);font-size:14px}
+main{max-width:760px;margin:0 auto;padding:56px 24px 80px}
+h1{font-size:40px;line-height:1.15;letter-spacing:-.02em;margin-bottom:16px}
+h2{font-size:24px;margin:44px 0 14px;letter-spacing:-.01em;scroll-margin-top:80px}
+h3{font-size:18px;margin:28px 0 10px}
+p{margin:14px 0;color:#c9c9d1}
+ul,ol{margin:14px 0 14px 22px}li{margin:7px 0;color:#c9c9d1}
+code{font-family:var(--mono);font-size:.88em;color:var(--accent);background:var(--bg3);padding:2px 6px;border-radius:5px}
+pre{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;overflow-x:auto;margin:18px 0}
+pre code{background:none;color:#d9d9e3;padding:0;font-size:13.5px;line-height:1.65}
+blockquote{border-left:3px solid var(--accent);background:var(--bg2);padding:12px 18px;margin:18px 0;border-radius:0 8px 8px 0;color:var(--muted)}
+table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14.5px}
+th,td{border:1px solid var(--border);padding:9px 12px;text-align:left}
+th{background:var(--bg2);font-weight:600}
+hr{border:0;border-top:1px solid var(--border);margin:36px 0}
+.lede{color:var(--muted);font-size:18px;margin-bottom:8px}
+.crumb{font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:22px}
+.cta{margin-top:52px;border:1px solid var(--border);background:var(--bg2);border-radius:14px;padding:26px}
+.cta h3{margin-top:0}
+.btn{display:inline-block;background:var(--accent);color:#07120b;font-weight:650;padding:11px 20px;border-radius:9px;margin-top:10px}
+.btn:hover{text-decoration:none;opacity:.92}
+footer{border-top:1px solid var(--border);padding:28px 24px;color:var(--muted);font-size:13.5px;text-align:center}
+@media(max-width:640px){h1{font-size:31px}main{padding:36px 20px 60px}.nav-links{display:none}}
+
+/* syntax tokens (build-time highlighted; no client JS) */
+.tok-com{color:var(--muted);font-style:italic}
+.tok-str{color:#7dd3fc}
+.tok-num{color:#e8b339}
+.tok-kw{color:#3bdb78;font-weight:600}
+.tok-bi{color:#6ee7a8}
+.tok-var{color:#e8b339}
+.tok-key{color:#e4e4e7}
+.tok-sec{color:#3bdb78;font-weight:600}
+.tok-flag{color:#8a8a96}
+
+/* guide index cards */
+.gwrap{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:36px}
+.gcard{display:block;border:1px solid var(--border);background:var(--bg2);border-radius:16px;overflow:hidden;transition:border-color .18s,transform .18s}
+.gcard:hover{border-color:rgba(59,219,120,.45);transform:translateY(-2px);text-decoration:none}
+.gart{height:118px;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 120%,rgba(59,219,120,.14),transparent 68%);border-bottom:1px solid var(--border)}
+.gart svg{width:52px;height:52px;color:var(--accent);opacity:.92}
+.gbody{padding:20px 22px 22px}
+.gchip{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--border);border-radius:99px;padding:3px 9px;margin-bottom:11px}
+.gcard h2{font-size:18px;margin:0 0 7px;color:var(--text);letter-spacing:-.01em;line-height:1.35}
+.gcard p{font-size:14px;color:var(--muted);margin:0 0 14px;line-height:1.6}
+.gcard .go{font-size:13.5px;color:var(--accent);font-weight:600}
+@media(max-width:700px){.gwrap{grid-template-columns:1fr}}
+
+</style>
+</head>
+<body>
+<nav><div class="nav-inner">
+  <a href="/" class="logo">⬡ Stoke</a>
+  <div class="nav-links">
+    <a href="/guides/">Guides</a>
+    <a href="https://github.com/Ozperium/stoke">GitHub</a>
+  </div>
+</div></nav>
+<main>
+<div class="crumb"><a href="/">Stoke</a> / <a href="/guides/">Guides</a></div>
+<h1>Run Ollama Across Two Machines Without Exposing It</h1>
+<p>You code on a laptop, but the real GPU is in the workstation or Mac Studio across the room. You want your coding agent to use the big machine when a request deserves it, and the laptop when it doesn't — without hardcoding a second base URL into every tool, and without setting <code>OLLAMA_HOST=0.0.0.0</code> on the workstation, which puts an unauthenticated model server on your LAN.</p>
+<p>The clean way is to run a small gateway on each machine and let them federate. Stoke is a single ~5.5 MB Rust binary that sits in front of Ollama. The laptop's Stoke treats the workstation's Stoke as a peer, imports its live model inventory, and routes to it when that's the better placement. The workstation's Ollama never leaves <code>127.0.0.1</code>. This guide sets that up end to end.</p>
+<h2 id="the-shape-of-the-setup">The shape of the setup</h2>
+<pre><code>laptop                              workstation (the GPU)
+┌────────────────────┐              ┌────────────────────┐
+│ agent (OpenCode)   │              │                    │
+│   ↓ localhost:8787 │              │                    │
+│ stoke ─────────────┼── LAN :8787 ─┼─→ stoke            │
+│   ↓ 127.0.0.1      │  (auth'd)    │     ↓ 127.0.0.1    │
+│ ollama (small)     │              │   ollama (big GPU) │
+└────────────────────┘              └────────────────────┘</code></pre>
+<p>Only one network port is open on the workstation: its Stoke on <code>:8787</code>, and it requires a bearer key. Ollama on both machines stays bound to loopback.</p>
+<h2 id="install-stoke-on-both-machines">Install Stoke on both machines</h2>
+<p>There is no tagged stable release yet, so pin the nightly build — a bare <code>| sh</code> resolves <code>latest</code> and compiles from source. Run this on the laptop and the workstation:</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -sSf</span> https://stokegate.com/install | sh<span class="tok-flag"> -s</span> --<span class="tok-flag"> --version</span> nightly</code></pre>
+<p>That fetches a checksum-verified static binary for macOS (arm64/x64) or Linux (x64/arm64) and falls back to a source build on anything else. You get two binaries: <code>stoke</code> (the server) and <code>stoke-cli</code> (config + client helpers).</p>
+<h2 id="configure-the-workstation-the-gpu-machine">Configure the workstation (the GPU machine)</h2>
+<p>Generate a starter config next to the workstation's Ollama:</p>
+<pre><code class="lang-bash"><span class="tok-kw">stoke</span>-cli init<span class="tok-flag"> --output</span> stoke.toml</code></pre>
+<p><code>init</code> discovers a default model from the workstation's own Ollama. Edit <code>stoke.toml</code> so the server binds to the LAN while Ollama stays on loopback:</p>
+<pre><code class="lang-toml"><span class="tok-key">routing</span> = <span class="tok-str">"single"</span>
+<span class="tok-sec">
+[server]</span>
+<span class="tok-key">host</span> = <span class="tok-str">"0.0.0.0"</span>   <span class="tok-com"># reachable from the laptop; auth is still required</span>
+<span class="tok-key">port</span> = <span class="tok-num">8787</span>
+<span class="tok-sec">
+[[providers]]</span>
+<span class="tok-key">name</span> = <span class="tok-str">"studio"</span>
+<span class="tok-key">base_url</span> = <span class="tok-str">"http://127.0.0.1:11434/v1"</span>   <span class="tok-com"># Ollama stays on loopback</span>
+<span class="tok-key">tier</span> = <span class="tok-str">"local"</span></code></pre>
+<p>Coding agents send large contexts, and Ollama's default window is small. Set it server-side before starting Ollama (it cannot be set through the OpenAI-compatible API):</p>
+<pre><code class="lang-bash"><span class="tok-var">OLLAMA_CONTEXT_LENGTH</span>=<span class="tok-num">32768</span> ollama serve</code></pre>
+<p>Now start Stoke with an API key. Stoke is fail-closed: with no <code>STOKE_API_KEYS</code> and no <code>STOKE_DEV=1</code>, every request is rejected with 401. Pick a key the laptop will present:</p>
+<pre><code class="lang-bash"><span class="tok-var">STOKE_API_KEYS</span>=stk-studio-9159ba0a stoke</code></pre>
+<p>Confirm it's alive from the laptop (this is the one endpoint that needs no auth):</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span> http://<span class="tok-num">192.168</span>.<span class="tok-num">1.20</span>:<span class="tok-num">8787</span>/health</code></pre>
+<p>Use the workstation's real LAN address in place of <code>192.168.1.20</code>.</p>
+<h2 id="configure-the-laptop-and-federate">Configure the laptop and federate</h2>
+<p>On the laptop, put the peer key in the environment so it never lands in the config file:</p>
+<pre><code class="lang-bash"><span class="tok-kw">export</span> STUDIO_STOKE_KEY=stk-studio-9159ba0a</code></pre>
+<p>Then write the laptop's <code>stoke.toml</code> with its own local Ollama plus a <code>type = "stoke"</code> provider pointing at the workstation's Stoke <code>/v1</code> URL:</p>
+<pre><code class="lang-toml"><span class="tok-key">routing</span> = <span class="tok-str">"single"</span>
+<span class="tok-sec">
+[server]</span>
+<span class="tok-key">host</span> = <span class="tok-str">"127.0.0.1"</span>   <span class="tok-com"># the agent is local; no need to expose this one</span>
+<span class="tok-key">port</span> = <span class="tok-num">8787</span>
+<span class="tok-sec">
+[[providers]]</span>
+<span class="tok-key">name</span> = <span class="tok-str">"laptop"</span>
+<span class="tok-key">base_url</span> = <span class="tok-str">"http://127.0.0.1:11434/v1"</span>
+<span class="tok-key">tier</span> = <span class="tok-str">"local"</span>
+
+<span class="tok-com"># The workstation, fronted by its own Stoke (federation).</span>
+<span class="tok-sec">[[providers]]</span>
+<span class="tok-key">name</span> = <span class="tok-str">"studio"</span>
+<span class="tok-key">type</span> = <span class="tok-str">"stoke"</span>
+<span class="tok-key">base_url</span> = <span class="tok-str">"http://192.168.1.20:8787/v1"</span>
+<span class="tok-key">api_key_env</span> = <span class="tok-str">"STUDIO_STOKE_KEY"</span>
+<span class="tok-key">tier</span> = <span class="tok-str">"remote"</span></code></pre>
+<p>Note the port: <code>8787</code> (the peer's Stoke), not <code>11434</code> (Ollama). <code>api_key_env</code> names the environment variable holding the bearer key; its value must match one of the workstation's <code>STOKE_API_KEYS</code>.</p>
+<p>Start the laptop's Stoke with a key your agent will use:</p>
+<pre><code class="lang-bash"><span class="tok-var">STOKE_API_KEYS</span>=stk-laptop-dev stoke</code></pre>
+<h2 id="verify-it-worked">Verify it worked</h2>
+<p>The registry polls the peer on a background loop. From the laptop, ask what nodes it can see:</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -s</span> http://localhost:<span class="tok-num">8787</span>/v1/nodes \
+ <span class="tok-flag"> -H</span> <span class="tok-str">"Authorization: Bearer stk-laptop-dev"</span> | jq</code></pre>
+<p>You should see two nodes — the local Ollama and the imported peer. The peer's models, warm state, live in-flight count, and measured per-model performance all arrive through its authenticated <code>/v1/nodes</code>:</p>
+<pre><code class="lang-json">{
+  <span class="tok-key">"nodes"</span>: [
+    {
+      <span class="tok-key">"name"</span>: <span class="tok-str">"laptop"</span>,
+      <span class="tok-key">"type"</span>: <span class="tok-str">"direct"</span>,
+      <span class="tok-key">"tier"</span>: <span class="tok-str">"local"</span>,
+      <span class="tok-key">"healthy"</span>: <span class="tok-kw">true</span>,
+      <span class="tok-key">"models"</span>: [<span class="tok-str">"gemma4:e4b-mlx"</span>],
+      <span class="tok-key">"warm"</span>: [<span class="tok-str">"gemma4:e4b-mlx"</span>],
+      <span class="tok-key">"inflight"</span>: <span class="tok-num">0</span>,
+      <span class="tok-key">"ewma_latency_ms"</span>: <span class="tok-num">180.0</span>
+    },
+    {
+      <span class="tok-key">"name"</span>: <span class="tok-str">"studio"</span>,
+      <span class="tok-key">"type"</span>: <span class="tok-str">"stoke"</span>,
+      <span class="tok-key">"tier"</span>: <span class="tok-str">"remote"</span>,
+      <span class="tok-key">"healthy"</span>: <span class="tok-kw">true</span>,
+      <span class="tok-key">"models"</span>: [<span class="tok-str">"qwen3.6:35b-a3b-q4_K_M"</span>, <span class="tok-str">"gpt-oss:20b"</span>],
+      <span class="tok-key">"warm"</span>: [<span class="tok-str">"qwen3.6:35b-a3b-q4_K_M"</span>],
+      <span class="tok-key">"models_meta"</span>: {
+        <span class="tok-key">"qwen3.6:35b-a3b-q4_K_M"</span>: {
+          <span class="tok-key">"context_length"</span>: <span class="tok-num">32768</span>, <span class="tok-key">"tools"</span>: <span class="tok-kw">true</span>,
+          <span class="tok-key">"tps"</span>: <span class="tok-num">48.2</span>, <span class="tok-key">"ttft_ms"</span>: <span class="tok-num">410.0</span>
+        }
+      },
+      <span class="tok-key">"inflight"</span>: <span class="tok-num">1</span>,
+      <span class="tok-key">"ewma_latency_ms"</span>: <span class="tok-num">620.0</span>
+    }
+  ]
+}</code></pre>
+<p>(Values are illustrative.) If the <code>studio</code> node shows <code>"healthy": false</code> or is missing its models, check that the workstation's Stoke is reachable on <code>:8787</code> and that <code>STUDIO_STOKE_KEY</code> matches one of its <code>STOKE_API_KEYS</code>. Unreachable nodes are excluded from routing until they return.</p>
+<h2 id="how-placement-chooses-a-machine">How placement chooses a machine</h2>
+<p>When a request names a model, Stoke ranks every node that can serve it, best first, in this order:</p>
+<ol><li><strong>Warm before cold</strong> — a node with the model already loaded in RAM wins over one that only has it pulled.</li><li><strong>Local tier before remote</strong> — ties at the same warmth prefer the laptop over the workstation.</li><li><strong>Fewest in-flight requests</strong> — among equally-ranked nodes, it balances the same model across machines by live load.</li><li><strong>Lowest latency EWMA</strong> — the measured tiebreaker.</li></ol>
+<p>So the big <code>qwen3.6:35b-a3b-q4_K_M</code> — which only exists on the workstation — routes there automatically, while a tiny chat model warm on the laptop stays local. If the chosen node errors mid-request, Stoke <strong>fails over to the same model on the next candidate node</strong> and continues. Non-streaming responses carry a <code>stoke_route</code> field explaining the pick and why each candidate ranked where it did; for streamed requests the same placement shows up in the logs and on <code>/v1/nodes</code>.</p>
+<h2 id="point-your-agent-at-the-local-stoke">Point your agent at the local Stoke</h2>
+<p>Your agent only ever talks to <code>localhost</code> — the federation is invisible to it. In OpenCode (or any OpenAI-compatible client), configure a provider:</p>
+<pre><code>base_url = http://localhost:8787/v1
+api_key  = stk-laptop-dev</code></pre>
+<p>Every request now passes the laptop's Stoke first — auth, rate limits, the loop breaker — before it's placed on the laptop or forwarded to the workstation. Nothing in the agent config mentions the second machine.</p>
+<h2 id="the-hop-guard-keeps-it-cycle-safe">The hop guard keeps it cycle-safe</h2>
+<p>Forwarded requests carry an <code>x-stoke-hop</code> header, and federation depth is exactly one hop. When the workstation's Stoke receives a forwarded request, it excludes its own <code>type = "stoke"</code> providers from routing. That means you can point the two gateways at each other (A↔B) for symmetric use and a request can never loop between them — it's ruled out with <code>excluded (hop guard)</code> in the <code>stoke_route</code> candidate list.</p>
+<h2 id="what-this-doesn-t-do">What this doesn't do</h2>
+<ul><li><strong>It doesn't expose or replace Ollama.</strong> Both Ollama daemons stay on <code>127.0.0.1</code>; Stoke is the only network door and it always requires auth. (Remember: the Ollama app's menu-bar quit doesn't stop <code>ollama serve</code> — kill the daemon if you're locking things down.)</li><li><strong>Local isn't free.</strong> Routing to your own GPU costs electricity and the hardware you already bought; it's just not a metered per-request bill.</li><li><strong>Failover is same-model only.</strong> If a node dies, Stoke retries the same model on another node. Cross-model or cross-vendor fallback chains are on the roadmap, not shipped.</li><li><strong>Streamed-request spend isn't metered.</strong> Dollar cost accrues from non-streaming responses today. Auth, rate limits, and the loop breaker cover streaming regardless.</li><li><strong>No published benchmarks.</strong> The <code>tps</code>/<code>ttft_ms</code> numbers are per-node measurements Stoke records to inform placement, not performance claims.</li></ul>
+<h2 id="next-steps">Next steps</h2>
+<p>You now have one laptop agent quietly borrowing a workstation GPU, warm-aware and auth-gated, with zero base-URL juggling. Add a third machine by dropping in another provider, or set <code>routing = "auto"</code> with an <code>[auto_route]</code> block to let Stoke classify each request and pick the model for you.</p>
+<p>Source, config reference, and the federation smoke test: <a href="https://github.com/Ozperium/stoke">github.com/Ozperium/stoke</a>.</p>
+<div class="cta">
+  <h3>Put a control point in front of your agents</h3>
+  <p>Stoke is a single Rust binary: hard budget caps, a runaway-loop kill switch, and local-first routing — enforced before a provider is ever called. Open source, MIT.</p>
+  <a class="btn" href="https://github.com/Ozperium/stoke">Get Stoke on GitHub</a>
+</div>
+</main>
+<footer>MIT licensed · <a href="https://stokegate.com">stokegate.com</a> · <a href="https://github.com/Ozperium/stoke">GitHub</a></footer>
+</body>
+</html>

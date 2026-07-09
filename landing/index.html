@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="mask-icon" href="/favicon.svg" color="#3bdb78">
+<meta name="theme-color" content="#0a0a0b">
+<title>Stoke — your agents, your machines, your rules</title>
+<meta name="description" content="Route AI agents to your own hardware or the cloud, refuse anything over budget, kill runaway loops — enforced before any provider is called. One Rust binary.">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0a0a0b;
+  --bg2: #131316;
+  --bg3: #1a1a20;
+  --border: #2a2a32;
+  --text: #e4e4e7;
+  --muted: #8a8a96;
+  --accent: #3bdb78;
+  --accent2: #2dd66a;
+  --accent-dim: rgba(59,219,120,0.15);
+  --red: #ff5454;
+  --amber: #e8b339;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+}
+html { scroll-behavior: smooth; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.6; overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code.inline { font-family: var(--mono); color: var(--accent); font-size: 0.9em; }
+.container { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+/* Nav */
+nav { position: fixed; top: 0; width: 100%; z-index: 100; backdrop-filter: blur(12px); background: rgba(10,10,11,0.8); border-bottom: 1px solid var(--border); }
+.nav-inner { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+.logo { font-weight: 700; font-size: 18px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.logo span { color: var(--accent); }
+.nav-links { display: flex; gap: 28px; align-items: center; }
+.nav-links a { color: var(--muted); font-size: 14px; font-weight: 500; }
+.nav-links a:hover { color: var(--text); text-decoration: none; }
+.nav-cta { background: var(--accent); color: #000 !important; padding: 8px 18px; border-radius: 8px; font-weight: 600; }
+.nav-cta:hover { background: var(--accent2); text-decoration: none; }
+
+/* Hero */
+.hero { padding: 140px 0 80px; text-align: center; position: relative; }
+.hero::before { content: ''; position: absolute; top: -50%; left: 50%; transform: translateX(-50%); width: 600px; height: 600px; background: radial-gradient(circle, var(--accent-dim) 0%, transparent 60%); pointer-events: none; }
+.badge { display: inline-block; background: var(--bg3); border: 1px solid var(--border); color: var(--accent); font-size: 13px; font-weight: 600; padding: 6px 16px; border-radius: 100px; margin-bottom: 28px; font-family: var(--mono); }
+.badge::before { content: '● '; }
+h1 { font-size: 56px; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; margin-bottom: 24px; max-width: 800px; margin-left: auto; margin-right: auto; }
+h1 .hl { color: var(--accent); }
+.motto { margin: 0 auto 24px; max-width: 700px; }
+.motto-label { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.motto-line { font-family: var(--mono); font-size: 26px; font-weight: 700; color: var(--accent); letter-spacing: -0.01em; }
+.hero-sub { font-size: 20px; color: var(--muted); max-width: 640px; margin: 0 auto 36px; }
+.hero-cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+.btn { padding: 14px 28px; border-radius: 10px; font-weight: 600; font-size: 16px; transition: all 0.15s; display: inline-flex; align-items: center; gap: 8px; }
+.btn-primary { background: var(--accent); color: #000; }
+.btn-primary:hover { background: var(--accent2); text-decoration: none; transform: translateY(-1px); }
+.btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { border-color: var(--accent); text-decoration: none; }
+.hero-note { margin-top: 28px; font-size: 14px; color: var(--muted); }
+.hero-note code { font-family: var(--mono); color: var(--text); font-size: 13px; }
+
+/* Section */
+section { padding: 80px 0; }
+.section-tag { color: var(--accent); font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+h2 { font-size: 36px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; }
+.section-sub { font-size: 18px; color: var(--muted); max-width: 680px; margin-bottom: 48px; }
+
+/* Code block */
+.code-block { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 28px; font-family: var(--mono); font-size: 14px; line-height: 1.8; overflow-x: auto; margin: 24px 0; white-space: pre; }
+.code-block .comment { color: var(--muted); }
+.code-block .cmd { color: var(--accent); }
+.code-block .var { color: #e8b339; }
+.code-block .str { color: #7dd3fc; }
+
+/* Flow rows (enforcement) */
+.routing-flow { display: flex; flex-direction: column; gap: 16px; margin-top: 40px; }
+.flow-row { display: flex; align-items: flex-start; gap: 16px; background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 24px 28px; }
+.flow-row .flow-num { font-size: 28px; font-weight: 800; color: var(--accent); font-family: var(--mono); min-width: 40px; }
+.flow-row .flow-content h3 { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+.flow-row .flow-content p { font-size: 14px; color: var(--muted); }
+
+/* Tables */
+.cmp-table { width: 100%; border-collapse: collapse; margin-top: 32px; font-size: 15px; }
+.cmp-table th { text-align: left; padding: 14px 16px; background: var(--bg3); color: var(--muted); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1px solid var(--border); }
+.cmp-table td { padding: 14px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.cmp-table tr:last-child td { border-bottom: none; }
+.cmp-table td.rowlabel { color: var(--muted); font-weight: 600; font-size: 14px; }
+.cmp-table td.win { color: var(--text); }
+.cmp-table td.win::before { content: '✓ '; color: var(--accent); font-weight: 700; }
+.cmp-table td.lose { color: var(--muted); }
+.table-scroll { overflow-x: auto; }
+
+/* Features / cards grid */
+.features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 40px; }
+.feature { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 28px; }
+.feature h3 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
+.feature p { font-size: 14px; color: var(--muted); }
+.feature .mini-tag { display: inline-block; font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 10px; }
+
+/* Two-pillar cards */
+.pillars { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 40px; }
+.pillar-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 14px; padding: 36px; }
+.pillar-card h3 { font-size: 22px; font-weight: 700; margin-bottom: 14px; }
+.pillar-card p { font-size: 15px; color: var(--muted); margin-bottom: 14px; }
+.pillar-card p:last-child { margin-bottom: 0; }
+.pillar-card strong { color: var(--text); }
+
+/* Audience cards */
+.audience { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 40px; }
+.audience-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 14px; padding: 32px; display: flex; flex-direction: column; }
+.audience-card .tag { display: inline-block; background: var(--bg3); color: var(--accent); font-size: 13px; font-weight: 600; padding: 4px 12px; border-radius: 100px; margin-bottom: 16px; align-self: flex-start; }
+.audience-card h3 { font-size: 20px; font-weight: 700; margin-bottom: 12px; }
+.audience-card p { font-size: 14px; color: var(--muted); }
+.audience-card.roadmap-card { border-style: dashed; }
+.audience-card.roadmap-card .tag { color: var(--amber); }
+.audience-card .card-link { margin-top: auto; padding-top: 16px; font-size: 14px; font-weight: 600; }
+
+/* Callout */
+.callout { background: var(--bg2); border: 1px solid var(--border); border-left: 3px solid var(--amber); border-radius: 12px; padding: 32px 36px; max-width: 820px; }
+.callout h3 { font-size: 20px; font-weight: 700; margin-bottom: 10px; }
+.callout h3 span { color: var(--amber); }
+.callout p { font-size: 15px; color: var(--muted); }
+.callout p strong { color: var(--text); }
+
+/* CTA */
+.cta { text-align: center; padding: 80px 0 100px; }
+.cta-box { background: var(--bg2); border: 1px solid var(--border); border-radius: 20px; padding: 60px 40px; position: relative; overflow: hidden; }
+.cta-box::before { content: ''; position: absolute; top: -100px; left: 50%; transform: translateX(-50%); width: 400px; height: 400px; background: radial-gradient(circle, var(--accent-dim) 0%, transparent 60%); }
+.cta-box h2 { position: relative; }
+.cta-box p { position: relative; color: var(--muted); font-size: 18px; margin-bottom: 32px; }
+.cta-box .hero-cta { position: relative; }
+
+/* Footer */
+footer { border-top: 1px solid var(--border); padding: 40px 0; }
+.footer-inner { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; }
+.footer-inner .logo { font-size: 16px; }
+.footer-mit { color: var(--muted); font-size: 14px; margin-top: 8px; max-width: 420px; }
+.footer-links { display: flex; gap: 24px; flex-wrap: wrap; }
+.footer-links a { color: var(--muted); font-size: 14px; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  h1 { font-size: 36px; }
+  .motto-line { font-size: 20px; }
+  .hero-sub { font-size: 17px; }
+  .pillars, .audience { grid-template-columns: 1fr; }
+  .features { grid-template-columns: 1fr; }
+  .nav-links { display: none; }
+  h2 { font-size: 28px; }
+  .cmp-table { font-size: 13px; }
+  .cmp-table th, .cmp-table td { padding: 10px 8px; }
+  .footer-inner { flex-direction: column; text-align: center; }
+  .footer-inner .footer-mit { margin: 8px auto 0; }
+  .footer-links { justify-content: center; }
+}
+
+/* ── Hero two-column + terminal demo ─────────────────────────── */
+.hero { text-align: left; }
+.hero-grid { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 56px; align-items: center; }
+.hero-copy h1 { margin-left: 0; margin-right: 0; max-width: none; }
+.hero-copy .hero-sub { margin-left: 0; }
+.hero-copy .hero-cta { justify-content: flex-start; }
+.kicker { font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--accent); margin-bottom: 20px; }
+.kicker::before { content: '// '; color: var(--muted); }
+
+.term { background: #0d0d10; border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 60px -20px rgba(0,0,0,0.7), 0 0 0 1px rgba(59,219,120,0.04); overflow: hidden; font-family: var(--mono); }
+.term-bar { display: flex; align-items: center; gap: 7px; padding: 12px 16px; border-bottom: 1px solid var(--border); background: #141418; }
+.term-dot { width: 11px; height: 11px; border-radius: 50%; background: #34343c; }
+.term-title { margin-left: 10px; font-size: 12px; color: var(--muted); letter-spacing: 0.02em; }
+.term-tabs { display: flex; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: #0f0f13; }
+.term-tabs span { font-family: var(--mono); font-size: 11.5px; color: var(--muted); padding: 3px 10px; border-radius: 999px; border: 1px solid transparent; transition: color .2s, border-color .2s, background .2s; }
+.term-tabs span.active { color: var(--accent); border-color: rgba(59,219,120,0.35); background: rgba(59,219,120,0.08); }
+.term-body { padding: 20px 22px; font-size: 13.5px; line-height: 1.85; min-height: 300px; }
+.term-line { white-space: pre-wrap; opacity: 0; transform: translateY(3px); }
+.term-line.show { opacity: 1; transform: none; transition: opacity .18s ease, transform .18s ease; }
+.term-body .dim { color: var(--muted); }
+.term-body .g { color: var(--accent); }
+.term-body .r { color: var(--red); }
+.term-body .a { color: var(--amber); }
+.term-body .cost { color: var(--amber); }
+.term-meter { margin: 6px 0 2px; height: 6px; border-radius: 4px; background: #1c1c22; overflow: hidden; }
+.term-meter i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--amber), var(--red)); transition: width .18s linear; }
+.term-meter.killed i { background: var(--accent); }
+.cursor { display: inline-block; width: 8px; height: 15px; background: var(--accent); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ── Request pipeline ────────────────────────────────────────── */
+.pipe { margin-top: 40px; border: 1px solid var(--border); border-radius: 16px; background: var(--bg2); padding: 12px 8px; }
+.pipe-row { display: grid; grid-template-columns: 34px 1fr auto; gap: 14px; align-items: center; padding: 13px 16px; border-radius: 10px; transition: background .35s ease; }
+.pipe-row.lit { background: rgba(59,219,120,0.06); }
+.pipe-rail { position: relative; display: flex; justify-content: center; }
+.pipe-dot { width: 11px; height: 11px; border-radius: 50%; background: #2a2a32; border: 2px solid #3a3a44; transition: background .35s, border-color .35s, box-shadow .35s; }
+/* The travelling request is always green — it passed. A stage's power to
+   refuse is communicated by its badge, not by the dot. */
+.pipe-row.lit .pipe-dot { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 4px rgba(59,219,120,0.14); }
+.pipe-name { font-weight: 650; font-size: 15px; }
+.pipe-name .pipe-desc { display: block; font-weight: 400; font-size: 13.5px; color: var(--muted); margin-top: 2px; }
+.pipe-badge { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.pipe-badge.refuse { color: var(--red); border-color: rgba(255,90,90,0.3); }
+.pipe-badge.yours { color: var(--accent); border-color: rgba(59,219,120,0.3); }
+.pipe-badge.short { color: var(--amber); border-color: rgba(240,180,60,0.3); }
+.pipe-provider { display: flex; align-items: center; gap: 10px; margin: 6px 16px; padding: 12px 14px; border: 1px dashed var(--border); border-radius: 10px; color: var(--muted); font-size: 13.5px; }
+.pipe-note { color: var(--muted); font-size: 14px; margin-top: 18px; max-width: 720px; }
+.pipe-note b { color: var(--text); font-weight: 600; }
+@media (max-width: 768px) {
+  .pipe-row { grid-template-columns: 26px 1fr; }
+  .pipe-badge { grid-column: 2; justify-self: start; margin-top: 4px; }
+}
+
+/* ── Burn calculator ─────────────────────────────────────────── */
+.burn { display: grid; grid-template-columns: 1fr 0.9fr; gap: 40px; margin-top: 40px; background: var(--bg2); border: 1px solid var(--border); border-radius: 16px; padding: 40px; align-items: center; }
+.burn-controls label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 20px 0 10px; }
+.burn-controls label:first-child { margin-top: 0; }
+.burn-controls select, .burn-controls input[type=range] { width: 100%; }
+.burn-controls select { background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 11px 14px; font-family: var(--mono); font-size: 14px; }
+.burn-controls input[type=range] { accent-color: var(--accent); height: 6px; margin-top: 4px; }
+.burn-val { font-family: var(--mono); color: var(--accent); font-size: 13px; float: right; font-weight: 600; }
+.burn-out { text-align: center; }
+.burn-out .burn-cap { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.burn-out .burn-num { font-family: var(--mono); font-size: 52px; font-weight: 800; color: var(--red); letter-spacing: -0.02em; line-height: 1.1; margin: 10px 0 6px; transition: color .2s; }
+.burn-out .burn-note { font-size: 14px; color: var(--muted); margin-bottom: 22px; }
+.burn-out .burn-note b { color: var(--text); }
+@media (max-width: 768px) {
+  .hero { text-align: left; }
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .term-body { min-height: 300px; }
+  .burn { grid-template-columns: 1fr; padding: 28px; gap: 28px; }
+  .burn-out .burn-num { font-size: 42px; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <a href="https://stokegate.com" class="logo">⬡ Stoke</a>
+    <div class="nav-links">
+      <a href="#enforcement">Enforcement</a>
+      <a href="#routing">Routing</a>
+      <a href="#compare">Compare</a>
+      <a href="#install">Install</a>
+      <a href="#roadmap">What's next</a>
+      <a href="/guides/">Guides</a>
+      <a href="https://github.com/Ozperium/stoke" class="nav-cta">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<!-- 1. Hero -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <div class="kicker">Enforce, don't just observe.</div>
+        <h1>Your agents. Your machines.<br><span class="hl">Your rules.</span></h1>
+        <p class="hero-sub">Route to your own hardware — or the cloud, when you choose. Refuse anything over budget. Kill loops in seconds. One ~5.5&nbsp;MB Rust binary that decides <em>before</em> the money is spent, not a dashboard that reports it after.</p>
+        <div class="hero-cta">
+          <a href="#install" class="btn btn-primary">Install in 60 seconds</a>
+          <a href="https://github.com/Ozperium/stoke" class="btn btn-secondary">★ Star on GitHub</a>
+        </div>
+        <p class="hero-note">Works with any OpenAI-compatible agent — point <code>base_url</code> at <code>localhost:8787/v1</code>.<br>Claude Code connects via <code>ANTHROPIC_BASE_URL</code>. Pre-release · MIT · dogfooded daily.</p>
+      </div>
+      <div class="hero-demo">
+        <div class="term" id="term">
+          <div class="term-bar">
+            <span class="term-dot"></span><span class="term-dot"></span><span class="term-dot"></span>
+            <span class="term-title" id="term-title">stoke :8787 — illustrative</span>
+          </div>
+          <div class="term-tabs" id="term-tabs">
+            <span data-scene="0">route it</span>
+            <span data-scene="1">fail over</span>
+            <span data-scene="2">cap it</span>
+            <span data-scene="3">kill it</span>
+          </div>
+          <div class="term-body" id="term-body"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 2. The problem -->
+<section id="problem">
+  <div class="container">
+    <div class="section-tag">The problem</div>
+    <h2>Your AI bill is a postmortem.</h2>
+    <p class="section-sub">An agent that starts looping at 2 a.m. keeps spending until someone wakes up. The billing alert is a receipt, not a control — it fires after the damage. Dashboards chart what happened. Stoke decides what is allowed to happen.</p>
+    <div class="features">
+      <div class="feature">
+        <h3>Loops don't get tired</h3>
+        <p>A retrying agent will happily replay the same failing request all night, on your metered key.</p>
+      </div>
+      <div class="feature">
+        <h3>Alerts arrive late</h3>
+        <p>Spend notifications trail actual usage. By the time one fires, the budget is already gone.</p>
+      </div>
+      <div class="feature">
+        <h3>Dashboards observe. Stoke refuses.</h3>
+        <p>An over-budget or looping request never reaches the provider. Refused at the gateway, not flagged in a chart.</p>
+      </div>
+    </div>
+
+    <div class="burn">
+      <div class="burn-controls">
+        <label>Model <span class="burn-val" id="bv-model"></span></label>
+        <select id="c-model">
+          <option value="17.5" data-name="Claude Sonnet 4">Claude Sonnet 4</option>
+          <option value="12.5" data-name="GPT-5.2">GPT-5.2</option>
+          <option value="6.25" data-name="Gemini 3 Pro">Gemini 3 Pro</option>
+          <option value="5.50" data-name="DeepSeek V4 Pro">DeepSeek V4 Pro</option>
+        </select>
+        <label>Tokens per request <span class="burn-val" id="bv-tok">4,000</span></label>
+        <input type="range" id="c-tok" min="1000" max="32000" step="1000" value="4000">
+        <label>Requests per minute in the loop <span class="burn-val" id="bv-rpm">30</span></label>
+        <input type="range" id="c-rpm" min="1" max="120" step="1" value="30">
+      </div>
+      <div class="burn-out">
+        <div class="burn-cap">Unattended overnight burn (8h)</div>
+        <div class="burn-num" id="burn-num">$0</div>
+        <div class="burn-note">A runaway loop doesn't sleep. Stoke caps it at <b>your number</b>, or trips the loop breaker in seconds.</div>
+        <a href="#install" class="btn btn-primary">Cap it →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. Enforcement (flagship) -->
+<section id="enforcement">
+  <div class="container">
+    <div class="section-tag">Enforcement</div>
+    <h2>Refused at the request path.</h2>
+    <p class="section-sub">Limits that reject requests before a provider ever sees them — not alerts for a human to find in the morning.</p>
+    <div class="routing-flow">
+      <div class="flow-row">
+        <div class="flow-num">1</div>
+        <div class="flow-content">
+          <h3>Hard budget caps, in dollars</h3>
+          <p>Per-key spend caps in USD, set in a <code class="inline">[[keys]]</code> config table (each key must also be listed in <code class="inline">STOKE_API_KEYS</code>) and applied to the budget guard at startup. Checked before any provider call: over the cap, the request is refused with <code class="inline">429 Budget exceeded</code> — an error your agent can handle, not a log line for later. Live spend per key at <code class="inline">/v1/budget</code>; per-request cost rides along in a <code class="inline">stoke_cost</code> field on non-streaming responses. Today spend accrues from non-streaming responses only — streamed-request cost accounting is on the roadmap — while loop detection, rate limits and fail-closed auth enforce on all traffic, streams included.</p>
+        </div>
+      </div>
+      <div class="flow-row">
+        <div class="flow-num">2</div>
+        <div class="flow-content">
+          <h3>Loop kill switch</h3>
+          <p>A two-layer circuit breaker: exact prompt-hash matching plus opt-in semantic similarity, so a loop that rephrases itself still counts as a loop. Five similar requests within 60 seconds blocks the key for 120 seconds. Thresholds are global constants today — per-key tuning is on the roadmap.</p>
+        </div>
+      </div>
+      <div class="flow-row">
+        <div class="flow-num">3</div>
+        <div class="flow-content">
+          <h3>Per-key rate limits</h3>
+          <p>A sliding 60-second window per API key, set as <code class="inline">rate_limit_rpm</code> in the same <code class="inline">[[keys]]</code> table and applied at startup. One misbehaving agent gets refused (429); everyone else keeps working.</p>
+        </div>
+      </div>
+      <div class="flow-row">
+        <div class="flow-num">4</div>
+        <div class="flow-content">
+          <h3>Fail-closed, by architecture</h3>
+          <p>No API keys configured and no dev flag: every request is rejected. Every endpoint except <code class="inline">/health</code> requires auth — status endpoints included, because model inventory and node load are reconnaissance data. Federation polling authenticates too. Misconfigured means closed, not open.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4. Run your own models -->
+<section id="routing">
+  <div class="container">
+    <div class="section-tag">Local-first</div>
+    <h2>Run your own models. On every machine you own.</h2>
+    <p class="section-sub">Stoke is dogfooded daily on a real MacBook + Mac Studio + Ollama Cloud setup. Point it at your Ollama nodes and it routes like it knows them — because it polls them.</p>
+    <div class="pillars">
+      <div class="pillar-card">
+        <h3>Node-aware routing</h3>
+        <p>A background registry polls each node's <code class="inline">/api/tags</code> (models pulled) and <code class="inline">/api/ps</code> (models loaded in RAM). Placement <strong>prefers warm nodes</strong>, balances the same model across machines by live in-flight count, breaks ties with a latency EWMA, and fails over automatically. Unreachable nodes are excluded until they come back.</p>
+        <p>Every live stream teaches it: time-to-first-token and tokens/sec are measured per model per node, and context windows plus tool-calling support come from <code class="inline">/api/show</code> — so predictions come from your hardware, not guesses.</p>
+      </div>
+      <div class="pillar-card">
+        <h3>Federation: Stoke behind Stoke</h3>
+        <p>Provider type <code class="inline">"stoke"</code> lets one gateway front another. The peer's models, warm state, <strong>live load, and measured speeds</strong> are imported through its <code class="inline">/v1/nodes</code> — richer state than raw Ollama can report. Forwarded requests carry <code class="inline">x-stoke-hop</code>; depth is exactly one, and a deliberate A-to-B-to-A cycle cannot loop — a shipped test script proves it.</p>
+        <p>The practical win: Ollama stays bound to <code class="inline">127.0.0.1</code>. Stoke is the only network-facing door, and it authenticates.</p>
+      </div>
+      <div class="pillar-card">
+        <h3>Auto-routing that optimizes, not guesses</h3>
+        <p>Point your agent at the <code class="inline">auto</code> model and Stoke scores every eligible (model, node) pair on <strong>estimated cost, predicted latency, and your stated preference order</strong> — then picks. <code class="inline">auto-cheap</code> weights spend, <code class="inline">auto-fast</code> weights speed. Models come only from your config and your discovered nodes; Stoke ships with zero model names.</p>
+        <p>Hard exclusions, not vibes: prompts that don't fit a model's context window and tool-calling requests aimed at models that can't emit structured <code class="inline">tool_calls</code> are ruled out with the reason on the receipt.</p>
+      </div>
+      <div class="pillar-card">
+        <h3>Hedged dispatch</h3>
+        <p>Opt-in (<code class="inline">hedge = true</code>): small prompts whose model sits warm on two of your machines are fired at <strong>both</strong> — first past prefill wins, the loser is dropped. Your idle hardware races for you; duplicate local compute buys tail latency that no single node can.</p>
+        <p>Zero-marginal nodes only — hedging never doubles a cloud bill.</p>
+      </div>
+    </div>
+    <div style="margin-top: 48px;">
+      <h3 style="font-size: 22px; font-weight: 700; margin-bottom: 8px;">Every decision shows its reasoning — and the road not taken</h3>
+      <p style="color: var(--muted); font-size: 15px; max-width: 680px;">Auto-routed responses carry the full receipt: the chosen candidate with estimated cost and predicted latency, every alternative and why it lost, and an honest counterfactual — the list price your configured cloud model <em>would</em> have charged. <code class="inline">GET /v1/budget</code> aggregates them into a running ledger. Estimates, clearly labeled; never a quality claim.</p>
+      <div class="code-block"><span class="str">"stoke_route"</span>: { <span class="str">"node"</span>: <span class="str">"mac-studio"</span>, <span class="str">"auto"</span>: {
+  <span class="str">"mode"</span>: <span class="str">"auto"</span>, <span class="str">"class"</span>: <span class="str">"Code"</span>,
+  <span class="str">"chosen"</span>:    { <span class="str">"model"</span>: <span class="str">"your-35b"</span>, <span class="str">"node"</span>: <span class="str">"mac-studio"</span>, <span class="str">"warm"</span>: true, <span class="str">"est_cost_usd"</span>: 0.0, <span class="str">"predicted_ms"</span>: 2100 },
+  <span class="str">"not_taken"</span>: [{ <span class="str">"model"</span>: <span class="str">"your-8b"</span>,  <span class="str">"node"</span>: <span class="str">"macbook"</span>,    <span class="str">"warm"</span>: false, <span class="str">"est_cost_usd"</span>: 0.0, <span class="str">"predicted_ms"</span>: 9800 }],
+  <span class="str">"counterfactual_usd_est"</span>: 0.0214  <span class="comment">// what your configured cloud model would have charged</span>
+}}</div>
+    </div>
+  </div>
+</section>
+
+<!-- 4b. The request pipeline -->
+<section id="pipeline">
+  <div class="container">
+    <div class="section-tag">The control point</div>
+    <h2>Every call passes through your pipeline.</h2>
+    <p class="section-sub">This is the actual order of operations for one request. Every stage before the provider call can refuse it — and four of them are yours to write.</p>
+
+    <div class="pipe" id="pipe">
+      <div class="pipe-row stop">
+        <div class="pipe-rail"><span class="pipe-dot"></span></div>
+        <div class="pipe-name">Authentication<span class="pipe-desc">Fail-closed. No key configured and no dev flag means nothing is served.</span></div>
+        <span class="pipe-badge refuse">can refuse</span>
+      </div>
+      <div class="pipe-row stop">
+        <div class="pipe-rail"><span class="pipe-dot"></span></div>
+        <div class="pipe-name">Budget · rate limit · loop breaker<span class="pipe-desc">Hard caps and the semantic circuit breaker, checked before a provider is ever contacted.</span></div>
+        <span class="pipe-badge refuse">can refuse</span>
+      </div>
+      <div class="pipe-row">
+        <div class="pipe-rail"><span class="pipe-dot"></span></div>
+        <div class="pipe-name">Route profile<span class="pipe-desc">Per-endpoint model, routing mode, and plugin chain.</span></div>
+        <span class="pipe-badge">config</span>
+      </div>
+      <div class="pipe-row stop">
+        <div class="pipe-rail"><span class="pipe-dot"></span></div>
+        <div class="pipe-name">Pre-request hooks<span class="pipe-desc">Rewrite the model or routing — or block the request outright.</span></div>
+        <span class="pipe-badge yours">yours</span>
+      </div>
+      <div class="pipe-row">
+        <div class="pipe-rail"><span class="pipe-dot"></span></div>
+        <div class="pipe-name">Prompt harness<span class="pipe-desc">Inject a system prompt per task class before the model sees it.</span></div>
+        <span class="pipe-badge yours">yours</span>
+      </div>
+      <div class="pipe-row stop">
+        <div class="pipe-rail"><span class="pipe-dot"></span></div>
+        <div class="pipe-name">Filter &amp; redact<span class="pipe-desc">Built-in PII redaction strips keys, tokens, emails. Your filters can block on policy.</span></div>
+        <span class="pipe-badge yours">yours</span>
+      </div>
+      <div class="pipe-row">
+        <div class="pipe-rail"><span class="pipe-dot"></span></div>
+        <div class="pipe-name">Cache<span class="pipe-desc">Exact hash, plus opt-in semantic match. A hit never reaches a model at all.</span></div>
+        <span class="pipe-badge short">short-circuit</span>
+      </div>
+      <div class="pipe-row">
+        <div class="pipe-rail"><span class="pipe-dot"></span></div>
+        <div class="pipe-name">Placement<span class="pipe-desc">Warm-first across your machines, scored and explained, with automatic failover.</span></div>
+        <span class="pipe-badge">routes</span>
+      </div>
+
+      <div class="pipe-provider">↓ &nbsp;the provider call — the only step that leaves your gateway</div>
+
+      <div class="pipe-row">
+        <div class="pipe-rail"><span class="pipe-dot"></span></div>
+        <div class="pipe-name">Post-response hooks<span class="pipe-desc">Format, transform, and append to a JSONL audit log.</span></div>
+        <span class="pipe-badge yours">yours</span>
+      </div>
+      <div class="pipe-row">
+        <div class="pipe-rail"><span class="pipe-dot"></span></div>
+        <div class="pipe-name">Cost &amp; receipts<span class="pipe-desc">Per-key spend recorded, and the decision written back into the response.</span></div>
+        <span class="pipe-badge">observes</span>
+      </div>
+    </div>
+
+    <p class="pipe-note">The <b>yours</b> stages take webhooks in any language — a plain HTTP endpoint is a plugin. JS/TS plugins run on an embedded V8 behind a compile-time flag. Nothing is a black box: <b>every stage above the provider call can say no</b>, and the ones that transform your prompt run before it leaves the machine.</p>
+  </div>
+</section>
+
+<!-- 5. Three audiences -->
+<section id="audiences">
+  <div class="container">
+    <div class="section-tag">Who it's for</div>
+    <h2>Three ways people run Stoke.</h2>
+    <div class="audience">
+      <div class="audience-card">
+        <div class="tag">Coding agents on metered keys</div>
+        <h3>Cap the burn.</h3>
+        <p>You run coding agents — Claude Code, OpenCode, aider, Codex — against metered API keys, and one bad loop is a four-figure morning. Stoke puts a loop kill switch, a rate limit, and a hard USD cap between the agent and the key. The loop kill switch and rate limit apply to every request, streaming included — so a runaway loop is stopped no matter how it talks. OpenCode works end-to-end today; any OpenAI-compatible agent connects via <code class="inline">base_url</code>.</p>
+      </div>
+      <div class="audience-card">
+        <div class="tag">Your own GPUs, several machines</div>
+        <h3>One endpoint for all your hardware.</h3>
+        <p>A MacBook here, a Mac Studio there, maybe a Linux box with a GPU. Stoke fronts them all: warm-aware placement, live load balancing of the same model across machines, automatic failover, and federation between gateways — while Ollama never gets exposed to the LAN.</p>
+      </div>
+      <div class="audience-card roadmap-card">
+        <div class="tag">On the roadmap — talk to us</div>
+        <h3>A control plane for your AI product.</h3>
+        <p>You ship an AI product and need usage entitlement enforcement: hard per-tenant caps your billing team can trust, enforced at the request path — a control plane over every customer's LLM spend. This is where Stoke is headed, not shipped yet; we are looking for design partners.</p>
+        <a class="card-link" href="https://github.com/Ozperium/stoke/discussions">Open a GitHub discussion →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. Honest scope callout -->
+<section id="scope" style="padding-top: 0;">
+  <div class="container">
+    <div class="callout">
+      <h3><span>Honest scope:</span> subscription plans are quota-world.</h3>
+      <p>If your agents run on a subscription plan — Claude Max or Pro, ChatGPT Plus — there is no per-request dollar price, so there is nothing to dollar-cap. Stoke can still <strong>rate-limit</strong> that traffic and <strong>kill loops</strong> in it, but it cannot cap it in dollars, and we won't pretend otherwise. Hard USD caps apply to metered API keys, where every request has a price.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 7. Sovereignty -->
+<section id="sovereignty">
+  <div class="container">
+    <div class="section-tag">Sovereignty</div>
+    <h2>Your prompts never leave your infrastructure.</h2>
+    <p class="section-sub">Data residency by architecture, not by contract. An EU-based project, built for people who read data-processing agreements and would rather not need them.</p>
+    <div class="features">
+      <div class="feature">
+        <h3>Local by default</h3>
+        <p>Requests route to machines you own. Nothing goes to a cloud provider unless you explicitly configure one. Once configured, automatic failover may use it — so if prompts must never leave your machines, simply don't configure a cloud tier.</p>
+      </div>
+      <div class="feature">
+        <h3>One authenticated door</h3>
+        <p>Ollama stays bound to <code class="inline">127.0.0.1</code>. Stoke is the only network-facing surface, and every endpoint except <code class="inline">/health</code> requires auth.</p>
+      </div>
+      <div class="feature">
+        <h3>Fail-closed status surface</h3>
+        <p>Model inventory and node load are reconnaissance data, so even the status endpoints authenticate. No keys configured means no service — not open service.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 8. Comparison -->
+<section id="compare">
+  <div class="container">
+    <div class="section-tag">Compared honestly</div>
+    <h2>Where Stoke wins. And where it doesn't.</h2>
+    <p class="section-sub">LiteLLM, Portkey and Helicone are good tools. They cover far more providers and go much deeper on observability. Stoke is built for a different job: enforcement.</p>
+    <div class="table-scroll">
+    <table class="cmp-table">
+      <thead>
+        <tr>
+          <th></th>
+          <th>Stoke</th>
+          <th>LiteLLM</th>
+          <th>Portkey</th>
+          <th>Helicone</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="rowlabel">Primary job</td>
+          <td class="win">Enforcement — refuse bad requests at the gateway</td>
+          <td class="lose">Universal gateway</td>
+          <td class="lose">Gateway + observability</td>
+          <td class="lose">Observability</td>
+        </tr>
+        <tr>
+          <td class="rowlabel">Loop kill switch</td>
+          <td class="win">Exact-hash + semantic circuit breaker</td>
+          <td class="lose">—</td>
+          <td class="lose">—</td>
+          <td class="lose">—</td>
+        </tr>
+        <tr>
+          <td class="rowlabel">Fail-closed default</td>
+          <td class="win">No keys configured = all requests rejected</td>
+          <td class="lose">Configuration-dependent</td>
+          <td class="lose">Configuration-dependent</td>
+          <td class="lose">Configuration-dependent</td>
+        </tr>
+        <tr>
+          <td class="rowlabel">Node-aware local routing</td>
+          <td class="win">Warm state + live load via <code class="inline">/api/ps</code></td>
+          <td class="lose">—</td>
+          <td class="lose">—</td>
+          <td class="lose">—</td>
+        </tr>
+        <tr>
+          <td class="rowlabel">Gateway federation</td>
+          <td class="win">Stoke-behind-Stoke, hop-guarded, cycle-safe</td>
+          <td class="lose">—</td>
+          <td class="lose">—</td>
+          <td class="lose">—</td>
+        </tr>
+        <tr>
+          <td class="rowlabel">Deployment</td>
+          <td class="win">One ~5.5&nbsp;MB Rust binary, zero runtime deps</td>
+          <td class="lose">Python service (database needed for key management features)</td>
+          <td class="lose">Hosted, or self-host stack</td>
+          <td class="lose">Hosted, or self-host stack</td>
+        </tr>
+        <tr>
+          <td class="rowlabel">Provider coverage</td>
+          <td class="lose">OpenAI-compatible + Ollama + federation. They win here.</td>
+          <td class="win">100+ providers</td>
+          <td class="win">Broad</td>
+          <td class="win">Broad</td>
+        </tr>
+        <tr>
+          <td class="rowlabel">Observability depth</td>
+          <td class="lose">Per-response route + cost, audit log. Deliberately minimal — they win here.</td>
+          <td class="win">Deep</td>
+          <td class="win">Deep dashboards</td>
+          <td class="win">Their core strength</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <p style="margin-top: 20px; color: var(--muted); font-size: 14px;">No benchmark numbers in this table, on purpose. When we publish performance claims, they will ship with a reproducible harness first.</p>
+  </div>
+</section>
+
+<!-- 9. Install -->
+<section id="install">
+  <div class="container">
+    <div class="section-tag">Install</div>
+    <h2>One line, then point your agent at it.</h2>
+    <p class="section-sub">Static binaries for macOS and Linux are built from every commit on <code class="inline">main</code> and published to a rolling <code class="inline">nightly</code> build — no Rust toolchain needed. Honest status: that rolling build is what exists today; the first tagged stable release is still to come, and the installer falls back to compiling from source on any platform we don't ship.</p>
+    <div class="code-block"><span class="comment"># prebuilt binary, checksum-verified</span>
+<span class="cmd">curl</span> -sSf https://stokegate.com/install | sh -s -- --version nightly
+
+<span class="cmd">cp</span> stoke.example.toml stoke.toml            <span class="comment"># your nodes, your providers</span>
+<span class="var">STOKE_API_KEYS</span>=team-key stoke</div>
+    <p style="color: var(--muted); font-size: 14px; margin: -8px 0 16px;">Prefer to build it yourself? <code class="inline">git clone</code> and <code class="inline">cargo build --release</code> — the installer does exactly that when no binary matches your platform.</p>
+    <p style="color: var(--muted); font-size: 15px; margin-bottom: 8px;">A minimal <code class="inline">stoke.toml</code> — one local Ollama node, default port 8787:</p>
+    <div class="code-block"><span class="comment"># stoke.toml</span>
+[server]
+host = <span class="str">"127.0.0.1"</span>
+port = <span class="var">8787</span>
+
+[[providers]]
+name     = <span class="str">"mac-studio"</span>
+type     = <span class="str">"openai_compatible"</span>
+base_url = <span class="str">"http://127.0.0.1:11434/v1"</span>
+tier     = <span class="str">"local"</span></div>
+    <p style="color: var(--muted); font-size: 15px; margin-bottom: 8px;">Then point any agent at Stoke instead of the provider — OpenAI-compatible tools and Claude Code both work:</p>
+    <div class="code-block"><span class="var">OPENAI_BASE_URL</span>=http://localhost:8787/v1      <span class="comment"># OpenCode, aider, Codex</span>
+<span class="var">ANTHROPIC_BASE_URL</span>=http://localhost:8787   <span class="comment"># Claude Code (/v1/messages)</span></div>
+    <p style="margin-top: 16px; color: var(--muted); font-size: 14px;">Note the fail-closed default: without <code class="inline">STOKE_API_KEYS</code> (or <code class="inline">STOKE_DEV=1</code> for local experiments), Stoke rejects every request. That is a feature.</p>
+  </div>
+</section>
+
+<!-- 10. Shape what's next -->
+<section id="roadmap">
+  <div class="container">
+    <div class="section-tag">What's next</div>
+    <h2>Built on what you actually hit.</h2>
+    <p class="section-sub">Stoke ships features when they earn their place — dogfooded first, not promised against a roadmap. What gets built next is driven by what real users run into. If Stoke is one capability away from working for you, that's the most useful thing you can tell us.</p>
+    <div class="hero-cta" style="justify-content: flex-start; margin-bottom: 44px;">
+      <a href="https://github.com/Ozperium/stoke/issues/new?labels=feature-request&amp;template=feature_request.md" class="btn btn-primary">Request a feature →</a>
+      <a href="https://github.com/Ozperium/stoke/discussions" class="btn btn-secondary">Open a discussion</a>
+    </div>
+    <p style="color: var(--muted); font-size: 15px; margin-bottom: 20px;">Open questions we're weighing — weigh in if one is yours:</p>
+    <div class="features">
+      <div class="feature">
+        <h3>Fallback chains across models</h3>
+        <p>Today failover retries the <em>same model</em> on another machine. Should a role fall through a chain — cloud model hits a 429 or an outage, traffic degrades to your local model, even across vendors? Tell us how you'd want it to behave.</p>
+      </div>
+      <div class="feature">
+        <h3>Per-tenant caps for AI products</h3>
+        <p>Hard usage-entitlement enforcement per customer, at the request path. If your pricing tiers need teeth, <a href="https://github.com/Ozperium/stoke/discussions">start a thread</a>.</p>
+      </div>
+      <div class="feature">
+        <h3>What would earn your trust?</h3>
+        <p>Enforcement benchmarks, OpenTelemetry export, Anthropic↔local translation — all on the table. Tell us which one unblocks you and it moves up.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 11. Proof -->
+<section id="proof">
+  <div class="container">
+    <div class="section-tag">Proof</div>
+    <h2>Don't take this page's word for it.</h2>
+    <p class="section-sub">The repo ships reproducible test harnesses. Run them on your own machine and watch the claims hold or break.</p>
+    <div class="pillars">
+      <div class="pillar-card">
+        <h3><a href="https://github.com/Ozperium/stoke/blob/main/scripts/smoke.sh">scripts/smoke.sh</a></h3>
+        <p>One gateway against two mock Ollama nodes — no Ollama install needed: model discovery, warm placement, streaming in-flight accounting, failover, health.</p>
+      </div>
+      <div class="pillar-card">
+        <h3><a href="https://github.com/Ozperium/stoke/blob/main/scripts/smoke_federation.sh">scripts/smoke_federation.sh</a></h3>
+        <p>Two gateways wired into a deliberate cycle: inventory import, cross-gateway routing, hop guard, cycle safety.</p>
+      </div>
+    </div>
+    <p style="margin-top: 24px; color: var(--muted); font-size: 15px;">While they run, poll <code class="inline">GET /v1/nodes</code> — the live registry every routing decision is made from.</p>
+    <p style="margin-top: 12px; color: var(--muted); font-size: 15px;">Enforcement benchmarks — overhead, time-to-trip, false-positive rate — ship with a public reproducible harness. Numbers only when you can run them yourself.</p>
+  </div>
+</section>
+
+<!-- Closing CTA -->
+<section class="cta">
+  <div class="container">
+    <div class="cta-box">
+      <h2>Put a firewall between your agents and your bill.</h2>
+      <p>Open source, MIT licensed, no signup, no lock-in. Pre-release and built in the open.</p>
+      <div class="hero-cta">
+        <a href="#install" class="btn btn-primary">Get started</a>
+        <a href="https://github.com/Ozperium/stoke" class="btn btn-secondary">★ Star on GitHub</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 12. Footer -->
+<footer>
+  <div class="container footer-inner">
+    <div>
+      <a href="https://stokegate.com" class="logo">⬡ Stoke</a>
+      <p class="footer-mit">The data plane is MIT-licensed and stays MIT forever. If that ever changes, fork it — that's the point of the license.</p>
+    </div>
+    <div class="footer-links">
+      <a href="https://github.com/Ozperium/stoke">GitHub</a>
+      <a href="https://github.com/Ozperium/stoke/blob/main/README.md">README</a>
+      <a href="https://github.com/Ozperium/stoke/blob/main/ARCHITECTURE.md">Architecture</a>
+      <a href="https://github.com/Ozperium/stoke/blob/main/docs/design/routing.md">Routing design</a>
+      <a href="/guides/">Guides</a>
+      <a href="/llms.txt">llms.txt</a>
+      <a href="https://github.com/Ozperium/stoke/blob/main/skills/stoke/SKILL.md">Agent skill</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // ── Hero terminal: three scenes, one per control verb ──────────────
+  // Every line mirrors real Stoke output (stoke_route placement, 429 budget
+  // and loop refusals). Cycles route it → cap it → kill it, forever.
+  var body = document.getElementById('term-body');
+  var titleEl = document.getElementById('term-title');
+  var tabs = document.getElementById('term-tabs');
+  var meterHTML = '<div class="term-meter" id="tmeter"><i></i></div>';
+
+  var SCENES = [
+    { // ROUTE IT — auto-routing scores candidates across your machines
+      title: 'auto routing across your machines',
+      frames: [
+        {h: '<span class="dim">$ opencode — model=<span class="g">auto</span></span>'},
+        {h: '<span class="g">POST</span> /v1/chat/completions  <span class="dim">class=code</span>'},
+        {h: '<span class="dim">  scoring 3 candidates…</span>'},
+        {h: '<span class="g">✓ studio</span>  qwen3-35b  <span class="g">warm</span>  ~2.1s  <span class="g">$0.00</span>'},
+        {h: '<span class="dim">  macbook qwen3-8b   cold  ~9.8s  (slower)</span>'},
+        {h: '<span class="dim">  cloud   glm-5.2    —     ~3.0s  <span class="cost">$0.021</span> (not taken)</span>'},
+        {h: '<span class="g">→</span> served on your own GPU <span class="dim">— nothing left the LAN</span>', done: true},
+      ],
+    },
+    { // FAIL OVER — a machine dies; the SAME model serves from another node
+      title: 'automatic failover across your machines',
+      frames: [
+        {h: '<span class="dim">$ the studio just went down mid-session</span>'},
+        {h: '<span class="g">POST</span> /v1/chat/completions  <span class="dim">model=qwen3-8b</span>'},
+        {h: '<span class="dim">  trying</span> <span class="a">studio</span>  qwen3-8b  <span class="dim">warm</span>'},
+        {h: '<span class="r">⨯ studio</span>  connect failed  <span class="dim">— before a single token</span>'},
+        {h: '<span class="a">↻</span> next candidate for the same model…'},
+        {h: '<span class="g">✓ macbook</span>  qwen3-8b  <span class="dim">served in 1.2s</span>'},
+        {h: '<span class="dim">  studio marked unhealthy — excluded until it returns</span>'},
+        {h: '<span class="g">✓</span> same model, different machine — <span class="g">your agent never saw an error</span>', done: true},
+      ],
+    },
+    { // CAP IT — hard budget cap refuses at the request path
+      title: 'hard per-key budget cap',
+      frames: [
+        {h: '<span class="dim">$ agent on a <span class="g">$50.00</span> key</span>'},
+        {h: '<span class="g">POST</span> /v1/chat/completions   <span class="dim">spend $49.20</span>', spend: 0.984},
+        {h: '<span class="a">POST</span> /v1/chat/completions   <span class="dim">would hit $52.10</span>', spend: 1.042},
+        {meter: true, spend: 1.042, over: true},
+        {h: '<span class="r">⨯ 429</span> Budget exceeded: $52.10 / $50.00', kill: true},
+        {h: '<span class="dim">   refused before the provider was called</span>'},
+        {h: '<span class="g">✓</span> the bill stops at <span class="g">your number</span>', done: true},
+      ],
+    },
+    { // KILL IT — the loop breaker (the anchor)
+      title: 'semantic loop kill switch',
+      frames: [
+        {h: '<span class="dim">$ agent stuck retrying the same prompt</span>'},
+        {h: '<span class="g">POST</span> /v1/chat/completions  <span class="dim">attempt 3</span>  <span class="cost">+$0.41</span>', spend: 0.33},
+        {h: '<span class="g">POST</span> /v1/chat/completions  <span class="dim">attempt 4</span>  <span class="cost">+$0.41</span>', spend: 0.66},
+        {h: '<span class="a">POST</span> /v1/chat/completions  <span class="dim">attempt 5 — same prompt</span>', spend: 1.0},
+        {meter: true, spend: 1.0},
+        {h: '<span class="r">⨯ 429</span> Loop detected: key blocked for 120s', kill: true},
+        {h: '<span class="dim">   5 similar requests in 60s</span>'},
+        {h: '<span class="g">✓</span> spend flatlined <span class="dim">— the loop stopped paying</span>', done: true},
+      ],
+    },
+  ];
+
+  var s = 0, i = 0, spend = 0, gen = 0, timer = null;
+  function setTabs() {
+    [].forEach.call(tabs.children, function (t, idx) {
+      t.className = idx === s ? 'active' : '';
+    });
+  }
+  // `gen` invalidates any pending timer from a scene that was restarted (tab
+  // click / auto-advance) so overlapping step() chains can never race.
+  function schedule(fn, ms) {
+    var myGen = gen;
+    timer = setTimeout(function () { if (myGen === gen) fn(); }, ms);
+  }
+  function step() {
+    var scene = SCENES[s];
+    if (i >= scene.frames.length) {
+      schedule(nextScene, 2600); // hold the finished scene, then advance
+      return;
+    }
+    var f = scene.frames[i++];
+    if (f.meter) {
+      body.insertAdjacentHTML('beforeend', meterHTML);
+    } else {
+      var d = document.createElement('div');
+      d.className = 'term-line';
+      d.innerHTML = f.h + (f.done ? ' <span class="cursor"></span>' : '');
+      body.appendChild(d);
+      requestAnimationFrame(function () { d.classList.add('show'); });
+    }
+    if (typeof f.spend === 'number') spend = f.spend;
+    var m = document.getElementById('tmeter');
+    if (m) {
+      m.querySelector('i').style.width = Math.min(100, spend * 100) + '%';
+      if (f.kill) m.classList.add('killed');
+    }
+    schedule(step, f.done ? 1200 : (f.meter ? 650 : 520));
+  }
+  function nextScene() {
+    s = (s + 1) % SCENES.length;
+    startScene();
+  }
+  function startScene() {
+    gen++;                       // invalidate any timer from the prior scene
+    if (timer) clearTimeout(timer);
+    body.innerHTML = '';
+    i = 0; spend = 0;
+    titleEl.textContent = SCENES[s].title;
+    setTabs();
+    step();
+  }
+  if (body && tabs) {
+    var seen = false;
+    var io = new IntersectionObserver(function (es) {
+      if (es[0].isIntersecting && !seen) { seen = true; startScene(); }
+    }, {threshold: 0.4});
+    io.observe(document.getElementById('term'));
+    // let a viewer jump straight to a capability
+    tabs.addEventListener('click', function (e) {
+      var t = e.target.closest('[data-scene]');
+      if (!t) return;
+      s = +t.getAttribute('data-scene');
+      startScene();
+    });
+  }
+
+  // ── Request pipeline: a request travelling through every gate ──────
+  var pipe = document.getElementById('pipe');
+  if (pipe) {
+    var rows = [].slice.call(pipe.querySelectorAll('.pipe-row'));
+    var pi = 0, ptimer = null;
+    function pipeStep() {
+      rows.forEach(function (r) { r.classList.remove('lit'); });
+      if (pi < rows.length) {
+        rows[pi].classList.add('lit');
+        pi++;
+        ptimer = setTimeout(pipeStep, 620);
+      } else {
+        pi = 0;
+        ptimer = setTimeout(pipeStep, 1500); // brief rest, then run again
+      }
+    }
+    var pseen = false;
+    new IntersectionObserver(function (es) {
+      if (es[0].isIntersecting && !pseen) { pseen = true; pipeStep(); }
+      else if (!es[0].isIntersecting && ptimer) {
+        clearTimeout(ptimer); ptimer = null; pseen = false;
+        rows.forEach(function (r) { r.classList.remove('lit'); });
+        pi = 0;
+      }
+    }, {threshold: 0.25}).observe(pipe);
+  }
+
+  // ── Burn calculator ────────────────────────────────────────────────
+  var cModel = document.getElementById('c-model'),
+      cTok = document.getElementById('c-tok'),
+      cRpm = document.getElementById('c-rpm'),
+      out = document.getElementById('burn-num');
+  function fmtInt(n) { return n.toLocaleString('en-US'); }
+  function calc() {
+    var blendedPerM = parseFloat(cModel.value);   // $ per 1M tokens, blended in+out
+    var tok = parseInt(cTok.value, 10);
+    var rpm = parseInt(cRpm.value, 10);
+    document.getElementById('bv-model').textContent = '$' + blendedPerM.toFixed(2) + '/1M tok';
+    document.getElementById('bv-tok').textContent = fmtInt(tok);
+    document.getElementById('bv-rpm').textContent = rpm;
+    var reqs = rpm * 60 * 8;                        // 8-hour overnight window
+    var cost = reqs * tok / 1e6 * blendedPerM;
+    out.textContent = '$' + fmtInt(Math.round(cost));
+    out.style.color = cost > 2000 ? 'var(--red)' : cost > 500 ? 'var(--amber)' : 'var(--accent)';
+  }
+  if (cModel) { [cModel, cTok, cRpm].forEach(function (el) { el.addEventListener('input', calc); }); calc(); }
+})();
+</script>
+</body>
+</html>

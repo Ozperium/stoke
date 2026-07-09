@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>Stoke</title>
+  <!-- Dark plate so the mark reads on light and dark browser tabs alike. -->
+  <rect width="32" height="32" rx="7" fill="#0a0a0b"/>
+  <!-- The ⬡ mark from the wordmark: a pointy-top hexagon, sized to fill the
+       plate and stroked heavy enough to survive scaling down to 16px. -->
+  <path d="M16 3.6 L26.8 9.8 L26.8 22.2 L16 28.4 L5.2 22.2 L5.2 9.8 Z"
+        fill="none" stroke="#3bdb78" stroke-width="3.2" stroke-linejoin="round"/>
+</svg>

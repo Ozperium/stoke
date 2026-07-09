@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="mask-icon" href="/favicon.svg" color="#3bdb78">
+<meta name="theme-color" content="#0a0a0b">
+<title>Guides — Stoke</title>
+<meta name="description" content="Task-shaped guides for capping AI agent spend, killing runaway loops, and routing agents to your own machines with Stoke.">
+<link rel="canonical" href="https://stokegate.com/guides/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Guides">
+<meta property="og:description" content="Task-shaped guides for capping AI agent spend, killing runaway loops, and routing agents to your own machines with Stoke.">
+<meta property="og:url" content="https://stokegate.com/guides/">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Guides","description":"Stoke guides","url":"https://stokegate.com/guides/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-07-10"}</script>
+<style>
+:root{--bg:#0a0a0b;--bg2:#131316;--bg3:#1a1a20;--border:#2a2a32;--text:#e4e4e7;--muted:#8a8a96;--accent:#3bdb78;--red:#ff5454;
+--font:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+nav{border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(10,10,11,.85);backdrop-filter:blur(8px);z-index:10}
+.nav-inner{max-width:860px;margin:0 auto;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.logo{font-weight:700;font-size:17px;color:var(--text)}
+.nav-links{display:flex;gap:20px}.nav-links a{color:var(--muted);font-size:14px}
+main{max-width:760px;margin:0 auto;padding:56px 24px 80px}
+h1{font-size:40px;line-height:1.15;letter-spacing:-.02em;margin-bottom:16px}
+h2{font-size:24px;margin:44px 0 14px;letter-spacing:-.01em;scroll-margin-top:80px}
+h3{font-size:18px;margin:28px 0 10px}
+p{margin:14px 0;color:#c9c9d1}
+ul,ol{margin:14px 0 14px 22px}li{margin:7px 0;color:#c9c9d1}
+code{font-family:var(--mono);font-size:.88em;color:var(--accent);background:var(--bg3);padding:2px 6px;border-radius:5px}
+pre{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;overflow-x:auto;margin:18px 0}
+pre code{background:none;color:#d9d9e3;padding:0;font-size:13.5px;line-height:1.65}
+blockquote{border-left:3px solid var(--accent);background:var(--bg2);padding:12px 18px;margin:18px 0;border-radius:0 8px 8px 0;color:var(--muted)}
+table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14.5px}
+th,td{border:1px solid var(--border);padding:9px 12px;text-align:left}
+th{background:var(--bg2);font-weight:600}
+hr{border:0;border-top:1px solid var(--border);margin:36px 0}
+.lede{color:var(--muted);font-size:18px;margin-bottom:8px}
+.crumb{font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:22px}
+.cta{margin-top:52px;border:1px solid var(--border);background:var(--bg2);border-radius:14px;padding:26px}
+.cta h3{margin-top:0}
+.btn{display:inline-block;background:var(--accent);color:#07120b;font-weight:650;padding:11px 20px;border-radius:9px;margin-top:10px}
+.btn:hover{text-decoration:none;opacity:.92}
+footer{border-top:1px solid var(--border);padding:28px 24px;color:var(--muted);font-size:13.5px;text-align:center}
+@media(max-width:640px){h1{font-size:31px}main{padding:36px 20px 60px}.nav-links{display:none}}
+
+/* syntax tokens (build-time highlighted; no client JS) */
+.tok-com{color:var(--muted);font-style:italic}
+.tok-str{color:#7dd3fc}
+.tok-num{color:#e8b339}
+.tok-kw{color:#3bdb78;font-weight:600}
+.tok-bi{color:#6ee7a8}
+.tok-var{color:#e8b339}
+.tok-key{color:#e4e4e7}
+.tok-sec{color:#3bdb78;font-weight:600}
+.tok-flag{color:#8a8a96}
+
+/* guide index cards */
+.gwrap{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:36px}
+.gcard{display:block;border:1px solid var(--border);background:var(--bg2);border-radius:16px;overflow:hidden;transition:border-color .18s,transform .18s}
+.gcard:hover{border-color:rgba(59,219,120,.45);transform:translateY(-2px);text-decoration:none}
+.gart{height:118px;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 120%,rgba(59,219,120,.14),transparent 68%);border-bottom:1px solid var(--border)}
+.gart svg{width:52px;height:52px;color:var(--accent);opacity:.92}
+.gbody{padding:20px 22px 22px}
+.gchip{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--border);border-radius:99px;padding:3px 9px;margin-bottom:11px}
+.gcard h2{font-size:18px;margin:0 0 7px;color:var(--text);letter-spacing:-.01em;line-height:1.35}
+.gcard p{font-size:14px;color:var(--muted);margin:0 0 14px;line-height:1.6}
+.gcard .go{font-size:13.5px;color:var(--accent);font-weight:600}
+@media(max-width:700px){.gwrap{grid-template-columns:1fr}}
+
+</style>
+</head>
+<body>
+<nav><div class="nav-inner">
+  <a href="/" class="logo">⬡ Stoke</a>
+  <div class="nav-links">
+    <a href="/guides/">Guides</a>
+    <a href="https://github.com/Ozperium/stoke">GitHub</a>
+  </div>
+</div></nav>
+<main>
+<div class="crumb"><a href="/">Stoke</a> / <a href="/guides/">Guides</a></div>
+<h1>Guides</h1><p class="lede">Task-shaped walkthroughs for running agents behind Stoke — capping spend, killing runaway loops, and keeping prompts on your own hardware. Every command here is one we run ourselves.</p><div class="gwrap"><a class="gcard" href="/guides/block-prompt-injection-at-the-gateway/"><div class="gart"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 9h34L28 24v13l-8 4V24Z"/><circle cx="36" cy="34" r="7.5"/><path d="M31 39l10-10"/></svg></div><div class="gbody"><span class="gchip" style="color:var(--accent);border-color:var(--accent)44">Security</span><h2>Block Prompt Injection at the Gateway</h2><p>Most prompt injection tools only observe and alert. Wire a detector into a Stoke webhook plugin and it refuses the request before any model sees it.</p><span class="go">Read the guide →</span></div></a>
+<a class="gcard" href="/guides/expose-ollama-to-your-network-safely/"><div class="gart"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M24 5 39 11v12c0 9-6.5 16.5-15 20-8.5-3.5-15-11-15-20V11Z"/><rect x="19" y="22" width="10" height="9" rx="1.5"/><path d="M21.5 22v-3a2.5 2.5 0 0 1 5 0v3"/></svg></div><div class="gbody"><span class="gchip" style="color:var(--accent);border-color:var(--accent)44">Security</span><h2>Expose Ollama to Your Network Safely</h2><p>Setting OLLAMA_HOST=0.0.0.0 publishes an unauthenticated model server to your whole LAN. Put an authenticated Stoke gateway in front of Ollama instead.</p><span class="go">Read the guide →</span></div></a>
+<a class="gcard" href="/guides/cap-claude-code-api-spend/"><div class="gart"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 34a15 15 0 1 1 30 0"/><path d="M24 34l9-12"/><circle cx="24" cy="34" r="2.4" fill="currentColor" stroke="none"/><path d="M8 34h4M36 34h4M24 17v4"/></svg></div><div class="gbody"><span class="gchip" style="color:#e8b339;border-color:#e8b33944">Cost</span><h2>Cap Claude Code API Spend with a Local Budget Gateway</h2><p>Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.</p><span class="go">Read the guide →</span></div></a>
+<a class="gcard" href="/guides/stop-a-runaway-ai-agent/"><div class="gart"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 34l6-9 5 11 5-16 4 14"/><path d="M25 34h18"/><path d="M25 14v27" stroke-dasharray="3 3" opacity=".55"/><circle cx="25" cy="34" r="2.6" fill="currentColor" stroke="none"/></svg></div><div class="gbody"><span class="gchip" style="color:#e8b339;border-color:#e8b33944">Cost</span><h2>Stop a Runaway AI Agent From Burning API Credits</h2><p>An AI agent that loops at 2am burns API credits until morning. Stop runaway agent spend at the request path with hard budget caps and a loop breaker.</p><span class="go">Read the guide →</span></div></a>
+<a class="gcard" href="/guides/run-ollama-across-two-machines/"><div class="gart"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="13" width="15" height="12" rx="2.5"/><rect x="29" y="13" width="15" height="12" rx="2.5"/><path d="M19 19h4M25 19h4"/><circle cx="24" cy="19" r="2.3" fill="currentColor" stroke="none"/><path d="M11.5 25v6M7 31h9M36.5 25v6M32 31h9"/></svg></div><div class="gbody"><span class="gchip" style="color:#7dd3fc;border-color:#7dd3fc44">Routing</span><h2>Run Ollama Across Two Machines Without Exposing It</h2><p>Run Ollama across two machines by federating two Stoke gateways. Your desktop GPU serves the laptop over LAN while Ollama stays bound to 127.0.0.1.</p><span class="go">Read the guide →</span></div></a></div>
+<div class="cta">
+  <h3>Put a control point in front of your agents</h3>
+  <p>Stoke is a single Rust binary: hard budget caps, a runaway-loop kill switch, and local-first routing — enforced before a provider is ever called. Open source, MIT.</p>
+  <a class="btn" href="https://github.com/Ozperium/stoke">Get Stoke on GitHub</a>
+</div>
+</main>
+<footer>MIT licensed · <a href="https://stokegate.com">stokegate.com</a> · <a href="https://github.com/Ozperium/stoke">GitHub</a></footer>
+</body>
+</html>

@@ -1,0 +1,17 @@
+# Serve the installer as plain text, never as HTML, and don't let a CDN pin a
+# stale copy of it for long.
+/install
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=300
+
+/install.sh
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=300
+
+/favicon.ico
+  Content-Type: image/svg+xml
+  Cache-Control: public, max-age=86400
+
+/favicon.svg
+  Content-Type: image/svg+xml
+  Cache-Control: public, max-age=86400

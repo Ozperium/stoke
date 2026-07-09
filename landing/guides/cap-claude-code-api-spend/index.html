@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="mask-icon" href="/favicon.svg" color="#3bdb78">
+<meta name="theme-color" content="#0a0a0b">
+<title>Cap Claude Code API Spend with a Local Budget Gateway — Stoke</title>
+<meta name="description" content="Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.">
+<link rel="canonical" href="https://stokegate.com/guides/cap-claude-code-api-spend/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Cap Claude Code API Spend with a Local Budget Gateway">
+<meta property="og:description" content="Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.">
+<meta property="og:url" content="https://stokegate.com/guides/cap-claude-code-api-spend/">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Cap Claude Code API Spend with a Local Budget Gateway","description":"Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.","url":"https://stokegate.com/guides/cap-claude-code-api-spend/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-07-10"}</script>
+<style>
+:root{--bg:#0a0a0b;--bg2:#131316;--bg3:#1a1a20;--border:#2a2a32;--text:#e4e4e7;--muted:#8a8a96;--accent:#3bdb78;--red:#ff5454;
+--font:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+nav{border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(10,10,11,.85);backdrop-filter:blur(8px);z-index:10}
+.nav-inner{max-width:860px;margin:0 auto;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.logo{font-weight:700;font-size:17px;color:var(--text)}
+.nav-links{display:flex;gap:20px}.nav-links a{color:var(--muted);font-size:14px}
+main{max-width:760px;margin:0 auto;padding:56px 24px 80px}
+h1{font-size:40px;line-height:1.15;letter-spacing:-.02em;margin-bottom:16px}
+h2{font-size:24px;margin:44px 0 14px;letter-spacing:-.01em;scroll-margin-top:80px}
+h3{font-size:18px;margin:28px 0 10px}
+p{margin:14px 0;color:#c9c9d1}
+ul,ol{margin:14px 0 14px 22px}li{margin:7px 0;color:#c9c9d1}
+code{font-family:var(--mono);font-size:.88em;color:var(--accent);background:var(--bg3);padding:2px 6px;border-radius:5px}
+pre{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;overflow-x:auto;margin:18px 0}
+pre code{background:none;color:#d9d9e3;padding:0;font-size:13.5px;line-height:1.65}
+blockquote{border-left:3px solid var(--accent);background:var(--bg2);padding:12px 18px;margin:18px 0;border-radius:0 8px 8px 0;color:var(--muted)}
+table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14.5px}
+th,td{border:1px solid var(--border);padding:9px 12px;text-align:left}
+th{background:var(--bg2);font-weight:600}
+hr{border:0;border-top:1px solid var(--border);margin:36px 0}
+.lede{color:var(--muted);font-size:18px;margin-bottom:8px}
+.crumb{font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:22px}
+.cta{margin-top:52px;border:1px solid var(--border);background:var(--bg2);border-radius:14px;padding:26px}
+.cta h3{margin-top:0}
+.btn{display:inline-block;background:var(--accent);color:#07120b;font-weight:650;padding:11px 20px;border-radius:9px;margin-top:10px}
+.btn:hover{text-decoration:none;opacity:.92}
+footer{border-top:1px solid var(--border);padding:28px 24px;color:var(--muted);font-size:13.5px;text-align:center}
+@media(max-width:640px){h1{font-size:31px}main{padding:36px 20px 60px}.nav-links{display:none}}
+
+/* syntax tokens (build-time highlighted; no client JS) */
+.tok-com{color:var(--muted);font-style:italic}
+.tok-str{color:#7dd3fc}
+.tok-num{color:#e8b339}
+.tok-kw{color:#3bdb78;font-weight:600}
+.tok-bi{color:#6ee7a8}
+.tok-var{color:#e8b339}
+.tok-key{color:#e4e4e7}
+.tok-sec{color:#3bdb78;font-weight:600}
+.tok-flag{color:#8a8a96}
+
+/* guide index cards */
+.gwrap{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:36px}
+.gcard{display:block;border:1px solid var(--border);background:var(--bg2);border-radius:16px;overflow:hidden;transition:border-color .18s,transform .18s}
+.gcard:hover{border-color:rgba(59,219,120,.45);transform:translateY(-2px);text-decoration:none}
+.gart{height:118px;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 120%,rgba(59,219,120,.14),transparent 68%);border-bottom:1px solid var(--border)}
+.gart svg{width:52px;height:52px;color:var(--accent);opacity:.92}
+.gbody{padding:20px 22px 22px}
+.gchip{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--border);border-radius:99px;padding:3px 9px;margin-bottom:11px}
+.gcard h2{font-size:18px;margin:0 0 7px;color:var(--text);letter-spacing:-.01em;line-height:1.35}
+.gcard p{font-size:14px;color:var(--muted);margin:0 0 14px;line-height:1.6}
+.gcard .go{font-size:13.5px;color:var(--accent);font-weight:600}
+@media(max-width:700px){.gwrap{grid-template-columns:1fr}}
+
+</style>
+</head>
+<body>
+<nav><div class="nav-inner">
+  <a href="/" class="logo">⬡ Stoke</a>
+  <div class="nav-links">
+    <a href="/guides/">Guides</a>
+    <a href="https://github.com/Ozperium/stoke">GitHub</a>
+  </div>
+</div></nav>
+<main>
+<div class="crumb"><a href="/">Stoke</a> / <a href="/guides/">Guides</a></div>
+<h1>Cap Claude Code API Spend with a Local Budget Gateway</h1>
+<p>Claude Code on a metered Anthropic API key can retry a failed tool call, re-send the same prompt in a loop, or grind through a task far longer than you expected. Anthropic's billing alerts fire hours late, so the first time you notice is on the invoice. This guide puts a small local gateway — <a href="https://github.com/Ozperium/stoke">Stoke</a> — between Claude Code and the Anthropic API so requests over your cap are refused <em>before</em> Anthropic is contacted, and repeated identical prompts are stopped by a loop breaker.</p>
+<h2 id="how-this-works">How this works</h2>
+<p>Stoke is a single Rust binary (~5.5 MB) that listens on <code>127.0.0.1:8787</code> and speaks the Anthropic Messages API on <code>POST /v1/messages</code>. You point <code>ANTHROPIC_BASE_URL</code> at it. On every request Stoke runs its enforcement — auth, budget cap, rate limit, loop breaker — and only then forwards the request to Anthropic. Nothing that trips a check ever reaches Anthropic, so it never costs a token.</p>
+<p>Be clear about the scope: <strong>this forwards to Anthropic. It does not run Claude Code on local models.</strong> Stoke is a policy-enforcing passthrough, not a translator — your prompts still go to Claude, you still pay Anthropic's per-token price, and the gateway's job is to refuse the calls you don't want to pay for.</p>
+<h2 id="install-stoke">Install Stoke</h2>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -sSf</span> https://stokegate.com/install | sh<span class="tok-flag"> -s</span> --<span class="tok-flag"> --version</span> nightly</code></pre>
+<p>This pulls a checksum-verified static binary for macOS (arm64/x64) or Linux (x64/arm64). There is no stable tag yet — a bare <code>| sh</code> resolves <code>latest</code> and compiles from source, so keep the <code>--version nightly</code> flag. It installs two binaries: <code>stoke</code> (the server) and <code>stoke-cli</code>.</p>
+<h2 id="configure-the-gateway">Configure the gateway</h2>
+<p>Create <code>stoke.toml</code>. You need one <code>[[providers]]</code> block of <code>type = "anthropic"</code> and one <code>[[keys]]</code> block that sets the dollar cap:</p>
+<pre><code class="lang-toml"><span class="tok-sec">[server]</span>
+<span class="tok-key">host</span> = <span class="tok-str">"127.0.0.1"</span>
+<span class="tok-key">port</span> = <span class="tok-num">8787</span>
+<span class="tok-sec">
+[[providers]]</span>
+<span class="tok-key">name</span> = <span class="tok-str">"anthropic"</span>
+<span class="tok-key">type</span> = <span class="tok-str">"anthropic"</span>
+<span class="tok-key">base_url</span> = <span class="tok-str">"https://api.anthropic.com"</span>
+<span class="tok-key">api_key_env</span> = <span class="tok-str">"ANTHROPIC_API_KEY"</span>
+<span class="tok-key">tier</span> = <span class="tok-str">"cloud"</span>
+<span class="tok-sec">
+[[keys]]</span>
+<span class="tok-key">key</span> = <span class="tok-str">"cc-cap-key"</span>
+<span class="tok-key">budget_usd</span> = <span class="tok-num">20.0</span>
+<span class="tok-key">rate_limit_rpm</span> = <span class="tok-num">60</span></code></pre>
+<p>Two separate keys are in play, and keeping them straight is the whole trick:</p>
+<ul><li><strong>The gateway key</strong> (<code>cc-cap-key</code> above) is a string you invent. Claude Code sends it to Stoke, and Stoke meters <em>it</em> — the budget and rate limit apply to this key.</li><li><strong>The real Anthropic key</strong> (<code>sk-ant-...</code>) is read server-side from the <code>ANTHROPIC_API_KEY</code> environment variable via <code>api_key_env</code>. Stoke attaches it as <code>x-api-key</code> on the way out to Anthropic. It never lives in Claude Code's config.</li></ul>
+<p>When the metered spend for <code>cc-cap-key</code> reaches <code>budget_usd</code>, the next request is refused with HTTP 429 and a body like <code>Budget exceeded: $20.0130/$20.0000 for key cc-cap-k</code> (Stoke identifies the key by its first eight characters). <code>rate_limit_rpm</code> caps requests per rolling 60-second window.</p>
+<p>One caveat that decides whether the dollar cap does anything: Stoke only meters models it can price. It ships a built-in price table that today knows <code>claude-haiku-4</code> and <code>claude-sonnet-4</code>; a model ID it doesn't recognize is priced at $0, so its spend never moves the meter. Point Claude Code at a model Stoke prices (this guide uses <code>claude-haiku-4</code>), and check the table with <code>stoke-cli pricing</code>.</p>
+<h2 id="start-stoke">Start Stoke</h2>
+<p>Stoke is fail-closed: with no <code>STOKE_API_KEYS</code> set (and no <code>STOKE_DEV=1</code>), every request is rejected with 401. The gateway key from <code>stoke.toml</code> must also appear in <code>STOKE_API_KEYS</code>. From the directory containing <code>stoke.toml</code>:</p>
+<pre><code class="lang-bash"><span class="tok-kw">export</span> ANTHROPIC_API_KEY=<span class="tok-str">"sk-ant-...your real key..."</span>
+<span class="tok-kw">export</span> STOKE_API_KEYS=<span class="tok-str">"cc-cap-key"</span>
+<span class="tok-kw">stoke</span>-cli serve</code></pre>
+<p>The real key lives only in this process's environment. Anyone hitting the gateway needs the gateway key, not the Anthropic key.</p>
+<h2 id="point-claude-code-at-stoke">Point Claude Code at Stoke</h2>
+<p>Claude Code authenticates to a base URL with a Bearer token when you set <code>ANTHROPIC_AUTH_TOKEN</code> (it sends <code>Authorization: Bearer &lt;token&gt;</code>). Stoke authenticates callers by exactly that header — so use <code>ANTHROPIC_AUTH_TOKEN</code>, not <code>ANTHROPIC_API_KEY</code> (which Claude Code would send as <code>x-api-key</code>, a header Stoke's auth ignores, giving you a 401). In the shell where you run Claude Code:</p>
+<pre><code class="lang-bash"><span class="tok-kw">export</span> ANTHROPIC_BASE_URL=<span class="tok-str">"http://127.0.0.1:8787"</span>
+<span class="tok-kw">export</span> ANTHROPIC_AUTH_TOKEN=<span class="tok-str">"cc-cap-key"</span>
+<span class="tok-kw">unset</span> ANTHROPIC_API_KEY
+claude</code></pre>
+<p><code>unset ANTHROPIC_API_KEY</code> keeps the client shell free of the real key — Stoke holds it. Claude Code now sends every request to <code>http://127.0.0.1:8787/v1/messages</code> with <code>Authorization: Bearer cc-cap-key</code>, and Stoke enforces before forwarding to Anthropic.</p>
+<h2 id="verify-it-worked">Verify it worked</h2>
+<p>Health check needs no auth:</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -sS</span> http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/health
+<span class="tok-com"># {"status":"ok","service":"stoke"}</span></code></pre>
+<p>Confirm fail-closed — a request with no Bearer token is rejected before it touches Anthropic:</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -sS</span><span class="tok-flag"> -o</span> /dev/null<span class="tok-flag"> -w</span> <span class="tok-str">'%{http_code}\n'</span> http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/v1/messages \
+ <span class="tok-flag"> -H</span> <span class="tok-str">"content-type: application/json"</span> \
+ <span class="tok-flag"> -d</span> <span class="tok-str">'{"model":"claude-haiku-4","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}'</span>
+<span class="tok-com"># 401</span></code></pre>
+<p>Now a real forwarded request, proving passthrough:</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -sS</span> http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/v1/messages \
+ <span class="tok-flag"> -H</span> <span class="tok-str">"Authorization: Bearer cc-cap-key"</span> \
+ <span class="tok-flag"> -H</span> <span class="tok-str">"content-type: application/json"</span> \
+ <span class="tok-flag"> -d</span> '{
+    <span class="tok-str">"model"</span>: <span class="tok-str">"claude-haiku-4"</span>,
+    <span class="tok-str">"max_tokens"</span>: <span class="tok-num">32</span>,
+    <span class="tok-str">"messages"</span>: [{<span class="tok-str">"role"</span>: <span class="tok-str">"user"</span>, <span class="tok-str">"content"</span>: <span class="tok-str">"Say hi in three words."</span>}]
+  }'</code></pre>
+<p>You get back a normal Anthropic Messages response. Trip the loop breaker by sending the <em>same</em> prompt five times inside 60 seconds — the threshold is a global constant (5 similar requests in 60s → blocked for 120s):</p>
+<pre><code class="lang-bash">for i in <span class="tok-num">1</span> <span class="tok-num">2</span> <span class="tok-num">3</span> <span class="tok-num">4</span> <span class="tok-num">5</span>; do
+<span class="tok-kw">  curl</span><span class="tok-flag"> -sS</span><span class="tok-flag"> -o</span> /dev/null<span class="tok-flag"> -w</span> <span class="tok-str">'%{http_code}\n'</span> http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/v1/messages \
+   <span class="tok-flag"> -H</span> <span class="tok-str">"Authorization: Bearer cc-cap-key"</span> \
+   <span class="tok-flag"> -H</span> <span class="tok-str">"content-type: application/json"</span> \
+   <span class="tok-flag"> -d</span> <span class="tok-str">'{"model":"claude-haiku-4","max_tokens":16,"messages":[{"role":"user","content":"retry me"}]}'</span>
+done
+<span class="tok-com"># 200</span>
+<span class="tok-com"># 200</span>
+<span class="tok-com"># 200</span>
+<span class="tok-com"># 200</span>
+<span class="tok-com"># 429</span></code></pre>
+<p>The fifth call's body reads: <code>Loop detected: key cc-cap-k sent 5 similar requests within 60s. Blocked for 120s. Check your agent's retry logic — it may be stuck.</code> That is a stuck-retry storm — the most common way agents burn credits — stopped at the gateway.</p>
+<p>Inspect the per-key ledger any time. <code>spend_usd</code> accrues only from the priced, non-streaming calls above, so expect a small figure; your exact numbers will differ:</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -sS</span> http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/v1/budget<span class="tok-flag"> -H</span> <span class="tok-str">"Authorization: Bearer cc-cap-key"</span>
+<span class="tok-com"># {"auth_enabled":true,"keys":[{"key":"cc-cap-k","spend_usd":0.0007,</span>
+<span class="tok-com">#   "limit_usd":20.0,"recent_requests":6}], ... }</span></code></pre>
+<h2 id="what-this-doesn-t-do">What this doesn't do</h2>
+<p>Read this section before you trust the dollar figure.</p>
+<ul><li><strong>It forwards to Anthropic; it does not run Claude Code on local models.</strong> Your traffic still goes to Claude and still bills Anthropic. Stoke controls <em>whether</em> a call goes out, not <em>where</em> it runs.</li><li><strong>Subscriptions can't be dollar-capped.</strong> If you use Claude Code on a Claude Max or Pro subscription rather than a metered API key, there is no per-request dollar price to cap. Stoke can still rate-limit and loop-kill that traffic — it just can't put a USD ceiling on it. Hard <code>budget_usd</code> caps apply only to metered API keys.</li><li><strong>Streamed responses don't yet accrue spend.</strong> Spend records from non-streaming responses only; streamed-request cost accounting isn't implemented. Claude Code streams by default, so treat the loop breaker and <code>rate_limit_rpm</code> — which enforce on <em>all</em> traffic, streaming included, alongside auth — as your primary guardrails, and <code>budget_usd</code> as a hard backstop for the non-streaming, priced portion.</li><li><strong>Pricing comes from a built-in table.</strong> Stoke meters a response by looking its model up in a built-in price table; a model ID it doesn't recognize is priced at $0, so the dollar meter won't move for it. Check which models Stoke prices before you rely on the cap:</li></ul>
+<pre><code class="lang-bash"><span class="tok-kw">stoke</span>-cli pricing</code></pre>
+<ul><li><strong>Loop thresholds are global</strong>, not per-key, and this is pre-release software (MIT).</li></ul>
+<h2 id="next-steps">Next steps</h2>
+<p>Get the binary, drop a <code>[[keys]]</code> cap in front of your metered key, and let the loop breaker do the rest — source, config reference, and issues are at <a href="https://github.com/Ozperium/stoke">github.com/Ozperium/stoke</a>.</p>
+<div class="cta">
+  <h3>Put a control point in front of your agents</h3>
+  <p>Stoke is a single Rust binary: hard budget caps, a runaway-loop kill switch, and local-first routing — enforced before a provider is ever called. Open source, MIT.</p>
+  <a class="btn" href="https://github.com/Ozperium/stoke">Get Stoke on GitHub</a>
+</div>
+</main>
+<footer>MIT licensed · <a href="https://stokegate.com">stokegate.com</a> · <a href="https://github.com/Ozperium/stoke">GitHub</a></footer>
+</body>
+</html>

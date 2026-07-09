@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="mask-icon" href="/favicon.svg" color="#3bdb78">
+<meta name="theme-color" content="#0a0a0b">
+<title>Stop a Runaway AI Agent From Burning API Credits — Stoke</title>
+<meta name="description" content="An AI agent that loops at 2am burns API credits until morning. Stop runaway agent spend at the request path with hard budget caps and a loop breaker.">
+<link rel="canonical" href="https://stokegate.com/guides/stop-a-runaway-ai-agent/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Stop a Runaway AI Agent From Burning API Credits">
+<meta property="og:description" content="An AI agent that loops at 2am burns API credits until morning. Stop runaway agent spend at the request path with hard budget caps and a loop breaker.">
+<meta property="og:url" content="https://stokegate.com/guides/stop-a-runaway-ai-agent/">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Stop a Runaway AI Agent From Burning API Credits","description":"An AI agent that loops at 2am burns API credits until morning. Stop runaway agent spend at the request path with hard budget caps and a loop breaker.","url":"https://stokegate.com/guides/stop-a-runaway-ai-agent/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-07-10"}</script>
+<style>
+:root{--bg:#0a0a0b;--bg2:#131316;--bg3:#1a1a20;--border:#2a2a32;--text:#e4e4e7;--muted:#8a8a96;--accent:#3bdb78;--red:#ff5454;
+--font:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+nav{border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(10,10,11,.85);backdrop-filter:blur(8px);z-index:10}
+.nav-inner{max-width:860px;margin:0 auto;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.logo{font-weight:700;font-size:17px;color:var(--text)}
+.nav-links{display:flex;gap:20px}.nav-links a{color:var(--muted);font-size:14px}
+main{max-width:760px;margin:0 auto;padding:56px 24px 80px}
+h1{font-size:40px;line-height:1.15;letter-spacing:-.02em;margin-bottom:16px}
+h2{font-size:24px;margin:44px 0 14px;letter-spacing:-.01em;scroll-margin-top:80px}
+h3{font-size:18px;margin:28px 0 10px}
+p{margin:14px 0;color:#c9c9d1}
+ul,ol{margin:14px 0 14px 22px}li{margin:7px 0;color:#c9c9d1}
+code{font-family:var(--mono);font-size:.88em;color:var(--accent);background:var(--bg3);padding:2px 6px;border-radius:5px}
+pre{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;overflow-x:auto;margin:18px 0}
+pre code{background:none;color:#d9d9e3;padding:0;font-size:13.5px;line-height:1.65}
+blockquote{border-left:3px solid var(--accent);background:var(--bg2);padding:12px 18px;margin:18px 0;border-radius:0 8px 8px 0;color:var(--muted)}
+table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14.5px}
+th,td{border:1px solid var(--border);padding:9px 12px;text-align:left}
+th{background:var(--bg2);font-weight:600}
+hr{border:0;border-top:1px solid var(--border);margin:36px 0}
+.lede{color:var(--muted);font-size:18px;margin-bottom:8px}
+.crumb{font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:22px}
+.cta{margin-top:52px;border:1px solid var(--border);background:var(--bg2);border-radius:14px;padding:26px}
+.cta h3{margin-top:0}
+.btn{display:inline-block;background:var(--accent);color:#07120b;font-weight:650;padding:11px 20px;border-radius:9px;margin-top:10px}
+.btn:hover{text-decoration:none;opacity:.92}
+footer{border-top:1px solid var(--border);padding:28px 24px;color:var(--muted);font-size:13.5px;text-align:center}
+@media(max-width:640px){h1{font-size:31px}main{padding:36px 20px 60px}.nav-links{display:none}}
+
+/* syntax tokens (build-time highlighted; no client JS) */
+.tok-com{color:var(--muted);font-style:italic}
+.tok-str{color:#7dd3fc}
+.tok-num{color:#e8b339}
+.tok-kw{color:#3bdb78;font-weight:600}
+.tok-bi{color:#6ee7a8}
+.tok-var{color:#e8b339}
+.tok-key{color:#e4e4e7}
+.tok-sec{color:#3bdb78;font-weight:600}
+.tok-flag{color:#8a8a96}
+
+/* guide index cards */
+.gwrap{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:36px}
+.gcard{display:block;border:1px solid var(--border);background:var(--bg2);border-radius:16px;overflow:hidden;transition:border-color .18s,transform .18s}
+.gcard:hover{border-color:rgba(59,219,120,.45);transform:translateY(-2px);text-decoration:none}
+.gart{height:118px;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 120%,rgba(59,219,120,.14),transparent 68%);border-bottom:1px solid var(--border)}
+.gart svg{width:52px;height:52px;color:var(--accent);opacity:.92}
+.gbody{padding:20px 22px 22px}
+.gchip{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--border);border-radius:99px;padding:3px 9px;margin-bottom:11px}
+.gcard h2{font-size:18px;margin:0 0 7px;color:var(--text);letter-spacing:-.01em;line-height:1.35}
+.gcard p{font-size:14px;color:var(--muted);margin:0 0 14px;line-height:1.6}
+.gcard .go{font-size:13.5px;color:var(--accent);font-weight:600}
+@media(max-width:700px){.gwrap{grid-template-columns:1fr}}
+
+</style>
+</head>
+<body>
+<nav><div class="nav-inner">
+  <a href="/" class="logo">⬡ Stoke</a>
+  <div class="nav-links">
+    <a href="/guides/">Guides</a>
+    <a href="https://github.com/Ozperium/stoke">GitHub</a>
+  </div>
+</div></nav>
+<main>
+<div class="crumb"><a href="/">Stoke</a> / <a href="/guides/">Guides</a></div>
+<h1>Stop a Runaway AI Agent Before It Burns Your API Credits</h1>
+<p>An agent that starts retrying at 2am does not stop because you are asleep. It re-sends the same tool call, fans out, and re-plans — and every attempt is a metered API request. By the time the billing alert fires, the money is already gone. That alert is a receipt, not a control: it tells you what happened, hours after you could have done anything about it.</p>
+<p>The fix is to put a gate in the request path that refuses the request <em>before</em> the provider is called. <a href="https://github.com/Ozperium/stoke">Stoke</a> is a single Rust binary that sits between your agent and the model API and does exactly that. This guide sets up two independent protections — a hard per-key dollar cap and a loop breaker — and then actually triggers both with <code>curl</code> so you can see the refusals.</p>
+<h2 id="the-two-protections-you-actually-get">The two protections you actually get</h2>
+<p>These are separate mechanisms. Either one can stop a runaway; they cover different failure modes.</p>
+<ul><li><strong>Hard budget cap.</strong> A per-key cumulative spend limit in USD. Once a key's spend <em>reaches</em> the cap, the next request is refused with <code>429 Budget exceeded</code> — no provider call is made. This stops slow bleed: an agent that is technically making progress but has already spent more than you authorized.</li><li><strong>Loop breaker.</strong> If one key sends 5 repeated requests within 60 seconds, that key is blocked for 120 seconds with <code>429 Loop detected</code>. By default "repeated" means an identical request (same model, same message content, same temperature — hashed). This stops the fast failure: a tight retry loop that would rack up hundreds of calls before any dollar cap noticed.</li></ul>
+<p>Both checks run on the request path, before Stoke ever contacts a model. Everything except <code>GET /health</code> also requires an <code>Authorization: Bearer &lt;key&gt;</code> header, and Stoke is fail-closed: with no keys configured and no <code>STOKE_DEV=1</code>, every request is rejected.</p>
+<h2 id="set-a-per-key-budget-and-register-the-key">Set a per-key budget and register the key</h2>
+<p>Create <code>stoke.toml</code>. A key gets enforcement only when it appears in a <code>[[keys]]</code> table <strong>and</strong> in the <code>STOKE_API_KEYS</code> environment variable — the table is the policy, the env var is the allowlist.</p>
+<pre><code class="lang-toml"><span class="tok-com"># stoke.toml</span>
+<span class="tok-sec">[server]</span>
+<span class="tok-key">host</span> = <span class="tok-str">"127.0.0.1"</span>
+<span class="tok-key">port</span> = <span class="tok-num">8787</span>
+
+<span class="tok-com"># Per-key enforcement policy. This key must ALSO be in STOKE_API_KEYS.</span>
+<span class="tok-sec">[[keys]]</span>
+<span class="tok-key">key</span> = <span class="tok-str">"agent-key"</span>
+<span class="tok-key">budget_usd</span> = <span class="tok-num">5.00</span>        <span class="tok-com"># hard cumulative spend cap; over it -&gt; 429</span>
+<span class="tok-key">rate_limit_rpm</span> = <span class="tok-num">120</span>     <span class="tok-com"># optional: max requests per rolling 60s window</span>
+
+<span class="tok-com"># Where real traffic goes. Your local Ollama, bound to loopback.</span>
+<span class="tok-sec">[[providers]]</span>
+<span class="tok-key">name</span> = <span class="tok-str">"local"</span>
+<span class="tok-key">base_url</span> = <span class="tok-str">"http://127.0.0.1:11434/v1"</span>
+<span class="tok-key">tier</span> = <span class="tok-str">"local"</span></code></pre>
+<p>Prefer not to hand-write it? <code>stoke-cli init --output stoke.toml</code> generates a starter config and discovers a default model from your own Ollama. You still add the <code>[[keys]]</code> table yourself.</p>
+<h2 id="start-stoke-and-route-the-agent-through-it">Start Stoke and route the agent through it</h2>
+<p>Export the allowlist and start the gateway. <code>stoke-cli serve</code> reads <code>stoke.toml</code> from the current directory and launches the server on <code>127.0.0.1:8787</code>.</p>
+<pre><code class="lang-bash"><span class="tok-kw">export</span> STOKE_API_KEYS=<span class="tok-str">"agent-key"</span>
+<span class="tok-kw">stoke</span>-cli serve</code></pre>
+<p>Now point your agent at Stoke instead of the upstream API. For any OpenAI-compatible client that means two settings:</p>
+<pre><code class="lang-bash"><span class="tok-var">OPENAI_BASE_URL</span>=http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/v1
+<span class="tok-var">OPENAI_API_KEY</span>=agent-key</code></pre>
+<p>Every request the agent makes now passes through the budget cap, the rate limit, and the loop breaker before anything is spent.</p>
+<h2 id="watch-the-loop-breaker-refuse-live">Watch the loop breaker refuse (live)</h2>
+<p>This is the demo you can run without a metered API key. Pick any model you have pulled in Ollama (<code>ollama list</code> shows them), then fire the <em>same</em> request five times in a row:</p>
+<pre><code class="lang-bash"><span class="tok-var">MODEL</span>=<span class="tok-str">"&lt;a-model-on-your-ollama&gt;"</span>
+
+for i in <span class="tok-num">1</span> <span class="tok-num">2</span> <span class="tok-num">3</span> <span class="tok-num">4</span> <span class="tok-num">5</span>; do
+  printf <span class="tok-str">'\n--- request %s ---\n'</span> <span class="tok-str">"$i"</span>
+<span class="tok-kw">  curl</span><span class="tok-flag"> -s</span><span class="tok-flag"> -w</span> <span class="tok-str">'\nHTTP %{http_code}\n'</span> \
+    http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/v1/chat/completions \
+   <span class="tok-flag"> -H</span> <span class="tok-str">"Authorization: Bearer agent-key"</span> \
+   <span class="tok-flag"> -H</span> <span class="tok-str">"Content-Type: application/json"</span> \
+   <span class="tok-flag"> -d</span> <span class="tok-str">"{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"retry: fix the failing test\"}],\"temperature\":0}"</span>
+done</code></pre>
+<p>Requests 1–4 pass the loop check and go through to the model (or return an upstream error if the model isn't reachable — either way the loop counter still increments, because the check runs before the provider call). The fifth trips the breaker:</p>
+<pre><code>--- request 5 ---
+Loop detected: key agent-ke sent 5 similar requests within 60s. Blocked for 120s. Check your agent's retry logic — it may be stuck.
+HTTP 429</code></pre>
+<p>The whole key is now frozen for 120 seconds — not just that prompt. Send <em>any</em> request with the same key during the block and you get the second loop message:</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -s</span><span class="tok-flag"> -w</span> <span class="tok-str">'\nHTTP %{http_code}\n'</span> \
+  http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/v1/chat/completions \
+ <span class="tok-flag"> -H</span> <span class="tok-str">"Authorization: Bearer agent-key"</span> \
+ <span class="tok-flag"> -H</span> <span class="tok-str">"Content-Type: application/json"</span> \
+ <span class="tok-flag"> -d</span> <span class="tok-str">"{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"something completely different\"}],\"temperature\":0}"</span></code></pre>
+<pre><code>Loop detected: key agent-ke blocked for 118s (repeated similar requests). Review your agent's retry logic.
+HTTP 429</code></pre>
+<p>That freeze is the point: a looping agent is a stuck agent, so Stoke stops all of its traffic until the block expires, then lets it start fresh. (The threshold — 5 requests / 60s / 120s block — is a global constant today, not per-key. Optional semantic matching, which counts near-duplicate wording as "the same" request, is turned on with <code>STOKE_SEMANTIC_CACHE</code> plus an embedding model in <code>STOKE_EMBED_MODEL</code>.)</p>
+<h2 id="watch-the-budget-cap-refuse">Watch the budget cap refuse</h2>
+<p>The dollar cap needs real spend to accrue, so this one requires a metered provider and low limit. Set <code>budget_usd = 0.05</code> for the key, restart, and send non-streaming completions against your metered upstream until cumulative spend reaches the cap. The next request is refused:</p>
+<pre><code>Budget exceeded: $0.0512/$0.0500 for key agent-ke
+HTTP 429</code></pre>
+<p>The format is <code>current/limit for key &lt;first-8-chars&gt;</code>. No provider call happens once you are over — the request dies at the gate, so an over-budget key cannot spend one more cent.</p>
+<p>One honesty note that matters here: spend currently accrues from <strong>non-streaming</strong> responses only. Streamed-request cost accounting is not implemented yet. Auth, rate limiting, and the loop breaker all cover streaming traffic — so a streaming agent can still be loop-killed and rate-limited — but a hard USD cap only bites on non-streaming calls against a metered API key. Subscription traffic (Claude Max, ChatGPT Plus) has no per-request price, so it can be rate-limited and loop-killed but not dollar-capped.</p>
+<h2 id="read-spend-and-the-receipts-ledger-get-v1-budget">Read spend and the receipts ledger: GET /v1/budget</h2>
+<p>To see where a key stands before it hits the wall, read the budget endpoint (auth required):</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -s</span> http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/v1/budget \
+ <span class="tok-flag"> -H</span> <span class="tok-str">"Authorization: Bearer agent-key"</span> | jq</code></pre>
+<pre><code class="lang-json">{
+  <span class="tok-key">"auth_enabled"</span>: <span class="tok-kw">true</span>,
+  <span class="tok-key">"keys"</span>: [
+    { <span class="tok-key">"key"</span>: <span class="tok-str">"agent-ke"</span>, <span class="tok-key">"spend_usd"</span>: <span class="tok-num">4.83</span>, <span class="tok-key">"limit_usd"</span>: <span class="tok-num">5.0</span>, <span class="tok-key">"recent_requests"</span>: <span class="tok-num">3</span> }
+  ],
+  <span class="tok-key">"receipts"</span>: {
+    <span class="tok-key">"requests"</span>: <span class="tok-num">128</span>,
+    <span class="tok-key">"zero_marginal_requests"</span>: <span class="tok-num">119</span>,
+    <span class="tok-key">"zero_marginal_pct"</span>: <span class="tok-num">93.0</span>,
+    <span class="tok-key">"cloud_listprice_avoided_usd_est"</span>: <span class="tok-num">3.4012</span>
+  }
+}</code></pre>
+<p><code>spend_usd</code> versus <code>limit_usd</code> is your live headroom. The <code>receipts</code> block is the ledger: how many requests were served, how many at zero marginal cost (local models on hardware you already own — electricity and your GPU, never truly free), and a list-price counterfactual estimate for what a cloud model would have charged. It is an estimate, not a quality claim.</p>
+<h2 id="why-the-request-path-beats-a-dashboard">Why the request path beats a dashboard</h2>
+<p>A billing dashboard and a spend alert are both after-the-fact. They read a number that has already been charged. Between the moment an agent starts looping and the moment a threshold-based alert reaches a human, an unbounded number of paid requests can complete. Nothing in that loop is <em>deciding</em> whether the next request should happen.</p>
+<p>Stoke moves the decision into the path. The budget check, rate check, and loop check all run before any upstream call, and the gateway is fail-closed, so the failure mode is "reject," not "pass through and hope." You are not watching a graph and reacting; the runaway is refused at request N, not investigated at request 900.</p>
+<h2 id="verify-it-worked">Verify it worked</h2>
+<p>Three checks confirm the gate is live:</p>
+<pre><code class="lang-bash"><span class="tok-com"># 1. Liveness — the only unauthenticated endpoint.</span>
+<span class="tok-kw">curl</span><span class="tok-flag"> -s</span> http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/health
+<span class="tok-com"># {"status":"ok","service":"stoke"}</span>
+
+<span class="tok-com"># 2. Auth is enforced — a request with no Bearer token should be rejected.</span>
+<span class="tok-kw">curl</span><span class="tok-flag"> -s</span><span class="tok-flag"> -o</span> /dev/null<span class="tok-flag"> -w</span> <span class="tok-str">'%{http_code}\n'</span> \
+  http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/v1/models
+<span class="tok-com"># 401</span>
+
+<span class="tok-com"># 3. The loop breaker fires — run the five-request loop above.</span>
+<span class="tok-com">#    Request 5 returns: HTTP 429, body "Loop detected: ..."</span></code></pre>
+<p>Seeing <code>401</code> on an unauthenticated call and <code>429 Loop detected</code> on the fifth repeat means both the auth wall and the loop breaker are protecting your key.</p>
+<h2 id="what-this-doesn-t-do">What this doesn't do</h2>
+<ul><li><strong>No dollar cap on streaming or subscription traffic.</strong> Spend accrues from non-streaming responses only; hard USD caps need a metered API key. Loop and rate limits still cover everything.</li><li><strong>Loop thresholds are global, not per-key.</strong> The 5 / 60s / 120s values are constants today; per-key tuning is on the roadmap.</li><li><strong>No cross-model fallback.</strong> Failover retries the <em>same</em> model on the next healthy node. Automatic "fall back to a cheaper vendor" chains are not implemented.</li><li><strong><code>/v1/messages</code> forwards to Anthropic.</strong> It is an enforced passthrough to a configured Anthropic upstream, not a way to run Claude on local GPUs.</li></ul>
+<h2 id="install-and-next-steps">Install and next steps</h2>
+<p>Grab the binary (static builds for macOS and Linux, checksum-verified, with a source fallback):</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -sSf</span> https://stokegate.com/install | sh<span class="tok-flag"> -s</span> --<span class="tok-flag"> --version</span> nightly</code></pre>
+<p>There is no stable tag yet — a bare <code>| sh</code> resolves <code>latest</code> and compiles from source, so pin <code>--version nightly</code> for the prebuilt binary. Then <code>stoke-cli init</code>, add a <code>[[keys]]</code> cap, export <code>STOKE_API_KEYS</code>, and route your agent through <code>127.0.0.1:8787</code>. Full config reference and source: <a href="https://github.com/Ozperium/stoke">github.com/Ozperium/stoke</a>.</p>
+<div class="cta">
+  <h3>Put a control point in front of your agents</h3>
+  <p>Stoke is a single Rust binary: hard budget caps, a runaway-loop kill switch, and local-first routing — enforced before a provider is ever called. Open source, MIT.</p>
+  <a class="btn" href="https://github.com/Ozperium/stoke">Get Stoke on GitHub</a>
+</div>
+</main>
+<footer>MIT licensed · <a href="https://stokegate.com">stokegate.com</a> · <a href="https://github.com/Ozperium/stoke">GitHub</a></footer>
+</body>
+</html>
