@@ -7,21 +7,27 @@ client's side. `stream_options_seen` proves whether Stoke asked the provider to
 report token usage — you cannot bill a stream from a measurement you never
 requested.
 
-Usage: mock_counting_provider.py <port> [--no-usage]
+Usage: mock_counting_provider.py <port> [--no-usage] [--slow-ms N]
   --no-usage   stream without ever reporting usage, so the gateway must estimate
+  --slow-ms N  pause N ms between stream frames, so several streams overlap in
+               flight — which is when an in-flight spend reservation matters
 
   GET  /count                -> {"calls": N, "stream_options_seen": M}
   POST /v1/chat/completions  -> 1000 prompt + 1000 completion tokens,
                                 streamed as SSE when the request sets stream:true
+  POST /v1/messages          -> the same, in Anthropic's shape (for /v1/messages)
 """
 import json
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
 PORT = int(sys.argv[1])
-REPORT_USAGE = "--no-usage" not in sys.argv[2:]
+ARGS = sys.argv[2:]
+REPORT_USAGE = "--no-usage" not in ARGS
+SLOW_MS = int(ARGS[ARGS.index("--slow-ms") + 1]) if "--slow-ms" in ARGS else 0
 
 LOCK = threading.Lock()
 CALLS = 0
@@ -52,7 +58,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         global CALLS, STREAM_OPTIONS_SEEN
         raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        if "chat/completions" not in self.path:
+        if "chat/completions" not in self.path and "/v1/messages" not in self.path:
             self._json({}, 404)
             return
         try:
@@ -64,6 +70,16 @@ class Handler(BaseHTTPRequestHandler):
             CALLS += 1
             if "stream_options" in req:
                 STREAM_OPTIONS_SEEN += 1
+
+        if "/v1/messages" in self.path:
+            self._json({
+                "id": "msg-1", "type": "message", "role": "assistant",
+                "model": req.get("model", "mock"),
+                "content": [{"type": "text", "text": "42"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 1000, "output_tokens": 1000},
+            })
+            return
 
         if req.get("stream"):
             self._stream(req)
@@ -91,6 +107,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
 
         for tok in ("4", "2"):
+            if SLOW_MS:
+                time.sleep(SLOW_MS / 1000.0)
             frame({"id": "mock-1", "object": "chat.completion.chunk", "created": 0,
                    "model": model,
                    "choices": [{"index": 0, "delta": {"content": tok}}],

@@ -258,7 +258,7 @@ async fn ttft_stats(State(state): State<AppState>) -> Json<Value> {
 
 async fn budget_stats(State(state): State<AppState>) -> Json<Value> {
     let stats = state.budget.stats();
-    let keys: Vec<Value> = stats.iter().map(|(key, spend, limit, recent_rpm, estimated)| {
+    let keys: Vec<Value> = stats.iter().map(|(key, spend, limit, recent_rpm, estimated, reserved)| {
         json!({
             "key": &key[..8.min(key.len())],
             "spend_usd": spend,
@@ -267,6 +267,9 @@ async fn budget_stats(State(state): State<AppState>) -> Json<Value> {
             // The part of spend_usd that Stoke had to estimate because a metered
             // provider streamed without reporting usage. Counted against the cap.
             "estimated_usd": estimated,
+            // Money held for requests still in flight. Not yet spent, but the cap
+            // treats it as though it were — otherwise concurrent requests all pass.
+            "reserved_usd": reserved,
         })
     }).collect();
     let auth_enabled = state.auth.is_auth_enabled();
@@ -315,6 +318,42 @@ fn provider_for_model_filtered<'a>(
         .or_else(|| candidates.first().copied())
 }
 
+/// The most a request could cost, priced against the models that will actually run.
+///
+/// Scaling one model's price by a leg count is not enough: a vote pattern bills each
+/// leg at *its own* model's price, and the base model is often only there to pick a
+/// provider. Price it that way and an unpriced base yields a hold of zero while the
+/// legs spend real dollars — no hold at all, on exactly the routes that spend most.
+///
+/// Only calls that generate tokens count. A failover attempt that never connects, or
+/// a candidate that returns 4xx, produces nothing to bill.
+fn hold_amount(
+    pricer: &cost::Pricer,
+    routing: &str,
+    model: &str,
+    vote_models: &[String],
+    n_samples: usize,
+    prompt_tokens: u64,
+    max_output_tokens: u64,
+) -> f64 {
+    let one = |m: &str| pricer.max_cost(m, prompt_tokens, max_output_tokens);
+    match routing {
+        // One model, N samples, every one of them generated and billed.
+        "self_consistency" => one(model) * n_samples.max(1) as f64,
+        // Every candidate generates; the tests or the vote pick a winner afterwards.
+        // A candidate that fails its tests has already been billed for its tokens.
+        "test_vote" | "parallel_vote" | "cascade_test" if !vote_models.is_empty() => {
+            vote_models.iter().map(|m| one(m)).sum()
+        }
+        // First success wins and the losers never generated, but which model wins
+        // decides the price. Hold for the dearest of them.
+        "stream_race" if !vote_models.is_empty() => {
+            vote_models.iter().map(|m| one(m)).fold(0.0, f64::max)
+        }
+        _ => one(model),
+    }
+}
+
 /// Measures a live SSE stream: time-to-first-token (connect time already
 /// includes prefill for Ollama; we add the delta to the first body chunk),
 /// tokens/sec (SSE `data:` events ≈ tokens), and — for providers that charge —
@@ -345,6 +384,10 @@ struct StreamBilling {
     api_key: String,
     /// Fallback when the provider never reports usage. An estimate, and labelled one.
     prompt_tokens_est: u64,
+    /// The hold taken on this key before the stream started. Dropped after the
+    /// real cost is recorded, so the money is never counted twice — once as
+    /// reserved and once as spent — and never leaks if the client vanishes.
+    _reservation: Option<budget::SpendReservation>,
 }
 
 impl StreamMeter {
@@ -877,6 +920,58 @@ async fn chat_completions(
 
     tracing::info!("Request: model={}, routing={}, vote_models={:?}", model, routing, vote_models);
 
+    // A cache hit costs nothing and contacts no provider, so look it up before
+    // holding money against the cap. Reserving first would refuse a free answer
+    // whenever the key's remaining budget was smaller than a request it never made.
+    // (`cache_key` is None for streams, so this is a no-op on the streaming path.)
+    // Check cache for single routing at temp=0 (deterministic requests only)
+    // Two-layer: exact match (hash) + semantic match (embedding similarity).
+    // Scoped to (api_key, path): a cached response is a response the caller was
+    // already authorised to receive, and nobody else.
+    let cache_scope = ResponseCache::scope_of(&api_key, path);
+    let cache_key = if routing == "single" && !req.stream.unwrap_or(false) {
+        ResponseCache::cache_key(&cache_scope, &model, &req.messages, req.temperature, req.max_tokens)
+    } else {
+        None
+    };
+
+    let cache_prompt = ResponseCache::extract_prompt(&req.messages);
+
+    if let Some(ref key) = cache_key {
+        if let Some((_matched_key, cached)) = state.cache.get_smart(key, &cache_scope, &cache_prompt).await {
+            tracing::info!("cache hit: key={}", &key[..8]);
+            let mut response_json = cached;
+            if let Some(obj) = response_json.as_object_mut() {
+                obj.insert("stoke_cache".into(), json!("hit"));
+            }
+            return Json(response_json).into_response();
+        }
+    }
+
+
+    // ─── Hold the money this request could cost ──────────────────────────────
+    // `check_with_prompt` admitted this request against what has already been
+    // *charged*. A stream is charged when it ends, so without a hold, every
+    // concurrent request on a nearly-exhausted key is admitted against a figure
+    // that ignores all the others in flight. The hold is released by its guard —
+    // on the early returns below, at the end of this handler, or when a stream
+    // finishes or its client hangs up.
+    let hold = hold_amount(
+        cost::global(),
+        &routing,
+        &model,
+        &vote_models,
+        n_samples,
+        (prompt_chars / 4) as u64,
+        req.max_tokens
+            .map(u64::from)
+            .unwrap_or(state.config.limits.assumed_max_output_tokens),
+    );
+    let mut reservation = match state.budget.try_reserve(&api_key, hold) {
+        Ok(r) => r,
+        Err(reason) => return (StatusCode::TOO_MANY_REQUESTS, reason).into_response(),
+    };
+
     // Streaming: supported for single routing (direct passthrough) and stream_race.
     // Fusion patterns aggregate multiple responses and can't stream.
     // stream_race: race multiple providers/models, first to connect wins.
@@ -987,6 +1082,8 @@ async fn chat_completions(
                     api_key: api_key.clone(),
                     // Only ever used if the provider reports nothing. ~4 chars/token.
                     prompt_tokens_est: (auto_route::extract_text(&req.messages).len() / 4) as u64,
+                    // The stream outlives this handler, and so must its hold.
+                    _reservation: reservation.take(),
                 });
 
                 let mut meter = StreamMeter::new(
@@ -1016,30 +1113,6 @@ async fn chat_completions(
                 let code = if cost::is_unpriced_error(&msg) { StatusCode::FORBIDDEN } else { code };
                 return (code, msg).into_response();
             }
-        }
-    }
-
-    // Check cache for single routing at temp=0 (deterministic requests only)
-    // Two-layer: exact match (hash) + semantic match (embedding similarity).
-    // Scoped to (api_key, path): a cached response is a response the caller was
-    // already authorised to receive, and nobody else.
-    let cache_scope = ResponseCache::scope_of(&api_key, path);
-    let cache_key = if routing == "single" && !req.stream.unwrap_or(false) {
-        ResponseCache::cache_key(&cache_scope, &model, &req.messages, req.temperature, req.max_tokens)
-    } else {
-        None
-    };
-
-    let cache_prompt = ResponseCache::extract_prompt(&req.messages);
-
-    if let Some(ref key) = cache_key {
-        if let Some((_matched_key, cached)) = state.cache.get_smart(key, &cache_scope, &cache_prompt).await {
-            tracing::info!("cache hit: key={}", &key[..8]);
-            let mut response_json = cached;
-            if let Some(obj) = response_json.as_object_mut() {
-                obj.insert("stoke_cache".into(), json!("hit"));
-            }
-            return Json(response_json).into_response();
         }
     }
 
@@ -1159,6 +1232,10 @@ async fn chat_completions(
     // through. `result.cost` is the whole request's bill, including every call a
     // fan-out pattern made.
     state.budget.record_spend(&api_key, result.cost.cost_usd);
+    // The hold has served its purpose: the money it stood for is now recorded as
+    // spent. Releasing here rather than at the end of the handler stops it being
+    // counted twice — once held, once spent — while the response hooks run.
+    drop(reservation.take());
 
     // Inject cost into the response (non-standard field, ignored by OpenAI clients)
     let mut response_json = serde_json::to_value(&result.response).unwrap();
@@ -1257,4 +1334,64 @@ async fn chat_completions(
     }
 
     Json(response_json).into_response()
+}
+#[cfg(test)]
+mod hold_sizing_tests {
+    use super::hold_amount;
+    use crate::cost::{ModelPricing, Pricer, Unpriced};
+    use std::collections::HashMap;
+
+    /// cheap: $1/1M in, $1/1M out.  dear: $10/1M in, $10/1M out.  "router": unpriced.
+    fn pricer() -> Pricer {
+        let mut m = HashMap::new();
+        m.insert("cheap".to_string(), ModelPricing { input_per_1m: 1.0, output_per_1m: 1.0 });
+        m.insert("dear".to_string(), ModelPricing { input_per_1m: 10.0, output_per_1m: 10.0 });
+        Pricer::new(m, Unpriced::Refuse)
+    }
+
+    // 1M prompt tokens + 1M output tokens, so a $1/1M model costs exactly $2.
+    const P: u64 = 1_000_000;
+    const O: u64 = 1_000_000;
+
+    fn hold(routing: &str, model: &str, votes: &[&str], n: usize) -> f64 {
+        let v: Vec<String> = votes.iter().map(|s| s.to_string()).collect();
+        hold_amount(&pricer(), routing, model, &v, n, P, O)
+    }
+
+    #[test]
+    fn a_single_call_holds_for_that_model() {
+        assert!((hold("single", "cheap", &[], 1) - 2.0).abs() < 1e-9);
+        assert!((hold("auto", "dear", &[], 1) - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn self_consistency_holds_for_every_sample() {
+        assert!((hold("self_consistency", "cheap", &[], 5) - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_vote_pattern_holds_for_each_leg_at_that_legs_own_price() {
+        // Scaling the base model's price by the leg count would hold $4; the legs
+        // actually bill $2 + $20.
+        assert!((hold("test_vote", "cheap", &["cheap", "dear"], 1) - 22.0).abs() < 1e-9);
+        assert!((hold("cascade_test", "cheap", &["cheap", "dear"], 1) - 22.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_unpriced_base_model_still_holds_for_its_priced_legs() {
+        // Regression: the base model often exists only to pick a provider. Pricing
+        // the hold against it yielded $0 — no hold at all — while the legs spent.
+        assert!((hold("test_vote", "router", &["dear", "dear"], 1) - 40.0).abs() < 1e-9);
+        assert_eq!(hold("single", "router", &[], 1), 0.0, "an unpriced single call is refused at dispatch, not held");
+    }
+
+    #[test]
+    fn a_race_holds_for_the_dearest_candidate_since_one_of_them_wins() {
+        assert!((hold("stream_race", "cheap", &["cheap", "dear"], 1) - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_empty_vote_list_falls_back_to_the_requested_model() {
+        assert!((hold("test_vote", "dear", &[], 1) - 20.0).abs() < 1e-9);
+    }
 }

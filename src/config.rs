@@ -67,6 +67,12 @@ pub struct LimitsConfig {
     /// `[[routes]]` profile or the top-level `routing` setting.
     #[serde(default)]
     pub allow_caller_routing: bool,
+    /// How many output tokens to assume when a request sets no `max_tokens`, for
+    /// the purpose of holding money against the cap while the request runs. Too
+    /// low and a burst of concurrent streams can still overshoot; too high and
+    /// requests that would have fit are refused.
+    #[serde(default = "default_assumed_max_output_tokens")]
+    pub assumed_max_output_tokens: u64,
 }
 
 impl Default for LimitsConfig {
@@ -75,6 +81,7 @@ impl Default for LimitsConfig {
             max_n_samples: default_max_n_samples(),
             max_vote_models: default_max_vote_models(),
             allow_caller_routing: false,
+            assumed_max_output_tokens: default_assumed_max_output_tokens(),
         }
     }
 }
@@ -84,6 +91,9 @@ fn default_max_n_samples() -> usize {
 }
 fn default_max_vote_models() -> usize {
     5
+}
+fn default_assumed_max_output_tokens() -> u64 {
+    2048
 }
 
 /// Routing patterns that issue more than one provider call per request.

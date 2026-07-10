@@ -13,6 +13,7 @@ WORK_DIR="$(mktemp -d)"
 UP_PORT=${UP_PORT:-11701}
 QUIET_PORT=${QUIET_PORT:-11702}
 LOCAL_PORT=${LOCAL_PORT:-11703}
+SLOW_PORT=${SLOW_PORT:-11704}
 STOKE_PORT=${STOKE_PORT:-8791}
 KEY_A="key-alpha"
 KEY_B="key-beta"
@@ -29,6 +30,7 @@ echo "==> starting counting mock providers (:$UP_PORT, :$QUIET_PORT no-usage, :$
 python3 "$REPO_DIR/scripts/mock_counting_provider.py" "$UP_PORT" >/dev/null 2>&1 &
 python3 "$REPO_DIR/scripts/mock_counting_provider.py" "$QUIET_PORT" --no-usage >/dev/null 2>&1 &
 python3 "$REPO_DIR/scripts/mock_counting_provider.py" "$LOCAL_PORT" >/dev/null 2>&1 &
+python3 "$REPO_DIR/scripts/mock_counting_provider.py" "$SLOW_PORT" --slow-ms 1200 >/dev/null 2>&1 &
 sleep 1
 
 calls() { curl -s "http://127.0.0.1:${1:-$UP_PORT}/count" | python3 -c 'import sys,json;print(json.load(sys.stdin)["calls"])'; }
@@ -242,6 +244,28 @@ grep -q '"stoke_cache":"hit"' "$WORK_DIR/resp.json" || fail "expected a cache hi
 
 stop_stoke
 
+# ── A fan-out is held for every leg it will dispatch ────────────────
+echo "==> assert: the hold covers the whole fan-out, not one leg of it"
+write_config '
+[limits]
+max_n_samples = 5
+allow_caller_routing = true'
+python3 - "$WORK_DIR/stoke.toml" <<'PYEOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+# A cap that fits one call but not five.
+s = s.replace('key = "key-alpha"\nbudget_usd = 100.0', 'key = "key-alpha"\nbudget_usd = 0.06', 1)
+p.write_text(s)
+PYEOF
+start_stoke
+BEFORE=$(calls)
+CODE=$(post "$KEY_A" '{"model":"priced-model","routing":"self_consistency","n_samples":5,"max_tokens":1000,"messages":[{"role":"user","content":"fan out"}]}')
+AFTER=$(calls)
+[ "$CODE" = "429" ] || fail "a 5-call fan-out on a 1-call cap: expected 429, got $CODE"
+[ "$((AFTER - BEFORE))" = "0" ] || fail "the refused fan-out still reached the provider $((AFTER - BEFORE)) times"
+grep -q "for this request exceeds" "$WORK_DIR/resp.json" || fail "the refusal did not explain the hold"
+stop_stoke
+
 # ── Clamped fan-out, billed in full ──────────────────────────────────
 echo "==> assert: an allowed fan-out is clamped, and every call it makes is billed"
 write_config '
@@ -296,5 +320,155 @@ assert abs(d - 0.030) < 1e-6, f'billed against the wrong model: expected \$0.030
   || fail "the streamed vote race was priced against the requested model, not the served one"
 
 stop_stoke
+
+# ── Concurrent streams are held against the cap ──────────────────────
+# A stream is charged when it ends. Without a hold on the money it is about to
+# cost, every concurrent request on a nearly-exhausted key is admitted against a
+# spend figure that ignores all the others still in flight.
+echo "==> assert: concurrent streams cannot overshoot the cap while none has been charged"
+cat > "$WORK_DIR/stoke.toml" <<EOF
+routing = "single"
+default_model = "slow-model"
+
+[server]
+host = "127.0.0.1"
+port = $STOKE_PORT
+
+[[providers]]
+name = "slow-metered"
+base_url = "http://127.0.0.1:$SLOW_PORT/v1"
+tier = "cloud"
+models = ["slow-model"]
+
+[[keys]]
+key = "$KEY_A"
+budget_usd = 0.05
+
+# max_tokens=1000 at \$25/1M output => each request holds ~\$0.025.
+[pricing.models.slow-model]
+input_per_1m = 5.0
+output_per_1m = 25.0
+EOF
+start_stoke
+
+BEFORE=$(calls "$SLOW_PORT")
+PIDS=""; RESULTS="$WORK_DIR/codes"; : > "$RESULTS"
+for i in 1 2 3; do
+  ( curl -s -N -o /dev/null -w '%{http_code}\n' --max-time 25 \
+      "http://127.0.0.1:$STOKE_PORT/v1/chat/completions" \
+      -H "Authorization: Bearer $KEY_A" -H 'Content-Type: application/json' \
+      -d "{\"model\":\"slow-model\",\"stream\":true,\"max_tokens\":1000,\"messages\":[{\"role\":\"user\",\"content\":\"unique $i\"}]}" >> "$RESULTS" ) &
+  PIDS="$PIDS $!"
+  sleep 0.15
+done
+for pid in $PIDS; do wait "$pid"; done
+sleep 1
+AFTER=$(calls "$SLOW_PORT")
+N=$((AFTER - BEFORE))
+REFUSED=$(grep -c '^429$' "$RESULTS" || true)
+
+[ "$REFUSED" -ge 1 ] || fail "three concurrent streams on a 2-stream cap: none was refused"
+python3 -c "
+import json, urllib.request
+r = urllib.request.Request('http://127.0.0.1:$STOKE_PORT/v1/budget')
+r.add_header('Authorization', 'Bearer $KEY_A')
+k = json.load(urllib.request.urlopen(r, timeout=5))['keys'][0]
+assert k['spend_usd'] <= k['limit_usd'] + 1e-9, f\"cap overshot: spent \${k['spend_usd']} against \${k['limit_usd']}\"
+assert abs(k['reserved_usd']) < 1e-9, f\"a hold leaked: \${k['reserved_usd']} still reserved\"
+" || fail "concurrent streams overshot the cap, or a hold leaked"
+[ "$N" -le 2 ] || fail "expected at most 2 streams to reach the provider, got $N"
+
+stop_stoke
+
+# ── A cache hit needs no hold ────────────────────────────────────────
+echo "==> assert: a free cache hit is served even when the cap could not fund a fresh call"
+cat > "$WORK_DIR/stoke.toml" <<EOF
+routing = "single"
+default_model = "priced-model"
+
+[server]
+host = "127.0.0.1"
+port = $STOKE_PORT
+
+[[providers]]
+name = "metered"
+base_url = "http://127.0.0.1:$UP_PORT/v1"
+tier = "cloud"
+models = ["priced-model"]
+
+[[keys]]
+key = "$KEY_A"
+budget_usd = 0.05
+
+[pricing.models.priced-model]
+input_per_1m = 5.0
+output_per_1m = 25.0
+EOF
+start_stoke
+BODY='{"model":"priced-model","temperature":0,"max_tokens":1000,"messages":[{"role":"user","content":"cache me"}]}'
+CODE=$(post "$KEY_A" "$BODY")
+[ "$CODE" = "200" ] || fail "priming the cache: expected 200, got $CODE"
+# Spend is now \$0.030 of a \$0.05 cap; a fresh call would need a \$0.025 hold and
+# could not fit. The identical request is a cache hit: no provider, no cost, no hold.
+BEFORE=$(calls)
+CODE=$(post "$KEY_A" "$BODY")
+AFTER=$(calls)
+[ "$CODE" = "200" ] || fail "a free cache hit was refused by the reservation gate (HTTP $CODE)"
+[ "$((AFTER - BEFORE))" = "0" ] || fail "the cache hit reached the provider"
+grep -q '"stoke_cache":"hit"' "$WORK_DIR/resp.json" || fail "expected a cache hit"
+stop_stoke
+
+# ── /v1/messages takes a hold too ────────────────────────────────────
+echo "==> assert: the Anthropic path holds money against the cap before forwarding"
+cat > "$WORK_DIR/stoke.toml" <<EOF
+[server]
+host = "127.0.0.1"
+port = $STOKE_PORT
+
+[[providers]]
+name = "anthropic"
+type = "anthropic"
+base_url = "http://127.0.0.1:$UP_PORT"
+tier = "cloud"
+
+[[keys]]
+key = "$KEY_A"
+budget_usd = 0.02
+
+# max_tokens=1000 => a \$0.025 hold, which does not fit under a \$0.02 cap.
+[pricing.models.claude-fixture]
+input_per_1m = 5.0
+output_per_1m = 25.0
+EOF
+start_stoke
+BEFORE=$(calls)
+CODE=$(curl -s -o "$WORK_DIR/resp.json" -w '%{http_code}' --max-time 20 \
+  "http://127.0.0.1:$STOKE_PORT/v1/messages" \
+  -H "Authorization: Bearer $KEY_A" -H 'Content-Type: application/json' \
+  -d '{"model":"claude-fixture","max_tokens":1000,"messages":[{"role":"user","content":"hi"}]}')
+AFTER=$(calls)
+[ "$CODE" = "429" ] || fail "/v1/messages over-cap request: expected 429, got $CODE"
+[ "$((AFTER - BEFORE))" = "0" ] || fail "/v1/messages forwarded a request it could not fund"
+grep -q "for this request exceeds" "$WORK_DIR/resp.json" || fail "/v1/messages refusal did not explain the hold"
+
+echo "==> assert: ...and a request that fits is forwarded and billed"
+BEFORE=$(calls)
+CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+  "http://127.0.0.1:$STOKE_PORT/v1/messages" \
+  -H "Authorization: Bearer $KEY_A" -H 'Content-Type: application/json' \
+  -d '{"model":"claude-fixture","max_tokens":100,"messages":[{"role":"user","content":"hi"}]}')
+AFTER=$(calls)
+[ "$CODE" = "200" ] || fail "/v1/messages within-cap request: expected 200, got $CODE"
+[ "$((AFTER - BEFORE))" = "1" ] || fail "expected exactly one upstream call"
+python3 -c "
+import json, urllib.request
+r = urllib.request.Request('http://127.0.0.1:$STOKE_PORT/v1/budget')
+r.add_header('Authorization', 'Bearer $KEY_A')
+k = json.load(urllib.request.urlopen(r, timeout=5))['keys'][0]
+assert abs(k['spend_usd'] - 0.030) < 1e-6, f\"expected \$0.030 billed, got \${k['spend_usd']}\"
+assert abs(k['reserved_usd']) < 1e-9, 'the hold leaked'
+" || fail "/v1/messages did not bill correctly, or leaked its hold"
+
+stop_stoke
 echo
-echo "SPEND FIREWALL SMOKE PASSED ✔ (pricing gate, streamed spend, served-model billing, boot validation, fan-out clamp, full billing, cache isolation)"
+echo "SPEND FIREWALL SMOKE PASSED ✔ (pricing gate, streamed spend, in-flight holds, served-model billing, boot validation, fan-out clamp, full billing, cache isolation)"

@@ -87,9 +87,25 @@ pub async fn messages(
         return (StatusCode::FORBIDDEN, reason).into_response();
     }
 
+    // Hold the money this request could cost, so concurrent requests on the same
+    // key are admitted against a figure that includes each other. Claude Code
+    // always sends max_tokens, which makes the hold exact rather than assumed.
+    let max_tokens = req
+        .get("max_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(state.config.limits.assumed_max_output_tokens);
+    let reservation = match state.budget.try_reserve(
+        &api_key,
+        crate::cost::global().max_cost(&model, (prompt_text.len() / 4) as u64, max_tokens),
+    ) {
+        Ok(r) => r,
+        Err(reason) => return (StatusCode::TOO_MANY_REQUESTS, reason).into_response(),
+    };
+
     if stream {
-        forward_stream(&state, &api_key, provider, &model, &req).await
+        forward_stream(&state, &api_key, provider, &model, &req, reservation).await
     } else {
+        let _hold = reservation; // released when this handler returns
         forward_once(&state, &api_key, provider, &model, &req).await
     }
 }
@@ -159,6 +175,9 @@ struct AnthropicStreamMeter {
     model: String,
     usage: crate::sse::UsageScanner,
     prompt_tokens_est: u64,
+    /// Released once the stream has been charged. The stream outlives the
+    /// handler, so the hold has to travel with it.
+    _reservation: Option<crate::budget::SpendReservation>,
 }
 
 impl AnthropicStreamMeter {
@@ -219,18 +238,21 @@ async fn forward_stream(
     provider: &ProviderConfig,
     model: &str,
     req: &Value,
+    reservation: Option<crate::budget::SpendReservation>,
 ) -> Response {
     let url = anthropic_url(provider);
     match anthropic_request(provider, &url, req).send().await {
         Ok(resp) if resp.status().is_success() => {
             // A free-tier Anthropic-compatible upstream (someone's local proxy)
             // costs nothing per token; do not pretend to bill it.
+            let mut reservation = reservation;
             let mut meter = (!crate::cost::is_free_tier(&provider.tier)).then(|| AnthropicStreamMeter {
                 budget: state.budget.clone(),
                 api_key: api_key.to_string(),
                 model: model.to_string(),
                 usage: crate::sse::UsageScanner::new(crate::sse::Wire::Anthropic),
                 prompt_tokens_est: (extract_prompt_text(req).len() / 4) as u64,
+                _reservation: reservation.take(),
             });
             let stream = resp.bytes_stream().map(move |chunk| {
                 if let (Ok(bytes), Some(m)) = (&chunk, meter.as_mut()) {

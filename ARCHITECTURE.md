@@ -56,13 +56,29 @@ returns `429` and the request never reaches a provider:
   every provider call the request issued, not just the one whose body is returned.
   Streamed responses accrue spend too: the bytes pass through untouched while a scanner
   reads the provider's usage report, and the key is charged when the stream ends or the
-  client disconnects (see [Streaming path](#5-streaming-path)). Because the cap is
-  checked at admission and a stream is charged at completion, the cap is a ceiling that
-  can be crossed once rather than a hard stop: a long response overshoots it, and
-  concurrent requests on one key are each admitted against a spend figure that does not
-  yet include the others still in flight. There is no reservation against in-flight
-  spend. `rate_limit_rpm` bounds the concurrency, and separate keys bound the blast
-  radius.
+  client disconnects (see [Streaming path](#5-streaming-path)).
+- **In-flight reservation.** A stream is charged only when it ends, so between admission
+  and completion its money is committed but invisible. Before dispatching, Stoke takes a
+  *hold* for the most the request could cost — the prompt's tokens plus `max_tokens`, or
+  `[limits] assumed_max_output_tokens` when the caller names none — and refuses the
+  request if the hold would carry the key past its cap. Both the admission check and
+  every other hold count it. A `SpendReservation` guard releases it on every exit path:
+  an early return, the end of the handler, the end of a stream, a client that hung up.
+  `/v1/budget` reports the outstanding total as `reserved_usd`.
+
+  The hold is priced against the models that will actually run, not the one the caller
+  named. A vote pattern bills each leg at its own model's price, and the requested model
+  is often only there to select a provider — pricing the hold against it would leave an
+  unpriced base model holding nothing at all while its legs spent real money. So
+  `self_consistency` holds one model's cost times its sample count; `test_vote` and
+  `cascade_test` hold the sum over their candidates; a race holds for the dearest of
+  them, since one of them wins.
+
+  A cache hit contacts no provider and costs nothing, so the cache is consulted before
+  any hold is taken. Because the hold otherwise assumes the worst case, a burst of
+  concurrent requests can be refused even though each would have used a fraction of what
+  it held. That is the price of a hard stop rather than a ceiling. An unpriced model and
+  an uncapped key take no hold at all.
 - **Rate limit.** Sliding 60-second window of request timestamps per key; over the
   key's configured requests-per-minute (`rate_limit_rpm` in the `[[keys]]` table),
   reject.

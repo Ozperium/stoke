@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
@@ -25,6 +25,38 @@ struct PromptEntry {
     timestamp: Instant,
 }
 
+/// A hold on a key's budget for the lifetime of one request. Releases itself.
+///
+/// Drop runs on every exit path — the happy one, an early `return`, a panic, a
+/// client that hung up mid-stream — which is the only way a hold can be trusted
+/// not to leak and slowly strangle a key.
+pub struct SpendReservation {
+    budget: Arc<BudgetGuard>,
+    key: String,
+    amount: f64,
+}
+
+impl std::fmt::Debug for SpendReservation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpendReservation")
+            .field("key", &&self.key[..8.min(self.key.len())])
+            .field("amount", &self.amount)
+            .finish()
+    }
+}
+
+impl SpendReservation {
+    pub fn amount(&self) -> f64 {
+        self.amount
+    }
+}
+
+impl Drop for SpendReservation {
+    fn drop(&mut self) {
+        self.budget.release(&self.key, self.amount);
+    }
+}
+
 pub struct BudgetGuard {
     /// API key -> cumulative spend in USD
     spend: RwLock<HashMap<String, f64>>,
@@ -33,6 +65,11 @@ pub struct BudgetGuard {
     /// provider that hides its usage must not thereby disable the cap — but
     /// surfaced separately so nobody mistakes an estimate for a measurement.
     estimated: RwLock<HashMap<String, f64>>,
+    /// Money committed to requests that are still running. A stream is charged
+    /// when it ends, which can be minutes after it was admitted; without a hold
+    /// on the money it is about to cost, every concurrent request on a key is
+    /// admitted against a spend figure that ignores all the others in flight.
+    reserved: RwLock<HashMap<String, f64>>,
     /// API key -> budget limit in USD (0 = unlimited)
     limits: RwLock<HashMap<String, f64>>,
     /// API key -> list of request timestamps (for rate limiting)
@@ -65,6 +102,7 @@ impl BudgetGuard {
         Self {
             spend: RwLock::new(HashMap::new()),
             estimated: RwLock::new(HashMap::new()),
+            reserved: RwLock::new(HashMap::new()),
             limits: RwLock::new(HashMap::new()),
             request_times: RwLock::new(HashMap::new()),
             rate_limits: RwLock::new(HashMap::new()),
@@ -179,12 +217,15 @@ impl BudgetGuard {
             let limits = self.limits.read().unwrap();
             let limit = limits.get(key).copied().unwrap_or(0.0);
             if limit > 0.0 {
+                // Locks are always taken limits -> spend -> reserved, everywhere.
                 let spend = self.spend.read().unwrap();
-                let current = spend.get(key).copied().unwrap_or(0.0);
-                if current >= limit {
+                let reserved = self.reserved.read().unwrap();
+                let committed = spend.get(key).copied().unwrap_or(0.0)
+                    + reserved.get(key).copied().unwrap_or(0.0);
+                if committed >= limit {
                     return Err(format!(
                         "Budget exceeded: ${:.4}/${:.4} for key {}",
-                        current,
+                        committed,
                         limit,
                         &key[..8.min(key.len())]
                     ));
@@ -320,6 +361,73 @@ impl BudgetGuard {
         *entry += cost_usd;
     }
 
+    /// Take a hold on the money a request is about to cost, refusing if the hold
+    /// would carry the key past its cap.
+    ///
+    /// This is the difference between a ceiling and a hard stop. `check_with_prompt`
+    /// admits a request against what has already been *charged*; a stream is charged
+    /// only when it ends. Between those two moments the money is committed but
+    /// invisible, so ten concurrent requests on a nearly-exhausted key would all be
+    /// admitted. The returned guard releases the hold when it is dropped — including
+    /// when the handler returns early, the stream ends, or the client disconnects.
+    ///
+    /// A zero amount takes no hold: a model with no configured price cannot be
+    /// reserved against, and free-tier compute has nothing to reserve.
+    pub fn try_reserve(
+        self: &Arc<Self>,
+        key: &str,
+        amount: f64,
+    ) -> Result<Option<SpendReservation>, String> {
+        if !(amount > 0.0) {
+            return Ok(None);
+        }
+        // Lock order is limits -> spend -> reserved, the same as check_with_prompt.
+        let limit = self.limits.read().unwrap().get(key).copied().unwrap_or(0.0);
+        if limit <= 0.0 {
+            return Ok(None); // unlimited key: nothing to protect
+        }
+        // Hold the spend guard across the reserved write. Reading `spent` into a
+        // temporary first would let two concurrent reserves each see the same stale
+        // figure, both fit, and together cross the cap. Lock order is preserved:
+        // spend before reserved, as everywhere else.
+        let spend = self.spend.read().unwrap();
+        let mut reserved = self.reserved.write().unwrap();
+        let spent = spend.get(key).copied().unwrap_or(0.0);
+        let held = reserved.entry(key.to_string()).or_insert(0.0);
+        if spent + *held + amount > limit {
+            return Err(format!(
+                "Budget exceeded: ${:.4} spent + ${:.4} in flight + ${:.4} for this request exceeds ${:.4} for key {}",
+                spent,
+                *held,
+                amount,
+                limit,
+                &key[..8.min(key.len())]
+            ));
+        }
+        *held += amount;
+        Ok(Some(SpendReservation {
+            budget: Arc::clone(self),
+            key: key.to_string(),
+            amount,
+        }))
+    }
+
+    /// Give back a hold. Called by `SpendReservation::drop`.
+    fn release(&self, key: &str, amount: f64) {
+        let mut reserved = self.reserved.write().unwrap();
+        if let Some(held) = reserved.get_mut(key) {
+            *held = (*held - amount).max(0.0);
+            if *held == 0.0 {
+                reserved.remove(key);
+            }
+        }
+    }
+
+    /// Money currently committed to this key's in-flight requests.
+    pub fn reserved_spend(&self, key: &str) -> f64 {
+        self.reserved.read().unwrap().get(key).copied().unwrap_or(0.0)
+    }
+
     /// Record spend Stoke had to estimate: a metered provider streamed a
     /// response and never reported its token usage. It counts against the cap,
     /// and it is also tallied separately so `/v1/budget` can admit it is a guess.
@@ -340,10 +448,14 @@ impl BudgetGuard {
     }
 
     /// Get stats for all keys.
-    pub fn stats(&self) -> Vec<(String, f64, f64, u32, f64)> {
-        let spend = self.spend.read().unwrap();
-        let estimated = self.estimated.read().unwrap();
+    pub fn stats(&self) -> Vec<(String, f64, f64, u32, f64, f64)> {
+        // Same order as everywhere else: limits -> spend -> reserved. These are all
+        // read locks so they cannot deadlock each other today, but a writer queued
+        // between two of them turns an inconsistent order into a real hazard.
         let limits = self.limits.read().unwrap();
+        let spend = self.spend.read().unwrap();
+        let reserved = self.reserved.read().unwrap();
+        let estimated = self.estimated.read().unwrap();
         let rate_limits = self.rate_limits.read().unwrap();
         let times = self.request_times.read().unwrap();
 
@@ -361,7 +473,8 @@ impl BudgetGuard {
                 let r = rate_limits.get(k).copied().unwrap_or(0);
                 let recent = times.get(k).map(|v| v.len() as u32).unwrap_or(0);
                 let e = estimated.get(k).copied().unwrap_or(0.0);
-                (k.clone(), s, l, recent, e)
+                let held = reserved.get(k).copied().unwrap_or(0.0);
+                (k.clone(), s, l, recent, e, held)
             })
             .collect()
     }
@@ -607,5 +720,84 @@ mod tests {
 
         // Different lengths -> 0.0
         assert_eq!(cosine_similarity(&[1.0], &[1.0, 2.0]), 0.0);
+    }
+}
+#[cfg(test)]
+mod reservation_tests {
+    use super::*;
+
+    fn guard_with_cap(key: &str, cap: f64) -> Arc<BudgetGuard> {
+        let g = Arc::new(BudgetGuard::new());
+        g.set_budget(key, cap);
+        g
+    }
+
+    #[test]
+    fn a_hold_is_refused_when_it_would_cross_the_cap() {
+        let g = guard_with_cap("k", 0.10);
+        let _first = g.try_reserve("k", 0.06).unwrap().expect("fits");
+        // 0.06 held + 0.06 more = 0.12 > 0.10
+        let err = g.try_reserve("k", 0.06).unwrap_err();
+        assert!(err.contains("in flight"), "the refusal must explain what is held: {err}");
+        assert_eq!(g.reserved_spend("k"), 0.06, "a refused hold must not be taken");
+    }
+
+    #[test]
+    fn a_hold_is_released_when_its_guard_drops() {
+        let g = guard_with_cap("k", 0.10);
+        {
+            let _hold = g.try_reserve("k", 0.09).unwrap().expect("fits");
+            assert_eq!(g.reserved_spend("k"), 0.09);
+            assert!(g.try_reserve("k", 0.05).is_err(), "no room while held");
+        }
+        assert_eq!(g.reserved_spend("k"), 0.0, "the hold must not leak");
+        assert!(g.try_reserve("k", 0.05).is_ok(), "room again once released");
+    }
+
+    #[test]
+    fn holds_stack_and_release_independently() {
+        let g = guard_with_cap("k", 1.0);
+        let a = g.try_reserve("k", 0.30).unwrap().unwrap();
+        let b = g.try_reserve("k", 0.40).unwrap().unwrap();
+        assert!((g.reserved_spend("k") - 0.70).abs() < 1e-9);
+        drop(a);
+        assert!((g.reserved_spend("k") - 0.40).abs() < 1e-9);
+        drop(b);
+        assert_eq!(g.reserved_spend("k"), 0.0);
+    }
+
+    #[test]
+    fn spend_and_holds_are_counted_together() {
+        let g = guard_with_cap("k", 0.10);
+        g.record_spend("k", 0.06);
+        assert!(g.try_reserve("k", 0.05).is_err(), "0.06 spent + 0.05 held > 0.10");
+        assert!(g.try_reserve("k", 0.04).is_ok(), "0.06 + 0.04 == 0.10 exactly");
+    }
+
+    #[test]
+    fn an_uncapped_key_is_never_held() {
+        // Nothing to protect, so nothing to reserve — and no refusals.
+        let g = Arc::new(BudgetGuard::new());
+        assert!(g.try_reserve("no-cap", 999.0).unwrap().is_none());
+        assert_eq!(g.reserved_spend("no-cap"), 0.0);
+    }
+
+    #[test]
+    fn a_zero_cost_request_takes_no_hold() {
+        // An unpriced model, or free-tier compute: there is nothing to reserve.
+        let g = guard_with_cap("k", 0.10);
+        assert!(g.try_reserve("k", 0.0).unwrap().is_none());
+        assert_eq!(g.reserved_spend("k"), 0.0);
+    }
+
+    #[tokio::test]
+    async fn admission_sees_money_held_by_requests_still_in_flight() {
+        // The whole point: a stream is charged when it ends, so without the hold
+        // a second request is admitted against a spend figure of $0.
+        let g = guard_with_cap("k", 0.10);
+        let _in_flight = g.try_reserve("k", 0.10).unwrap().expect("fits exactly");
+        let verdict = g.check_with_prompt("k", "hash", "prompt").await;
+        assert!(verdict.is_err(), "admission must see the in-flight hold");
+        assert!(verdict.unwrap_err().contains("Budget exceeded"));
     }
 }

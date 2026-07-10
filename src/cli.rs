@@ -419,11 +419,14 @@ tier = "local"
 # input_per_1m = 3.00
 # output_per_1m = 15.00
 
-# Ceilings on how far one request may fan out into billed provider calls.
+# Ceilings on how far one request may fan out into billed provider calls, and
+# how much output to assume when holding money for a request that names no
+# max_tokens (a streamed request is charged only once it ends).
 # [limits]
 # max_n_samples = 5
 # max_vote_models = 5
 # allow_caller_routing = false
+# assumed_max_output_tokens = 2048
 
 # Built-in plugins (uncomment to enable)
 # [builtins.prompt_harness]

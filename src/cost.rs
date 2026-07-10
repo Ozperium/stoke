@@ -164,6 +164,25 @@ impl Pricer {
         }
     }
 
+    /// The most this request could cost, for holding against the cap before it runs.
+    ///
+    /// Output length is the unknown. `max_tokens` is the caller's own promise not
+    /// to exceed it, so use it when given. Otherwise fall back to the operator's
+    /// assumption: guessing too low turns the hard cap back into a ceiling, and
+    /// guessing too high refuses requests that would have fit.
+    ///
+    /// Zero for a model with no configured price — there is nothing to reserve, and
+    /// the dispatch gate refuses it before it can be served anyway.
+    pub fn max_cost(&self, model: &str, prompt_tokens: u64, max_output_tokens: u64) -> f64 {
+        self.prices
+            .get(model)
+            .map(|p| {
+                (prompt_tokens as f64 * p.input_per_1m / 1_000_000.0)
+                    + (max_output_tokens as f64 * p.output_per_1m / 1_000_000.0)
+            })
+            .unwrap_or(0.0)
+    }
+
     pub fn get_pricing(&self, model: &str) -> Option<&ModelPricing> {
         self.prices.get(model)
     }

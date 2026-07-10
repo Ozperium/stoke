@@ -142,6 +142,13 @@ tier = "local"
 # max_n_samples = 5           # cap on self_consistency samples
 # max_vote_models = 5         # cap on the length of a voting/cascade list
 # allow_caller_routing = false  # may a caller pick a multi-call pattern in the body?
+#
+# A streamed request is charged when it ends, so before dispatching one Stoke
+# holds the most it could cost against the key's budget_usd. When the caller
+# names no max_tokens, assume this many output tokens for that hold. Lower it
+# and a burst of concurrent streams can overshoot; raise it and requests that
+# would have fit get refused.
+# assumed_max_output_tokens = 2048
 
 # ─── Per-key enforcement ─────────────────────────────────────────
 # [[keys]]
