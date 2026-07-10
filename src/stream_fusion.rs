@@ -78,7 +78,9 @@ pub async fn stream_race(
             provider.base_url.trim_end_matches('/')
         );
         let api_key = provider.resolve_api_key();
-        let body = body.clone();
+        // Metered leg: ask it to report usage so the stream can be billed from a
+        // measurement rather than an estimate.
+        let body = crate::sse::request_stream_usage(body, &provider.tier, &provider.r#type);
         let provider_name = provider.name.clone();
 
         tracing::info!("stream_race: falling back to paid provider: {}", provider_name);
@@ -257,6 +259,10 @@ pub async fn stream_race_models(
     };
     let models: &[String] = &models;
 
+    // Every model here is served by the same provider, so one decision covers
+    // them all: if it charges, ask it to report usage.
+    let body = &crate::sse::request_stream_usage(body, &provider.tier, &provider.r#type);
+
     if models.len() == 1 {
         let url = format!(
             "{}/chat/completions",
@@ -284,6 +290,54 @@ pub async fn stream_race_models(
             "Provider {}: {} {}",
             provider.name, status, text
         ));
+    }
+
+    // Racing N models means the provider generates N answers and you use one. On
+    // your own hardware that buys tail latency for the price of some electricity.
+    // On a metered provider it buys the same latency for N times the money — and
+    // only the winning stream gets a meter, so the losers' tokens would be billed
+    // by the provider and invisible to the cap. `stream_race` already refuses to
+    // race paid providers for exactly this reason; do the same here.
+    if !crate::cost::is_free_tier(&provider.tier) {
+        tracing::info!(
+            "stream_race_models: {} is metered — trying {} models in order rather than racing",
+            provider.name,
+            models.len()
+        );
+        let url = format!("{}/chat/completions", provider.base_url.trim_end_matches('/'));
+        let mut last_err = String::new();
+        for m in models {
+            let mut leg = body.clone();
+            if let Some(obj) = leg.as_object_mut() {
+                obj.insert("model".into(), Value::String(m.clone()));
+            }
+            match (&*SHARED_CLIENT)
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", provider.resolve_api_key()))
+                .header("Content-Type", "application/json")
+                .json(&leg)
+                .send()
+                .await
+            {
+                Ok(r) if r.status().is_success() => {
+                    return Ok((provider.name.clone(), m.clone(), r));
+                }
+                Ok(r) => {
+                    let status = r.status();
+                    last_err = format!("Provider {} model {}: {}", provider.name, m, status);
+                    tracing::warn!("{}", last_err);
+                }
+                Err(e) => {
+                    last_err = format!("Provider {} model {}: {}", provider.name, m, e);
+                    tracing::warn!("{}", last_err);
+                }
+            }
+        }
+        return Err(if last_err.is_empty() {
+            "All models failed in stream_race".to_string()
+        } else {
+            last_err
+        });
     }
 
     let (tx, mut rx) =

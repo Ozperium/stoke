@@ -19,10 +19,10 @@ Be clear about the scope: **this forwards to Anthropic. It does not run Claude C
 ## Install Stoke
 
 ```bash
-curl -sSf https://stokegate.com/install | sh -s -- --version nightly
+curl -sSf https://stokegate.com/install | sh
 ```
 
-This pulls a checksum-verified static binary for macOS (arm64/x64) or Linux (x64/arm64). There is no stable tag yet — a bare `| sh` resolves `latest` and compiles from source, so keep the `--version nightly` flag. It installs two binaries: `stoke` (the server) and `stoke-cli`.
+This pulls a checksum-verified static binary for macOS (arm64/x64) or Linux (x64/arm64) and installs two binaries: `stoke` (the server) and `stoke-cli`.
 
 ## Configure the gateway
 
@@ -143,12 +143,12 @@ done
 
 The fifth call's body reads: `Loop detected: key cc-cap-k sent 5 similar requests within 60s. Blocked for 120s. Check your agent's retry logic — it may be stuck.` That is a stuck-retry storm — the most common way agents burn credits — stopped at the gateway.
 
-Inspect the per-key ledger any time. `spend_usd` accrues only from the priced, non-streaming calls above, so expect a small figure; your exact numbers will differ:
+Inspect the per-key ledger any time. `spend_usd` accrues from every priced call, streamed or not; `estimated_usd` is the share of it Stoke had to guess because a provider reported no usage. Your exact numbers will differ:
 
 ```bash
 curl -sS http://127.0.0.1:8787/v1/budget -H "Authorization: Bearer cc-cap-key"
 # {"auth_enabled":true,"keys":[{"key":"cc-cap-k","spend_usd":0.0007,
-#   "limit_usd":20.0,"recent_requests":6}], ... }
+#   "limit_usd":20.0,"recent_requests":6,"estimated_usd":0.0}], ... }
 ```
 
 ## What this doesn't do
@@ -157,7 +157,8 @@ Read this section before you trust the dollar figure.
 
 - **It forwards to Anthropic; it does not run Claude Code on local models.** Your traffic still goes to Claude and still bills Anthropic. Stoke controls *whether* a call goes out, not *where* it runs.
 - **Subscriptions can't be dollar-capped.** If you use Claude Code on a Claude Max or Pro subscription rather than a metered API key, there is no per-request dollar price to cap. Stoke can still rate-limit and loop-kill that traffic — it just can't put a USD ceiling on it. Hard `budget_usd` caps apply only to metered API keys.
-- **Streamed responses don't yet accrue spend.** Spend records from non-streaming responses only; streamed-request cost accounting isn't implemented. Claude Code streams by default, so treat the loop breaker and `rate_limit_rpm` — which enforce on *all* traffic, streaming included, alongside auth — as your primary guardrails, and `budget_usd` as a hard backstop for the non-streaming, priced portion.
+- **A stream is billed after it finishes, not while it runs.** Streamed responses do accrue spend — Stoke reads the usage Anthropic reports as the stream passes and charges the key when the stream ends, including when Claude Code disconnects mid-response. Two consequences follow, and both mean `budget_usd` is a ceiling you can cross once, not a hard stop mid-answer. A single very long response can overshoot it. And because the cap is checked at admission, streams that are already in flight have not been charged yet: if you run several agents on one key concurrently, each is admitted against a spend figure that does not yet include the others. Overshoot is bounded by the cost of the requests in flight. If you need a hard ceiling, keep `rate_limit_rpm` low, or give each agent its own key.
+- **An estimate is not a measurement.** If a metered provider reports no usage at all, Stoke bills an estimate rather than $0, and reports that share as `estimated_usd` in `/v1/budget`. Treat it as a guess: it is derived from the prompt's length and the number of frames the provider streamed.
 - **You supply the prices, and they can go stale.** Stoke meters a response against the `[pricing.models]` numbers in your config. It ships none and infers none, so a model you haven't priced is refused rather than served for free — but nothing tells you when a provider changes its rates. Check what the gateway believes:
 
 ```bash

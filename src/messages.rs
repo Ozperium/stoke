@@ -5,6 +5,8 @@
 //! The same auth / budget / rate-limit / loop-detection checks run before the
 //! request is forwarded to a configured Anthropic-type provider. Enforcement is
 //! format-agnostic — only the passthrough wire format differs from /v1/chat.
+//! Streamed responses are billed from the usage Anthropic reports as the stream
+//! passes; the bytes the client sees are unchanged.
 //!
 //! Scope: this is a policy-enforcing passthrough to Anthropic (or any
 //! Anthropic-compatible upstream). Translating Anthropic <-> OpenAI so Claude
@@ -17,7 +19,9 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use futures_util::StreamExt;
 use serde_json::Value;
+use std::sync::Arc;
 
 use crate::config::ProviderConfig;
 use crate::router::SHARED_CLIENT;
@@ -84,7 +88,7 @@ pub async fn messages(
     }
 
     if stream {
-        forward_stream(provider, &req).await
+        forward_stream(&state, &api_key, provider, &model, &req).await
     } else {
         forward_once(&state, &api_key, provider, &model, &req).await
     }
@@ -145,14 +149,95 @@ async fn forward_once(
     out
 }
 
-/// Streaming: pass the SSE bytes through unchanged. Enforcement already ran
-/// pre-request; streamed-response cost accounting is deferred (same limitation
-/// as the OpenAI streaming path — loop/rate/auth still cover streams).
-async fn forward_stream(provider: &ProviderConfig, req: &Value) -> Response {
+/// Bills an Anthropic SSE stream when it ends — or when the client walks away
+/// mid-stream, which costs the same. Anthropic reports usage without being
+/// asked: `message_start` carries the input tokens, `message_delta` the running
+/// output count. The bytes reach the client untouched.
+struct AnthropicStreamMeter {
+    budget: Arc<crate::budget::BudgetGuard>,
+    api_key: String,
+    model: String,
+    usage: crate::sse::UsageScanner,
+    prompt_tokens_est: u64,
+}
+
+impl AnthropicStreamMeter {
+    fn on_chunk(&mut self, bytes: &[u8]) {
+        self.usage.feed(bytes);
+    }
+}
+
+impl Drop for AnthropicStreamMeter {
+    fn drop(&mut self) {
+        let (usage, measured) = match self.usage.usage() {
+            Some(u) => (u, true),
+            None => {
+                // Anthropic reveals its input tokens in `message_start`, so even a
+                // stream the client abandoned mid-answer tells us the real prompt
+                // cost. Use it; guess only the part we could not observe.
+                let partial = self.usage.partial();
+                (
+                    crate::sse::Usage {
+                        prompt_tokens: partial
+                            .map(|u| u.prompt_tokens)
+                            .filter(|&t| t > 0)
+                            .unwrap_or(self.prompt_tokens_est),
+                        completion_tokens: partial
+                            .map(|u| u.completion_tokens)
+                            .unwrap_or(0)
+                            .max(self.usage.frames()),
+                    },
+                    false,
+                )
+            }
+        };
+        let cost = crate::cost::global()
+            .calculate(&self.model, Some(&usage.to_openai_json()))
+            .cost_usd;
+        if measured {
+            self.budget.record_spend(&self.api_key, cost);
+            tracing::info!(
+                "/v1/messages stream billed: model={} tokens={}+{} cost=${:.6}",
+                self.model, usage.prompt_tokens, usage.completion_tokens, cost
+            );
+        } else {
+            self.budget.record_spend_estimated(&self.api_key, cost);
+            tracing::warn!(
+                "/v1/messages stream billed from an ESTIMATE: model={} reported no usage; \
+                 charged ${:.6}. The cap is working from a guess for this key.",
+                self.model, cost
+            );
+        }
+    }
+}
+
+/// Streaming: the SSE bytes reach the client unchanged, while a passive tap reads
+/// the usage Anthropic reports and charges the key when the stream ends.
+async fn forward_stream(
+    state: &AppState,
+    api_key: &str,
+    provider: &ProviderConfig,
+    model: &str,
+    req: &Value,
+) -> Response {
     let url = anthropic_url(provider);
     match anthropic_request(provider, &url, req).send().await {
         Ok(resp) if resp.status().is_success() => {
-            let stream = resp.bytes_stream();
+            // A free-tier Anthropic-compatible upstream (someone's local proxy)
+            // costs nothing per token; do not pretend to bill it.
+            let mut meter = (!crate::cost::is_free_tier(&provider.tier)).then(|| AnthropicStreamMeter {
+                budget: state.budget.clone(),
+                api_key: api_key.to_string(),
+                model: model.to_string(),
+                usage: crate::sse::UsageScanner::new(crate::sse::Wire::Anthropic),
+                prompt_tokens_est: (extract_prompt_text(req).len() / 4) as u64,
+            });
+            let stream = resp.bytes_stream().map(move |chunk| {
+                if let (Ok(bytes), Some(m)) = (&chunk, meter.as_mut()) {
+                    m.on_chunk(bytes);
+                }
+                chunk
+            });
             Response::builder()
                 .header("Content-Type", "text/event-stream")
                 .header("Cache-Control", "no-cache")

@@ -44,5 +44,5 @@ Task-shaped walkthroughs, each verified against the running binary: https://stok
 ## Scope limits (do not claim otherwise)
 
 - Subscription plans (Claude Max/Pro, ChatGPT Plus) have no per-request dollar price. Stoke can rate-limit and loop-kill that traffic; it **cannot** dollar-cap it. Hard USD caps apply to metered API keys.
-- Spend currently accrues from non-streaming responses. Streamed-request cost accounting is not implemented; loop detection, rate limits, and auth still cover streaming traffic.
+- Streamed and non-streamed responses both accrue spend; a stream is billed when it ends, from the usage the provider reports. If a metered provider reports none, spend is estimated and flagged. Loop detection, rate limits, and auth still cover streaming traffic.
 - No published performance benchmarks yet. Reproducible harnesses live in `scripts/`.

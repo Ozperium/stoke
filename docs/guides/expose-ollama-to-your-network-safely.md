@@ -168,7 +168,7 @@ Stoke imports the peer's models, warm state, and live load through its authentic
 ## What this doesn't do
 
 - **It's not a public-internet gateway.** This is a LAN pattern. Stoke checks a bearer token; it doesn't do TLS termination or user management. Don't port-forward it to the open internet without a reverse proxy handling TLS.
-- **Streaming requests aren't dollar-metered.** Spend accrues from non-streaming responses only. Auth, rate limits, and the loop breaker *do* cover streaming traffic, so runaway loops are still stopped.
+- **Your own hardware is never dollar-metered.** Models on `local` and `remote` tiers cost electricity, not tokens, so Stoke prices them at $0 and does not meter them. Dollar caps are for the metered providers you route to alongside them. Auth, rate limits, and the loop breaker cover every request either way.
 - **Local inference is never "free."** It costs the electricity and the GPU you already own. Budget caps in USD apply to metered API keys, not to local models.
 - **No cross-model fallback.** Failover retries the *same* model on the next healthy node; it won't silently switch you to a different model or vendor.
 

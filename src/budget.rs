@@ -28,6 +28,11 @@ struct PromptEntry {
 pub struct BudgetGuard {
     /// API key -> cumulative spend in USD
     spend: RwLock<HashMap<String, f64>>,
+    /// The share of `spend` that Stoke estimated rather than read from a
+    /// provider's usage report. Counted against the cap all the same — a
+    /// provider that hides its usage must not thereby disable the cap — but
+    /// surfaced separately so nobody mistakes an estimate for a measurement.
+    estimated: RwLock<HashMap<String, f64>>,
     /// API key -> budget limit in USD (0 = unlimited)
     limits: RwLock<HashMap<String, f64>>,
     /// API key -> list of request timestamps (for rate limiting)
@@ -59,6 +64,7 @@ impl BudgetGuard {
     pub fn new() -> Self {
         Self {
             spend: RwLock::new(HashMap::new()),
+            estimated: RwLock::new(HashMap::new()),
             limits: RwLock::new(HashMap::new()),
             request_times: RwLock::new(HashMap::new()),
             rate_limits: RwLock::new(HashMap::new()),
@@ -314,14 +320,29 @@ impl BudgetGuard {
         *entry += cost_usd;
     }
 
+    /// Record spend Stoke had to estimate: a metered provider streamed a
+    /// response and never reported its token usage. It counts against the cap,
+    /// and it is also tallied separately so `/v1/budget` can admit it is a guess.
+    pub fn record_spend_estimated(&self, key: &str, cost_usd: f64) {
+        self.record_spend(key, cost_usd);
+        let mut est = self.estimated.write().unwrap();
+        *est.entry(key.to_string()).or_insert(0.0) += cost_usd;
+    }
+
+    /// Of a key's cumulative spend, how much was estimated rather than reported.
+    pub fn estimated_spend(&self, key: &str) -> f64 {
+        self.estimated.read().unwrap().get(key).copied().unwrap_or(0.0)
+    }
+
     /// Get current spend for a key.
     pub fn get_spend(&self, key: &str) -> f64 {
         self.spend.read().unwrap().get(key).copied().unwrap_or(0.0)
     }
 
     /// Get stats for all keys.
-    pub fn stats(&self) -> Vec<(String, f64, f64, u32)> {
+    pub fn stats(&self) -> Vec<(String, f64, f64, u32, f64)> {
         let spend = self.spend.read().unwrap();
+        let estimated = self.estimated.read().unwrap();
         let limits = self.limits.read().unwrap();
         let rate_limits = self.rate_limits.read().unwrap();
         let times = self.request_times.read().unwrap();
@@ -339,7 +360,8 @@ impl BudgetGuard {
                 let l = limits.get(k).copied().unwrap_or(0.0);
                 let r = rate_limits.get(k).copied().unwrap_or(0);
                 let recent = times.get(k).map(|v| v.len() as u32).unwrap_or(0);
-                (k.clone(), s, l, recent)
+                let e = estimated.get(k).copied().unwrap_or(0.0);
+                (k.clone(), s, l, recent, e)
             })
             .collect()
     }

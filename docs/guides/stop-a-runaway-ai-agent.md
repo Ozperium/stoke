@@ -117,7 +117,7 @@ HTTP 429
 
 The format is `current/limit for key <first-8-chars>`. No provider call happens once you are over — the request dies at the gate, so an over-budget key cannot spend one more cent.
 
-One honesty note that matters here: spend currently accrues from **non-streaming** responses only. Streamed-request cost accounting is not implemented yet. Auth, rate limiting, and the loop breaker all cover streaming traffic — so a streaming agent can still be loop-killed and rate-limited — but a hard USD cap only bites on non-streaming calls against a metered API key. Subscription traffic (Claude Max, ChatGPT Plus) has no per-request price, so it can be rate-limited and loop-killed but not dollar-capped.
+One honesty note that matters here: the budget cap is checked *before* a request, so the call that crosses your limit is the last one served — the next is refused. Streamed responses do accrue spend (Stoke reads the provider's usage report as the stream passes), but a single long response can still overshoot the cap. The loop breaker and rate limit, which enforce before any provider is contacted, are what stop a runaway agent in the moment.
 
 ## Read spend and the receipts ledger: GET /v1/budget
 
@@ -173,7 +173,7 @@ Seeing `401` on an unauthenticated call and `429 Loop detected` on the fifth rep
 
 ## What this doesn't do
 
-- **No dollar cap on streaming or subscription traffic.** Spend accrues from non-streaming responses only; hard USD caps need a metered API key. Loop and rate limits still cover everything.
+- **A subscription cannot be dollar-capped.** Streamed and non-streamed traffic both accrue spend now, but a hard USD cap needs a metered API key with a per-token price — there is no per-request price on a Claude Max or ChatGPT subscription. Loop and rate limits still cover everything.
 - **Loop thresholds are global, not per-key.** The 5 / 60s / 120s values are constants today; per-key tuning is on the roadmap.
 - **No cross-model fallback.** Failover retries the *same* model on the next healthy node. Automatic "fall back to a cheaper vendor" chains are not implemented.
 - **`/v1/messages` forwards to Anthropic.** It is an enforced passthrough to a configured Anthropic upstream, not a way to run Claude on local GPUs.

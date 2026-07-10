@@ -51,6 +51,12 @@ pub async fn stream_with_failover(
 
         tracing::info!("stream_with_failover: trying provider {} ({})", provider.name, i);
 
+        // A streamed response is forwarded byte-for-byte, so the only way to know
+        // what it cost is to have the provider say so. Ask — but only where the
+        // answer changes something, so a local Ollama stream stays exactly as it
+        // was for the client reading it.
+        let outgoing = crate::sse::request_stream_usage(body, &provider.tier, &provider.r#type);
+
         let guard = registry.begin(&provider.name);
 
         match (&*crate::router::SHARED_CLIENT)
@@ -58,7 +64,7 @@ pub async fn stream_with_failover(
             .header("Authorization", format!("Bearer {}", provider.resolve_api_key()))
             .header("Content-Type", "application/json")
             .header("x-stoke-hop", hop.saturating_add(1).to_string())
-            .json(body)
+            .json(&outgoing)
             .send()
             .await
         {

@@ -11,6 +11,8 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WORK_DIR="$(mktemp -d)"
 UP_PORT=${UP_PORT:-11701}
+QUIET_PORT=${QUIET_PORT:-11702}
+LOCAL_PORT=${LOCAL_PORT:-11703}
 STOKE_PORT=${STOKE_PORT:-8791}
 KEY_A="key-alpha"
 KEY_B="key-beta"
@@ -23,11 +25,28 @@ fail() { echo "FAIL: $1"; echo "--- stoke.log ---"; tail -25 "$WORK_DIR/stoke.lo
 echo "==> building stoke"
 ( cd "$REPO_DIR" && cargo build --bin stoke >/dev/null 2>&1 ) || fail "build"
 
-echo "==> starting counting mock provider on :$UP_PORT"
+echo "==> starting counting mock providers (:$UP_PORT, :$QUIET_PORT no-usage, :$LOCAL_PORT free)"
 python3 "$REPO_DIR/scripts/mock_counting_provider.py" "$UP_PORT" >/dev/null 2>&1 &
+python3 "$REPO_DIR/scripts/mock_counting_provider.py" "$QUIET_PORT" --no-usage >/dev/null 2>&1 &
+python3 "$REPO_DIR/scripts/mock_counting_provider.py" "$LOCAL_PORT" >/dev/null 2>&1 &
 sleep 1
 
-calls() { curl -s "http://127.0.0.1:$UP_PORT/count" | python3 -c 'import sys,json;print(json.load(sys.stdin)["calls"])'; }
+calls() { curl -s "http://127.0.0.1:${1:-$UP_PORT}/count" | python3 -c 'import sys,json;print(json.load(sys.stdin)["calls"])'; }
+stream_opts() { curl -s "http://127.0.0.1:${1}/count" | python3 -c 'import sys,json;print(json.load(sys.stdin)["stream_options_seen"])'; }
+estimated() {
+  curl -s "http://127.0.0.1:$STOKE_PORT/v1/budget" -H "Authorization: Bearer $1" \
+    | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+m = [k for k in d['keys'] if k['key'].startswith('$1'[:8])]
+print(m[0]['estimated_usd'] if m else 0.0)"
+}
+stream() {
+  curl -s -N -o /dev/null -w '%{http_code}' --max-time 20 \
+    "http://127.0.0.1:$STOKE_PORT/v1/chat/completions" \
+    -H "Authorization: Bearer $1" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$2\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"stream me\"}]}"
+}
 spend() {
   curl -s "http://127.0.0.1:$STOKE_PORT/v1/budget" -H "Authorization: Bearer $1" \
     | python3 -c "
@@ -63,6 +82,20 @@ base_url = "http://127.0.0.1:$UP_PORT/v1"
 tier = "cloud"
 models = ["priced-model", "priced-model-2", "unpriced-model"]
 
+# Streams, but never reports token usage — Stoke must estimate rather than book $0.
+[[providers]]
+name = "hides-usage"
+base_url = "http://127.0.0.1:$QUIET_PORT/v1"
+tier = "cloud"
+models = ["quiet-model"]
+
+# Your own hardware: no per-token bill, and never asked to report usage.
+[[providers]]
+name = "own-box"
+base_url = "http://127.0.0.1:$LOCAL_PORT/v1"
+tier = "local"
+models = ["local-model"]
+
 [[keys]]
 key = "$KEY_A"
 budget_usd = 100.0
@@ -77,6 +110,10 @@ input_per_1m = 5.0
 output_per_1m = 25.0
 
 [pricing.models.priced-model-2]
+input_per_1m = 5.0
+output_per_1m = 25.0
+
+[pricing.models.quiet-model]
 input_per_1m = 5.0
 output_per_1m = 25.0
 
@@ -151,6 +188,43 @@ AFTER=$(calls)
 [ "$CODE" = "403" ] || fail "auto resolved into a fan-out for a caller: expected 403, got $CODE"
 [ "$((AFTER - BEFORE))" = "0" ] || fail "auto fan-out reached the provider $((AFTER - BEFORE)) times"
 
+# ── Streamed responses accrue spend ──────────────────────────────────
+echo "==> assert: a streamed response is billed from the usage the provider reports"
+BEFORE=$(calls); S0=$(spend "$KEY_A")
+CODE=$(stream "$KEY_A" priced-model)
+sleep 1
+AFTER=$(calls); S1=$(spend "$KEY_A"); E1=$(estimated "$KEY_A")
+[ "$CODE" = "200" ] || fail "streamed request: expected 200, got $CODE"
+[ "$((AFTER - BEFORE))" = "1" ] || fail "expected exactly 1 upstream call"
+[ "$(stream_opts "$UP_PORT")" != "0" ] || fail "Stoke never asked the metered provider to report usage"
+python3 -c "
+d = $S1 - $S0
+assert abs(d - 0.030) < 1e-6, f'streamed spend not recorded: expected \$0.030, got \${d}'
+assert $E1 == 0.0, f'a reported usage must not count as an estimate (got \${$E1})'" \
+  || fail "streamed spend was not billed from the reported usage"
+
+echo "==> assert: a metered provider that hides usage is billed from a flagged estimate"
+S0=$(spend "$KEY_A"); E0=$(estimated "$KEY_A")
+CODE=$(stream "$KEY_A" quiet-model)
+sleep 1
+S1=$(spend "$KEY_A"); E1=$(estimated "$KEY_A")
+[ "$CODE" = "200" ] || fail "quiet stream: expected 200, got $CODE"
+[ "$(stream_opts "$QUIET_PORT")" != "0" ] || fail "Stoke did not ask the quiet provider for usage"
+python3 -c "
+assert $S1 > $S0, 'a stream with no usage report booked \$0 — the bug this exists to prevent'
+assert $E1 > $E0, 'estimated spend must be flagged as estimated'" \
+  || fail "unreported streamed usage was not estimated and flagged"
+
+echo "==> assert: a free-tier provider is never asked for usage, and is never billed"
+S0=$(spend "$KEY_A")
+CODE=$(stream "$KEY_A" local-model)
+sleep 1
+S1=$(spend "$KEY_A")
+[ "$CODE" = "200" ] || fail "local stream: expected 200, got $CODE"
+[ "$(stream_opts "$LOCAL_PORT")" = "0" ] || fail "a free-tier stream was modified with stream_options"
+python3 -c "
+assert abs($S1 - $S0) < 1e-12, 'your own hardware was billed'" || fail "free-tier stream accrued spend"
+
 # ── Cross-key cache isolation ────────────────────────────────────────
 echo "==> assert: one key's cached response is never served to another key"
 post "$KEY_A" '{"model":"priced-model","temperature":0,"messages":[{"role":"user","content":"CONFIDENTIAL"}]}' >/dev/null
@@ -189,5 +263,38 @@ assert abs(d - want) < 1e-6, f'fan-out under-billed: recorded \${d}, spent \${wa
   || fail "fan-out spend was not billed in full"
 
 stop_stoke
+
+# ── Streamed vote race: bill the model that served, and do not race a payer ──
+echo "==> assert: a streamed vote race bills the model that served, and tries metered models in order"
+write_config '
+routing_override = true'
+# operator pins the fan-out; the caller only supplies the candidate list
+python3 - "$WORK_DIR/stoke.toml" <<'PYEOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+s = s.replace('routing = "single"', 'routing = "stream_race"', 1)
+s = s.replace("\nrouting_override = true", "")
+p.write_text(s)
+PYEOF
+start_stoke
+
+BEFORE=$(calls); S0=$(spend "$KEY_A")
+# The request names an UNPRICED model; the vote list names priced ones. Only the
+# vote models are ever dispatched, so the bill must be priced against the winner.
+CODE=$(curl -s -N -o /dev/null -w '%{http_code}' --max-time 20 \
+  "http://127.0.0.1:$STOKE_PORT/v1/chat/completions" \
+  -H "Authorization: Bearer $KEY_A" -H 'Content-Type: application/json' \
+  -d '{"model":"unpriced-model","stream":true,"vote_models":["priced-model","priced-model-2"],"messages":[{"role":"user","content":"race"}]}')
+sleep 1
+AFTER=$(calls); S1=$(spend "$KEY_A")
+N=$((AFTER - BEFORE))
+[ "$CODE" = "200" ] || fail "streamed vote race: expected 200, got $CODE"
+[ "$N" = "1" ] || fail "a metered provider must not be raced: expected 1 upstream call, got $N"
+python3 -c "
+d = $S1 - $S0
+assert abs(d - 0.030) < 1e-6, f'billed against the wrong model: expected \$0.030 for the model that served, got \${d}'" \
+  || fail "the streamed vote race was priced against the requested model, not the served one"
+
+stop_stoke
 echo
-echo "SPEND FIREWALL SMOKE PASSED ✔ (pricing gate incl. streams, boot validation, fan-out clamp, full billing, cache isolation)"
+echo "SPEND FIREWALL SMOKE PASSED ✔ (pricing gate, streamed spend, served-model billing, boot validation, fan-out clamp, full billing, cache isolation)"

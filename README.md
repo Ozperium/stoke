@@ -16,7 +16,7 @@ Everything below is in the code now, covered by tests or the shipped smoke scrip
 
 ### Enforcement primitives
 
-- **Hard budget caps** — per-API-key spend limits in USD, configured per key in a `[[keys]]` TOML table (each key must also be listed in `STOKE_API_KEYS`) and checked at the request path before any provider call. Over the limit, the request is refused with `429 Budget exceeded`, not alerted on. (Spend currently accrues from non-streaming responses only; streamed-request cost accounting is on the roadmap.)
+- **Hard budget caps** — per-API-key spend limits in USD, configured per key in a `[[keys]]` TOML table (each key must also be listed in `STOKE_API_KEYS`) and checked at the request path before any provider call. Over the limit, the request is refused with `429 Budget exceeded`, not alerted on. Streamed responses accrue spend too, read from the provider's own usage report as the stream passes.
 - **Rate limiting** — per-key requests-per-minute cap over a sliding 60-second window, set in the same `[[keys]]` table. Enforced on all traffic, streaming included.
 - **Loop detection (circuit breaker)** — exact prompt-hash matching plus optional semantic similarity (embedding cosine). 5 similar requests from one key within 60 seconds blocks that key for 120 seconds, with a reason in the error. It runs on all traffic, streaming included. Thresholds are global constants today; per-key tuning is on the roadmap.
 
@@ -88,7 +88,7 @@ Because prompts route to your own machines by default, they never leave your inf
 ### Also in the box
 
 - **Response cache** — exact-match plus semantic (semantic is opt-in via `STOKE_SEMANTIC_CACHE`).
-- **Cost tracking** — non-streaming responses carry a `stoke_cost` field and their spend is recorded per key, including every call a fan-out pattern makes; cost accounting for streamed responses is not implemented yet (SSE usage parsing is on the roadmap). Prices come from `[pricing.models]` in your config — Stoke ships none, and refuses to serve a model it cannot price on a metered provider rather than meter it at $0. `/v1/budget` shows per-key spend, `/v1/pricing` shows the configured prices.
+- **Cost tracking** — non-streaming responses carry a `stoke_cost` field, and both streamed and non-streamed responses record their spend per key, including every call a fan-out pattern makes. Streamed spend is read from the provider's own usage report as the stream passes; if a metered provider reports none, Stoke bills an estimate and says so (`estimated_usd` in `/v1/budget`) rather than booking $0. Prices come from `[pricing.models]` in your config — Stoke ships none, and refuses to serve a model it cannot price on a metered provider rather than meter it at $0. `/v1/budget` shows per-key spend, `/v1/pricing` shows the configured prices.
 - **Route profiles** — multiple endpoints, each with its own model, routing pattern, and plugin chain.
 - **Plugins** — webhook hooks (`pre_request`, `prompt_filter`, `post_response`) in any language; JS/TS plugins behind a compile-time feature flag (`--features js-plugins`); built-in PII redaction and JSONL audit log.
 - **OpenAI-compatible** — `/v1/chat/completions` passthrough including SSE streaming and `tool_calls`. Works with any OpenAI-compatible client or agent.
@@ -232,7 +232,7 @@ Planned, not built. Nothing here is a current-feature claim.
 - [x] Anthropic Messages API endpoint (`/v1/messages`) — Claude Code via `ANTHROPIC_BASE_URL`, enforced passthrough to an `anthropic` provider *(shipped)*
 - [ ] Anthropic ↔ OpenAI translation, so Claude Code can run against your **local** models (today `/v1/messages` forwards to an Anthropic upstream)
 - [ ] Homebrew formula and Docker images *(release CI and Dockerfile are in the repo; first tagged release pending)*
-- [ ] Cost accounting for streamed responses (SSE usage parsing) so streamed spend counts against budget caps
+- [x] Cost accounting for streamed responses (SSE usage parsing) so streamed spend counts against budget caps
 - [ ] Quota-aware cloud escalation (429 cooldown) and a degrade-to-local policy action
 - [ ] Per-key loop-detection thresholds in TOML (budget caps and rate limits are already configured per key today)
 - [ ] Per-tenant usage entitlement enforcement (per-customer caps for AI products — if you need this, open an issue and talk to us)

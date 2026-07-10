@@ -196,7 +196,7 @@ Forwarded requests carry an `x-stoke-hop` header, and federation depth is exactl
 - **It doesn't expose or replace Ollama.** Both Ollama daemons stay on `127.0.0.1`; Stoke is the only network door and it always requires auth. (Remember: the Ollama app's menu-bar quit doesn't stop `ollama serve` — kill the daemon if you're locking things down.)
 - **Local isn't free.** Routing to your own GPU costs electricity and the hardware you already bought; it's just not a metered per-request bill.
 - **Failover is same-model only.** If a node dies, Stoke retries the same model on another node. Cross-model or cross-vendor fallback chains are on the roadmap, not shipped.
-- **Streamed-request spend isn't metered.** Dollar cost accrues from non-streaming responses today. Auth, rate limits, and the loop breaker cover streaming regardless.
+- **Your own machines are never dollar-metered.** Models on `local` and `remote` tiers cost electricity, not tokens, so Stoke prices them at $0 by design. Streamed and non-streamed requests to a *metered* provider both accrue spend. Auth, rate limits, and the loop breaker cover every request regardless.
 - **No published benchmarks.** The `tps`/`ttft_ms` numbers are per-node measurements Stoke records to inform placement, not performance claims.
 
 ## Next steps

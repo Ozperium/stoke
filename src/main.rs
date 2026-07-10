@@ -9,6 +9,7 @@ mod messages;
 mod nodes;
 mod plugins;
 mod router;
+mod sse;
 mod stream_fusion;
 mod ttft;
 
@@ -257,12 +258,15 @@ async fn ttft_stats(State(state): State<AppState>) -> Json<Value> {
 
 async fn budget_stats(State(state): State<AppState>) -> Json<Value> {
     let stats = state.budget.stats();
-    let keys: Vec<Value> = stats.iter().map(|(key, spend, limit, recent_rpm)| {
+    let keys: Vec<Value> = stats.iter().map(|(key, spend, limit, recent_rpm, estimated)| {
         json!({
             "key": &key[..8.min(key.len())],
             "spend_usd": spend,
             "limit_usd": limit,
             "recent_requests": recent_rpm,
+            // The part of spend_usd that Stoke had to estimate because a metered
+            // provider streamed without reporting usage. Counted against the cap.
+            "estimated_usd": estimated,
         })
     }).collect();
     let auth_enabled = state.auth.is_auth_enabled();
@@ -312,10 +316,12 @@ fn provider_for_model_filtered<'a>(
 }
 
 /// Measures a live SSE stream: time-to-first-token (connect time already
-/// includes prefill for Ollama; we add the delta to the first body chunk) and
-/// tokens/sec (SSE `data:` events ≈ tokens). Records into the registry on
-/// Drop — which also fires on client disconnect, so partial streams still
-/// teach the predictor. Owns the in-flight guard for the stream's lifetime.
+/// includes prefill for Ollama; we add the delta to the first body chunk),
+/// tokens/sec (SSE `data:` events ≈ tokens), and — for providers that charge —
+/// the token usage they report on the final frame. Records into the registry and
+/// the budget on Drop, which also fires on client disconnect, so a stream that is
+/// abandoned halfway still teaches the predictor and still bills the caller.
+/// Owns the in-flight guard for the stream's lifetime.
 struct StreamMeter {
     _guard: Option<nodes::InflightGuard>,
     registry: Arc<nodes::NodeRegistry>,
@@ -326,6 +332,19 @@ struct StreamMeter {
     first_chunk_ms: Option<f64>,
     last_chunk_ms: f64,
     events: u64,
+    /// Reads the provider's usage report out of the stream as it passes.
+    usage: sse::UsageScanner,
+    /// Set only for providers whose tokens cost money. A free tier needs no
+    /// accounting, and is never asked to report usage in the first place.
+    billing: Option<StreamBilling>,
+}
+
+/// What the meter needs in order to charge for a stream once it ends.
+struct StreamBilling {
+    budget: Arc<BudgetGuard>,
+    api_key: String,
+    /// Fallback when the provider never reports usage. An estimate, and labelled one.
+    prompt_tokens_est: u64,
 }
 
 impl StreamMeter {
@@ -335,6 +354,7 @@ impl StreamMeter {
         node: String,
         model: String,
         connect_ms: u64,
+        billing: Option<StreamBilling>,
     ) -> Self {
         Self {
             _guard: guard,
@@ -346,6 +366,8 @@ impl StreamMeter {
             first_chunk_ms: None,
             last_chunk_ms: 0.0,
             events: 0,
+            usage: sse::UsageScanner::new(sse::Wire::OpenAi),
+            billing,
         }
     }
 
@@ -356,6 +378,9 @@ impl StreamMeter {
         }
         self.last_chunk_ms = now_ms;
         self.events += bytes.windows(5).filter(|w| *w == &b"data:"[..]).count() as u64;
+        if self.billing.is_some() {
+            self.usage.feed(bytes);
+        }
     }
 }
 
@@ -368,6 +393,52 @@ impl Drop for StreamMeter {
             let tokens = self.events.saturating_sub(1);
             self.registry
                 .record_stream_stats(&self.node, &self.model, ttft_ms, tokens, gen_ms);
+        }
+
+        let Some(billing) = self.billing.take() else { return };
+
+        let (usage, measured) = match self.usage.usage() {
+            Some(u) => (u, true),
+            None => {
+                // No final tally: either the provider never reported, or the
+                // stream ended before the frame carrying it. Recording $0 is the
+                // exact bug this path exists to fix, so estimate — using whatever
+                // partial truth the provider did give us, and label it a guess.
+                let partial = self.usage.partial();
+                (
+                    sse::Usage {
+                        prompt_tokens: partial
+                            .map(|u| u.prompt_tokens)
+                            .filter(|&t| t > 0)
+                            .unwrap_or(billing.prompt_tokens_est),
+                        completion_tokens: partial
+                            .map(|u| u.completion_tokens)
+                            .unwrap_or(0)
+                            .max(self.usage.frames()),
+                    },
+                    false,
+                )
+            }
+        };
+
+        let cost = cost::global()
+            .calculate(&self.model, Some(&usage.to_openai_json()))
+            .cost_usd;
+
+        if measured {
+            billing.budget.record_spend(&billing.api_key, cost);
+            tracing::info!(
+                "stream billed: model={} node={} tokens={}+{} cost=${:.6}",
+                self.model, self.node, usage.prompt_tokens, usage.completion_tokens, cost
+            );
+        } else {
+            billing.budget.record_spend_estimated(&billing.api_key, cost);
+            tracing::warn!(
+                "stream billed from an ESTIMATE: model={} node={} reported no usage; \
+                 charged ${:.6} for ~{}+{} tokens{}. The cap is working from a guess for this key.",
+                self.model, self.node, cost, usage.prompt_tokens, usage.completion_tokens,
+                if self.usage.lost_data() { "; a stream line exceeded the buffer" } else { "" }
+            );
         }
     }
 }
@@ -812,8 +883,11 @@ async fn chat_completions(
     if req.stream.unwrap_or(false) && (routing == "single" || routing == "stream_race") {
         let body = serde_json::to_value(&req).unwrap_or_default();
 
-        // Each branch resolves to (guard, winning node, connect ms, response)
-        let race_result: Result<(Option<nodes::InflightGuard>, String, u64, reqwest::Response), (StatusCode, String)> =
+        // Each branch resolves to (guard, winning node, connect ms, response, the
+        // model that actually served). The served model is not always the one the
+        // caller named: a vote race rewrites it per leg, and the bill must be
+        // priced against what ran, not against what was asked for.
+        let race_result: Result<(Option<nodes::InflightGuard>, String, u64, reqwest::Response, String), (StatusCode, String)> =
         if routing == "stream_race" {
             // Race multiple models on the same provider (or across providers if vote_models given)
             if !vote_models.is_empty() {
@@ -826,7 +900,8 @@ async fn chat_completions(
                         .await
                         .map(|(pname, mname, resp)| {
                             tracing::info!("stream_race winner: {}/{}", pname, mname);
-                            (state.nodes.begin(&pname), pname, 0, resp)
+                            let guard = state.nodes.begin(&pname);
+                            (guard, pname, 0, resp, mname)
                         })
                         .map_err(|e| (StatusCode::BAD_GATEWAY, e)),
                     Err(e) => Err(e),
@@ -835,7 +910,10 @@ async fn chat_completions(
                 let providers: Vec<_> = eligible_providers(&state.config, true);
                 stream_fusion::stream_race(providers, &body)
                     .await
-                    .map(|(pname, resp)| (state.nodes.begin(&pname), pname, 0, resp))
+                    .map(|(pname, resp)| {
+                        let guard = state.nodes.begin(&pname);
+                        (guard, pname, 0, resp, model.clone())
+                    })
                     .map_err(|e| (StatusCode::BAD_GATEWAY, e))
             }
         } else {
@@ -869,12 +947,12 @@ async fn chat_completions(
             } else {
                 failover::stream_with_failover(ranked, &body, &state.nodes, hop).await
             };
-            win.map(|w| (w.guard, w.provider_name, w.connect_ms, w.response))
+            win.map(|w| (w.guard, w.provider_name, w.connect_ms, w.response, model.clone()))
                 .map_err(|e| (StatusCode::BAD_GATEWAY, e))
         };
 
         match race_result {
-            Ok((guard, node_name, connect_ms, provider_resp)) => {
+            Ok((guard, node_name, connect_ms, provider_resp, served_model)) => {
                 // Receipts at dispatch (streamed usage is estimated): zero-
                 // marginal when the winning node isn't a cloud provider.
                 let zero_marginal = state
@@ -894,12 +972,30 @@ async fn chat_completions(
                 // The meter owns the guard: it measures TTFT + tokens/sec into
                 // the registry and keeps in-flight accurate for the stream's
                 // whole life (client disconnect included).
+                // Bill the stream only where tokens cost money. A provider on a
+                // free tier is your own hardware: its usage report, if any, would
+                // price at $0 anyway, and it was never asked for one.
+                let serving_tier = state
+                    .config
+                    .providers
+                    .iter()
+                    .find(|p| p.name == node_name)
+                    .map(|p| p.tier.clone())
+                    .unwrap_or_default();
+                let billing = (!cost::is_free_tier(&serving_tier)).then(|| StreamBilling {
+                    budget: state.budget.clone(),
+                    api_key: api_key.clone(),
+                    // Only ever used if the provider reports nothing. ~4 chars/token.
+                    prompt_tokens_est: (auto_route::extract_text(&req.messages).len() / 4) as u64,
+                });
+
                 let mut meter = StreamMeter::new(
                     guard,
                     state.nodes.clone(),
                     node_name,
-                    model.clone(),
+                    served_model,
                     connect_ms,
+                    billing,
                 );
                 let byte_stream = provider_resp.bytes_stream().map(move |chunk| {
                     if let Ok(bytes) = &chunk {

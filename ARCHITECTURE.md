@@ -54,10 +54,15 @@ returns `429` and the request never reaches a provider:
   table) and cumulative spend has reached it, reject. Spend is recorded as soon as a
   non-streaming request's cost is known — before the response hooks run — and includes
   every provider call the request issued, not just the one whose body is returned.
-  Scope note: streaming responses are passed through byte-for-byte and currently bypass
-  cost accounting — a streamed request does not add to a key's spend (SSE `usage`
-  parsing is not implemented yet). Auth, rate limiting, and loop detection still apply
-  to streaming traffic; only dollar-accrual from streams is deferred.
+  Streamed responses accrue spend too: the bytes pass through untouched while a scanner
+  reads the provider's usage report, and the key is charged when the stream ends or the
+  client disconnects (see [Streaming path](#5-streaming-path)). Because the cap is
+  checked at admission and a stream is charged at completion, the cap is a ceiling that
+  can be crossed once rather than a hard stop: a long response overshoots it, and
+  concurrent requests on one key are each admitted against a spend figure that does not
+  yet include the others still in flight. There is no reservation against in-flight
+  spend. `rate_limit_rpm` bounds the concurrency, and separate keys bound the blast
+  radius.
 - **Rate limit.** Sliding 60-second window of request timestamps per key; over the
   key's configured requests-per-minute (`rate_limit_rpm` in the `[[keys]]` table),
   reject.
@@ -463,7 +468,7 @@ These do not exist in the code today and nothing above claims them:
 - Anthropic Messages API endpoint (`/v1/messages`) for native Claude Code support.
 - Homebrew formula and a published container image (a `Dockerfile` builds one today,
   but nothing is pushed to a registry yet).
-- Cost accounting for streaming responses (SSE `usage` parsing so streamed requests
+- ~~Cost accounting for streaming responses (SSE `usage` parsing so streamed requests~~ — done
   accrue against a key's budget; today only non-streaming responses do).
 - Per-key loop-detection thresholds via config (per-key budgets and rate limits already
   ship in the `[[keys]]` table; loop thresholds are still global constants).

@@ -97,7 +97,7 @@ curl -s -H "Authorization: Bearer agent-key" localhost:8787/v1/budget
 ## Scope — be honest with the user
 
 - Hard USD caps only work on **metered API keys**. Subscription plans (Claude Max/Pro, ChatGPT Plus) have no per-request price: Stoke can rate-limit and loop-kill that traffic, but it cannot dollar-cap it.
-- Spend currently accrues from non-streaming responses. Streamed-request cost accounting is not implemented yet. Auth, rate limits, and the loop breaker **do** apply to streaming.
+- Streamed and non-streamed responses both accrue spend; a stream is billed when it ends, from the usage the provider reports. Auth, rate limits, and the loop breaker **do** apply to streaming.
 - Local models cost electricity and the GPU you already own — not "free". Never claim zero cost.
 
 ## Troubleshooting
