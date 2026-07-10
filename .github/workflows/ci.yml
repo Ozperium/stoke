@@ -1,6 +1,6 @@
 name: ci
 
-# Every push and PR: build, unit tests, and the two end-to-end smoke harnesses.
+# Every push and PR: build, unit tests, and the end-to-end smoke harnesses.
 # The smokes need no Ollama — they run against stdlib mock nodes.
 on:
   push:
@@ -34,3 +34,7 @@ jobs:
 
       - name: Smoke — federation, hop guard, cycle safety
         run: ./scripts/smoke_federation.sh
+
+      # Guards the claim on the homepage. Each assertion is a bug that shipped once.
+      - name: Smoke — spend firewall (pricing gate, fan-out clamp, cache isolation)
+        run: ./scripts/smoke_spend.sh

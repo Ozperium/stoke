@@ -37,7 +37,6 @@ use router::{
     self_consistency, test_vote_models, ProviderResult, SHARED_CLIENT,
 };
 use cache::ResponseCache;
-use cost::Pricer;
 use budget::{Auth, BudgetGuard};
 use ttft::TtftTracker;
 
@@ -101,6 +100,19 @@ async fn main() {
         tracing::error!("Config error: {}", e);
         std::process::exit(1);
     });
+
+    // Prices are operator config, never guessed. Publish them before the first
+    // request can reach the dispatch gate in router::call_provider_hop.
+    cost::init(config.pricer());
+    if config.pricing.models.is_empty()
+        && cost::Unpriced::parse(&config.pricing.unpriced) == cost::Unpriced::Refuse
+        && config.providers.iter().any(|p| !cost::is_free_tier(&p.tier))
+    {
+        tracing::warn!(
+            "no [pricing.models] configured, so metered providers will refuse every model. \
+             Declare prices, or set [pricing] unpriced = \"free\" to serve them unmetered."
+        );
+    }
 
     tracing::info!(
         "Stoke starting on {}:{} with {} provider(s)",
@@ -361,7 +373,7 @@ impl Drop for StreamMeter {
 }
 
 async fn list_pricing() -> Json<Value> {
-    let pricer = Pricer::default();
+    let pricer = cost::global();
     let prices: Vec<Value> = pricer
         .all_prices()
         .iter()
@@ -469,14 +481,22 @@ async fn chat_completions(
 
     let mut model = req.model.clone();
 
-    // Determine routing: route profile > request extra > config default
+    // Determine routing: route profile > request extra > config default.
+    //
+    // A fan-out pattern turns one inbound request into N billed provider calls,
+    // so choosing one is an operator decision. Enforcement happens below, on the
+    // *resolved* routing — `auto` names no fan-out here but can resolve into one.
+    let mut routing_from_caller = false;
     let mut routing = if let Some(profile) = route_profile {
         profile.routing.clone()
     } else {
-        req.extra.get("routing")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| state.config.routing.clone().unwrap_or_else(|| "single".to_string()))
+        match req.extra.get("routing").and_then(|v| v.as_str()) {
+            Some(asked) => {
+                routing_from_caller = true;
+                asked.to_string()
+            }
+            None => state.config.routing.clone().unwrap_or_else(|| "single".to_string()),
+        }
     };
 
     // Determine vote_models: route profile > request extra
@@ -651,10 +671,13 @@ async fn chat_completions(
         .unwrap_or("")
         .to_string();
 
-    // For self_consistency: number of samples and temperature
-    let n_samples = req.extra.get("n_samples")
+    // For self_consistency: number of samples and temperature. The caller names a
+    // number; the operator sets the ceiling. Unclamped, `n_samples` is a direct
+    // multiplier on the bill (router.rs loops over it, one provider call each).
+    let n_samples = (req.extra.get("n_samples")
         .and_then(|v| v.as_u64())
-        .unwrap_or(5) as usize;
+        .unwrap_or(5) as usize)
+        .clamp(1, state.config.limits.max_n_samples);
     let sc_temperature = req.extra.get("temperature")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.7) as f32;
@@ -696,7 +719,7 @@ async fn chat_completions(
             &req.messages,
             &opts,
             &state.nodes.discovered(),
-            &Pricer::default(),
+            cost::global(),
             &facts,
         );
         tracing::info!(
@@ -746,6 +769,39 @@ async fn chat_completions(
             test_code = opts.test_code.clone();
             entry_point = opts.entry_point.clone();
         }
+    }
+
+    // ─── Fan-out enforcement, on the RESOLVED routing ────────────────────────
+    // Everything that can name a routing pattern has now spoken: the route
+    // profile, the request body, the config default, the auto-router, and the
+    // pre_request plugins. Checking earlier missed the interesting case —
+    // `routing: "auto"` is not itself a fan-out, but `decide()` can resolve it
+    // into `cascade_test`, using `test_code`/`entry_point` taken straight from
+    // the request body. A caller could pick a fan-out without ever naming one.
+    if config::is_fanout_routing(&routing)
+        && routing_from_caller
+        && !state.config.limits.allow_caller_routing
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            format!(
+                "routing resolved to \"{routing}\", which issues multiple provider calls per \
+                 request, and the caller selected it. Pin it in a [[routes]] profile or the \
+                 top-level `routing` setting, or set [limits] allow_caller_routing = true."
+            ),
+        )
+            .into_response();
+    }
+
+    // Ceiling on the fan-out width, whatever its source — including the
+    // auto-router, which reassigns vote_models wholesale from [auto_route].
+    if vote_models.len() > state.config.limits.max_vote_models {
+        tracing::warn!(
+            "vote_models truncated from {} to the [limits] max_vote_models of {}",
+            vote_models.len(),
+            state.config.limits.max_vote_models
+        );
+        vote_models.truncate(state.config.limits.max_vote_models);
     }
 
     tracing::info!("Request: model={}, routing={}, vote_models={:?}", model, routing, vote_models);
@@ -860,15 +916,20 @@ async fn chat_completions(
                     .unwrap();
             }
             Err((code, msg)) => {
+                // Same policy-vs-upstream distinction as the non-streaming path.
+                let code = if cost::is_unpriced_error(&msg) { StatusCode::FORBIDDEN } else { code };
                 return (code, msg).into_response();
             }
         }
     }
 
     // Check cache for single routing at temp=0 (deterministic requests only)
-    // Two-layer: exact match (hash) + semantic match (embedding similarity)
+    // Two-layer: exact match (hash) + semantic match (embedding similarity).
+    // Scoped to (api_key, path): a cached response is a response the caller was
+    // already authorised to receive, and nobody else.
+    let cache_scope = ResponseCache::scope_of(&api_key, path);
     let cache_key = if routing == "single" && !req.stream.unwrap_or(false) {
-        ResponseCache::cache_key(&model, &req.messages, req.temperature, req.max_tokens)
+        ResponseCache::cache_key(&cache_scope, &model, &req.messages, req.temperature, req.max_tokens)
     } else {
         None
     };
@@ -876,7 +937,7 @@ async fn chat_completions(
     let cache_prompt = ResponseCache::extract_prompt(&req.messages);
 
     if let Some(ref key) = cache_key {
-        if let Some((_matched_key, cached)) = state.cache.get_smart(key, &cache_prompt).await {
+        if let Some((_matched_key, cached)) = state.cache.get_smart(key, &cache_scope, &cache_prompt).await {
             tracing::info!("cache hit: key={}", &key[..8]);
             let mut response_json = cached;
             if let Some(obj) = response_json.as_object_mut() {
@@ -956,7 +1017,11 @@ async fn chat_completions(
                     }
                     Err(e) => {
                         let client_error = e.contains(" returned 4");
-                        if !client_error {
+                        // A pricing refusal says nothing about the node's health —
+                        // it was never contacted. Counting it as an error would
+                        // demote a perfectly good node for a config omission.
+                        let policy_refusal = cost::is_unpriced_error(&e);
+                        if !client_error && !policy_refusal {
                             state.nodes.record_error(&provider.name);
                         }
                         tracing::warn!("placement: {} failed: {}", provider.name, e);
@@ -974,7 +1039,13 @@ async fn chat_completions(
 
     let result = match result {
         Ok(r) => r,
-        Err((code, msg)) => return (code, msg).into_response(),
+        Err((code, msg)) => {
+            // The pricing gate refuses inside the router, where every failure
+            // reads as a provider failure. It is not one — nothing upstream was
+            // contacted. Answer 403 so an operator sees a policy refusal.
+            let code = if cost::is_unpriced_error(&msg) { StatusCode::FORBIDDEN } else { code };
+            return (code, msg).into_response();
+        }
     };
 
     tracing::info!(
@@ -984,6 +1055,14 @@ async fn chat_completions(
         result.elapsed_ms,
         result.cost.cost_usd
     );
+
+    // Record spend the moment the money is known to be gone — before the response
+    // hooks, before any transform, before any of the returns below. A plugin that
+    // blocks, panics, or rewrites the body does not un-bill the provider, and a
+    // cap that only debits on the happy path is a cap a retry loop walks straight
+    // through. `result.cost` is the whole request's bill, including every call a
+    // fan-out pattern made.
+    state.budget.record_spend(&api_key, result.cost.cost_usd);
 
     // Inject cost into the response (non-standard field, ignored by OpenAI clients)
     let mut response_json = serde_json::to_value(&result.response).unwrap();
@@ -1059,11 +1138,10 @@ async fn chat_completions(
         }
     }
 
-    // Record spend for budget tracking
-    state.budget.record_spend(&api_key, result.cost.cost_usd);
+    // (spend was recorded above, before the response hooks could return early)
 
     // Receipts: zero-marginal is determined by the serving provider's tier
-    // (not by cost_usd — unknown models price at $0 and would lie here).
+    // (not by cost_usd — an unpriced free-tier model prices at $0 and would lie here).
     let zero_marginal = state
         .config
         .providers
@@ -1079,7 +1157,7 @@ async fn chat_completions(
     // Store in cache if we have a key (single routing, temp=0)
     // Uses put_with_embedding to generate embedding for semantic cache
     if let Some(ref key) = cache_key {
-        state.cache.put_with_embedding(key, response_json.clone(), &cache_prompt).await;
+        state.cache.put_with_embedding(key, &cache_scope, response_json.clone(), &cache_prompt).await;
     }
 
     Json(response_json).into_response()

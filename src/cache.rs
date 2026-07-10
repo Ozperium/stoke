@@ -9,7 +9,12 @@ use sha2::{Sha256, Digest};
 pub struct CacheEntry {
     pub response: Value,        // Full OpenAI-compatible response JSON
     pub embedding: Vec<f32>,    // Embedding of the prompt for similarity search
-    pub prompt_hash: String,    // SHA256 of model+prompt+temp+max_tokens
+    pub prompt_hash: String,    // SHA256 of scope+model+prompt+max_tokens
+    /// Who this entry belongs to: the API key and route path that produced it.
+    /// Entries are only ever served back to the same scope. Without this, one
+    /// key's answer is handed to another key that guessed the same prompt — and
+    /// under semantic matching, to one that merely guessed a *similar* prompt.
+    pub scope: String,
     pub created_at: Instant,
     pub hit_count: u32,
 }
@@ -54,9 +59,20 @@ impl ResponseCache {
         }
     }
 
+    /// The scope an entry belongs to. Two callers, or two route profiles with
+    /// different policy, must never share a cache slot.
+    pub fn scope_of(api_key: &str, path: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(api_key.as_bytes());
+        hasher.update([0u8]); // domain separator: key "a"+path "b" != key "ab"
+        hasher.update(path.as_bytes());
+        hex::encode(hasher.finalize())
+    }
+
     /// Compute cache key from request parameters.
     /// Only caches deterministic requests (temperature == 0).
     pub fn cache_key(
+        scope: &str,
         model: &str,
         messages: &[Value],
         temperature: Option<f32>,
@@ -78,9 +94,16 @@ impl ResponseCache {
             return None;
         }
 
+        // Separators matter: without them model "ab" + prompt "c" hashes the
+        // same as model "a" + prompt "bc". (`scope` is fixed-width hex, so it
+        // needs none, but keep the pattern uniform.)
         let mut hasher = Sha256::new();
+        hasher.update(scope.as_bytes());
+        hasher.update([0u8]);
         hasher.update(model.as_bytes());
+        hasher.update([0u8]);
         hasher.update(prompt.as_bytes());
+        hasher.update([0u8]);
         hasher.update(max_tokens.unwrap_or(8192).to_be_bytes());
         let hash = hasher.finalize();
         Some(hex::encode(hash))
@@ -110,7 +133,7 @@ impl ResponseCache {
 
     /// Look up semantic match by embedding similarity.
     /// Returns the best match above threshold, or None.
-    pub fn get_semantic(&self, query_embedding: &[f32]) -> Option<(String, Value)> {
+    pub fn get_semantic(&self, scope: &str, query_embedding: &[f32]) -> Option<(String, Value)> {
         if !self.semantic_enabled || query_embedding.is_empty() {
             return None;
         }
@@ -119,6 +142,12 @@ impl ResponseCache {
         let mut best: Option<(f32, &CacheEntry)> = None;
 
         for entry in exact.values() {
+            // Never match across scopes. The exact key already carries the scope,
+            // but this scan reaches entries by embedding alone — so a *similar*
+            // prompt from another key would otherwise pull its response.
+            if entry.scope != scope {
+                continue;
+            }
             // Check TTL
             if entry.created_at.elapsed() >= self.ttl {
                 continue;
@@ -145,7 +174,7 @@ impl ResponseCache {
 
     /// Store a response in the cache.
     /// If semantic caching is enabled, generates an embedding for the prompt.
-    pub async fn put_with_embedding(&self, key: &str, response: Value, prompt: &str) {
+    pub async fn put_with_embedding(&self, key: &str, scope: &str, response: Value, prompt: &str) {
         let embedding = if self.semantic_enabled && !prompt.is_empty() {
             self.generate_embedding(prompt).await.unwrap_or_default()
         } else {
@@ -156,6 +185,7 @@ impl ResponseCache {
             response,
             embedding,
             prompt_hash: key.to_string(),
+            scope: scope.to_string(),
             created_at: Instant::now(),
             hit_count: 0,
         };
@@ -163,11 +193,12 @@ impl ResponseCache {
     }
 
     /// Store a response in the cache (legacy, no embedding).
-    pub fn put(&self, key: &str, response: Value, embedding: Vec<f32>) {
+    pub fn put(&self, key: &str, scope: &str, response: Value, embedding: Vec<f32>) {
         let entry = CacheEntry {
             response,
             embedding,
             prompt_hash: key.to_string(),
+            scope: scope.to_string(),
             created_at: Instant::now(),
             hit_count: 0,
         };
@@ -177,7 +208,7 @@ impl ResponseCache {
     /// Try exact match first, then semantic match.
     /// If semantic is enabled and no exact match, generates an embedding for the query
     /// and searches for similar cached prompts.
-    pub async fn get_smart(&self, key: &str, prompt: &str) -> Option<(String, Value)> {
+    pub async fn get_smart(&self, key: &str, scope: &str, prompt: &str) -> Option<(String, Value)> {
         // Try exact match first
         if let Some(resp) = self.get_exact(key) {
             return Some((key.to_string(), resp));
@@ -186,7 +217,7 @@ impl ResponseCache {
         // Try semantic match
         if self.semantic_enabled && !prompt.is_empty() {
             let query_embedding = self.generate_embedding(prompt).await?;
-            if let Some((hash, resp)) = self.get_semantic(&query_embedding) {
+            if let Some((hash, resp)) = self.get_semantic(scope, &query_embedding) {
                 tracing::info!("semantic cache hit for key={}", &key[..8]);
                 return Some((hash, resp));
             }
@@ -259,4 +290,83 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         return 0.0;
     }
     dot / (norm_a * norm_b)
+}
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+
+    fn msgs() -> Vec<Value> {
+        vec![json!({"role": "user", "content": "the same question"})]
+    }
+
+    #[test]
+    fn different_api_keys_get_different_cache_keys() {
+        // Regression: the key used to hash only (model, prompt, max_tokens), so a
+        // second caller who guessed the prompt was served the first caller's
+        // response — for free, and without the response hooks running.
+        let a = ResponseCache::scope_of("key-a", "/v1/chat/completions");
+        let b = ResponseCache::scope_of("key-b", "/v1/chat/completions");
+        assert_ne!(a, b);
+        let ka = ResponseCache::cache_key(&a, "m", &msgs(), Some(0.0), None);
+        let kb = ResponseCache::cache_key(&b, "m", &msgs(), Some(0.0), None);
+        assert!(ka.is_some() && kb.is_some());
+        assert_ne!(ka, kb, "same prompt under two keys must not share a cache slot");
+    }
+
+    #[test]
+    fn different_routes_get_different_cache_keys() {
+        // Two route profiles can carry different policy for the same model.
+        let a = ResponseCache::scope_of("key-a", "/v1/chat/completions");
+        let b = ResponseCache::scope_of("key-a", "/v1/code/completions");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn the_same_caller_on_the_same_route_still_hits() {
+        let s = ResponseCache::scope_of("key-a", "/v1/chat/completions");
+        let k1 = ResponseCache::cache_key(&s, "m", &msgs(), Some(0.0), None);
+        let k2 = ResponseCache::cache_key(&s, "m", &msgs(), Some(0.0), None);
+        assert_eq!(k1, k2, "scoping must not disable caching for its own scope");
+    }
+
+    #[test]
+    fn cache_key_fields_are_domain_separated() {
+        // model "ab" + prompt "c" must not hash the same as "a" + "bc".
+        let s = ResponseCache::scope_of("k", "/p");
+        let a = ResponseCache::cache_key(&s, "ab", &[json!({"role":"user","content":"c"})], Some(0.0), None);
+        let b = ResponseCache::cache_key(&s, "a", &[json!({"role":"user","content":"bc"})], Some(0.0), None);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn scope_is_domain_separated() {
+        // Without a separator, key "ab" + path "c" and key "a" + path "bc" collide.
+        assert_ne!(ResponseCache::scope_of("ab", "c"), ResponseCache::scope_of("a", "bc"));
+    }
+
+    /// `ResponseCache::new` silently disables the semantic layer unless an
+    /// embedding model is named, so a test that skips this proves nothing: both
+    /// lookups return None and the scope filter is never reached.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn semantic_lookup_will_not_cross_scopes() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("STOKE_EMBED_MODEL", "fixture-embed");
+        let cache = ResponseCache::new(3600, 0.5, true);
+        std::env::remove_var("STOKE_EMBED_MODEL");
+
+        let mine = ResponseCache::scope_of("key-a", "/v1/chat/completions");
+        let theirs = ResponseCache::scope_of("key-b", "/v1/chat/completions");
+        cache.put("k", &theirs, json!({"answer": "secret"}), vec![1.0, 0.0]);
+
+        // Same embedding, different scope: the semantic scan reaches entries by
+        // similarity alone, so without the scope filter this would hand key-a
+        // key-b's answer for a merely *similar* prompt.
+        assert!(cache.get_semantic(&mine, &[1.0, 0.0]).is_none(), "leaked across scopes");
+        assert!(
+            cache.get_semantic(&theirs, &[1.0, 0.0]).is_some(),
+            "own-scope semantic hit must still work — otherwise this test proves nothing"
+        );
+    }
 }

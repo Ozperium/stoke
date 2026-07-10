@@ -401,7 +401,9 @@ base_url = "{ollama_url}"
 api_key = "ollama-local"
 tier = "local"
 
-# Cloud fallback (uncomment and set API key env var)
+# Cloud fallback (uncomment and set API key env var).
+# A cloud provider serves nothing until you price its models below: Stoke
+# refuses spend it cannot meter, so `budget_usd` is never decorative.
 # [[providers]]
 # name = "openrouter"
 # type = "openai_compatible"
@@ -409,6 +411,19 @@ tier = "local"
 # api_key_env = "OPENROUTER_API_KEY"
 # tier = "cloud"
 # models = ["<remote-model>"]
+
+# Prices per 1M tokens, copied from your provider's pricing page. Required for
+# every model a non-local provider serves. Local and remote tiers need none —
+# your own hardware is not billed per token.
+# [pricing.models."<remote-model>"]
+# input_per_1m = 3.00
+# output_per_1m = 15.00
+
+# Ceilings on how far one request may fan out into billed provider calls.
+# [limits]
+# max_n_samples = 5
+# max_vote_models = 5
+# allow_caller_routing = false
 
 # Built-in plugins (uncomment to enable)
 # [builtins.prompt_harness]

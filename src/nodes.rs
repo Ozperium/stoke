@@ -682,6 +682,8 @@ mod tests {
             routes: vec![],
             keys: vec![],
             auto_route: Default::default(),
+            pricing: Default::default(),
+            limits: Default::default(),
         };
         NodeRegistry::from_config(&config)
     }
@@ -863,11 +865,11 @@ mod tests {
         // Old provider_for_model fell back to the first provider even when its
         // explicit list didn't mention the model; unpolled providers must keep
         // that unknown-capability fallback role.
-        let mut cloud = provider("cloud", "cloud", &["gpt-4o"]);
+        let mut cloud = provider("cloud", "cloud", &["fixture-listed"]);
         cloud.base_url = "https://api.example.com/v1".into();
         let providers = vec![cloud];
         let reg = registry_with(&providers);
-        let (ranked, explain) = reg.rank("gpt-4o-mini", &providers, false);
+        let (ranked, explain) = reg.rank("fixture-unlisted", &providers, false);
         assert_eq!(ranked.len(), 1, "unpolled partial list must not exclude: {:?}", explain);
         assert!(explain[0].contains("unknown"));
     }

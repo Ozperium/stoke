@@ -32,9 +32,20 @@ pub async fn stream_with_failover(
         return Err("No providers for streaming".to_string());
     }
 
+    let model = body.get("model").and_then(|m| m.as_str()).unwrap_or_default();
     let mut last_error = String::new();
 
     for (i, provider) in providers.iter().enumerate() {
+        // The pricing gate. This path builds its own request rather than going
+        // through router::call_provider_hop, so it needs the check explicitly —
+        // otherwise `stream: true` is a way to reach a metered provider with a
+        // model Stoke cannot price, and streams already accrue no spend.
+        if let Err(reason) = crate::cost::global().allows(&provider.tier, model) {
+            tracing::warn!("stream_with_failover: skipping {}: {}", provider.name, reason);
+            last_error = reason;
+            continue;
+        }
+
         let url = format!("{}/chat/completions", provider.base_url.trim_end_matches('/'));
         let start = Instant::now();
 

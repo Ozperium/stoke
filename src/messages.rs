@@ -20,7 +20,6 @@ use axum::{
 use serde_json::Value;
 
 use crate::config::ProviderConfig;
-use crate::cost::Pricer;
 use crate::router::SHARED_CLIENT;
 use crate::AppState;
 
@@ -76,6 +75,14 @@ pub async fn messages(
         }
     };
 
+    // The same dispatch gate router::call_provider_hop applies. This path does not
+    // go through the router, so without it an Anthropic model with no configured
+    // price would be forwarded and metered at $0 — the budget cap would never move
+    // for the one client this endpoint exists to serve.
+    if let Err(reason) = crate::cost::global().allows(&provider.tier, &model) {
+        return (StatusCode::FORBIDDEN, reason).into_response();
+    }
+
     if stream {
         forward_stream(provider, &req).await
     } else {
@@ -121,12 +128,10 @@ async fn forward_once(
                 "completion_tokens": output,
                 "total_tokens": input + output
             });
-            Pricer::default().calculate(model, Some(&usage)).cost_usd
+            crate::cost::global().calculate(model, Some(&usage)).cost_usd
         })
         .unwrap_or(0.0);
-    if cost_usd > 0.0 {
-        state.budget.record_spend(api_key, cost_usd);
-    }
+    state.budget.record_spend(api_key, cost_usd);
     tracing::info!("/v1/messages: model={} provider={} cost=${:.6}", model, provider.name, cost_usd);
 
     let mut out = Json(body).into_response();
@@ -223,7 +228,7 @@ mod tests {
     #[test]
     fn extracts_string_and_block_content_and_system() {
         let req = json!({
-            "model": "claude-sonnet-4",
+            "model": "fixture-model",
             "system": "you are terse",
             "messages": [
                 {"role": "user", "content": "hello"},

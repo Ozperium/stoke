@@ -6,7 +6,7 @@ use std::time::Instant;
 use once_cell::sync::Lazy;
 
 use crate::config::ProviderConfig;
-use crate::cost::{CostBreakdown, Pricer};
+use crate::cost::CostBreakdown;
 
 /// Run a Python test file in a restricted sandbox.
 /// Blocks dangerous modules and enforces CPU/memory/time limits.
@@ -111,6 +111,13 @@ pub async fn call_provider_hop(
     request: &ChatCompletionRequest,
     hop: u32,
 ) -> Result<ProviderResult, String> {
+    let pricer = crate::cost::global();
+
+    // The dispatch gate. Every routing pattern — single, failover, and each
+    // fusion fan-out — funnels through here, so this is the one place that can
+    // refuse unmeterable spend while refusing is still free.
+    pricer.allows(&provider.tier, &request.model)?;
+
     let client = &*SHARED_CLIENT;
     let url = format!("{}/chat/completions", provider.base_url.trim_end_matches('/'));
 
@@ -142,7 +149,6 @@ pub async fn call_provider_hop(
         .await
         .map_err(|e| format!("Failed to parse provider {} response: {}", provider.name, e))?;
 
-    let pricer = Pricer::default();
     let cost = pricer.calculate(&request.model, response.usage.as_ref());
 
     Ok(ProviderResult {
@@ -151,6 +157,21 @@ pub async fn call_provider_hop(
         provider_name: provider.name.clone(),
         cost,
     })
+}
+
+/// A fusion pattern issues many provider calls and returns exactly one of them.
+/// The operator is billed for *all* of them, so the returned result must carry
+/// the whole bill — otherwise `record_spend` books one call's cost for N calls'
+/// worth of money and the budget cap under-counts by a factor of N.
+///
+/// `attempted` should include every call whose tokens were actually generated,
+/// including the losers.
+fn bill_all(winner: &mut ProviderResult, attempted: &[ProviderResult]) {
+    let mut total = CostBreakdown::zero(&winner.cost.model);
+    for r in attempted {
+        total.merge(&r.cost);
+    }
+    winner.cost = total;
 }
 
 /// Fusion: Parallel+Vote — send the same request to N providers,
@@ -207,7 +228,9 @@ pub async fn parallel_vote(
             if let Some(choice) = r.response.choices.first() {
                 if let Some(content) = choice.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                     if content == winner {
-                        return Ok(r.clone());
+                        let mut out = r.clone();
+                        bill_all(&mut out, &successes);
+                        return Ok(out);
                     }
                 }
             }
@@ -215,7 +238,9 @@ pub async fn parallel_vote(
     }
 
     // Fallback: return the first success
-    Ok(successes.into_iter().next().unwrap())
+    let mut out = successes[0].clone();
+    bill_all(&mut out, &successes);
+    Ok(out)
 }
 
 /// Fusion: Self-Consistency — same model, N samples at temp>0, majority vote.
@@ -274,14 +299,18 @@ pub async fn self_consistency(
                 if let Some(content) = choice.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                     if content == winner {
                         tracing::info!("self_consistency: model {} majority vote ({} samples)", model, n_samples);
-                        return Ok(r.clone());
+                        let mut out = r.clone();
+                        bill_all(&mut out, &results);
+                        return Ok(out);
                     }
                 }
             }
         }
     }
 
-    Ok(results.into_iter().next().unwrap())
+    let mut out = results[0].clone();
+    bill_all(&mut out, &results);
+    Ok(out)
 }
 
 
@@ -322,9 +351,14 @@ pub async fn deliberation(
         set.spawn(async move { call_provider(&provider, &req).await });
     }
 
+    // Panel and judge tokens are billed even though only the synthesizer's
+    // response is returned. Carry their cost forward.
+    let mut side_cost = CostBreakdown::zero(synth_model);
+
     let mut responses: Vec<(String, String)> = Vec::new();
     while let Some(res) = set.join_next().await {
         if let Ok(Ok(r)) = res {
+            side_cost.merge(&r.cost);
             let content = r
                 .response
                 .choices
@@ -370,6 +404,7 @@ Original question:\n{}\n\n",
     }
 
     let judge_result = call_provider(provider, &judge_req).await?;
+    side_cost.merge(&judge_result.cost);
 
     let judge_analysis = judge_result
         .response
@@ -405,7 +440,9 @@ address coverage gaps and blind spots, and include unique insights where relevan
         synth_model
     );
 
-    call_provider(provider, &synth_req).await
+    let mut out = call_provider(provider, &synth_req).await?;
+    out.cost.merge(&side_cost);
+    Ok(out)
 }
 
 
@@ -446,18 +483,28 @@ pub async fn test_vote_models(
     static FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
     let file_id = FILE_COUNTER.fetch_add(1, Ordering::SeqCst);
 
-    // Collect results and test each as it arrives (don't wait for all)
+    // Collect results and test each as it arrives. Every model was dispatched, so
+    // every model's tokens are billed — aborting the client future does not un-bill
+    // them. Drain the set to observe each cost rather than reporting only the
+    // winner's, then hand the winner the whole bill.
     let mut fallback: Option<ProviderResult> = None;
+    let mut winner: Option<ProviderResult> = None;
+    let mut billed = CostBreakdown::zero(&request.model);
 
     while let Some(res) = set.join_next().await {
         let r = match res {
             Ok(Ok(r)) => r,
             _ => continue,
         };
+        billed.merge(&r.cost);
 
         // Keep first successful result as fallback
         if fallback.is_none() {
             fallback = Some(r.clone());
+        }
+
+        if winner.is_some() {
+            continue; // already have a passing candidate; just drain for accounting
         }
 
         if let Some(content) = r
@@ -500,17 +547,22 @@ pub async fn test_vote_models(
             if let Ok(output) = test_result {
                 if output.status.success() {
                     tracing::info!("test_vote: model {} passed tests", r.response.model);
-                    // Abort remaining requests — we have a winner
-                    set.abort_all();
-                    return Ok(r);
+                    winner = Some(r);
                 }
             }
         }
     }
 
+    if let Some(mut w) = winner {
+        w.cost = billed;
+        return Ok(w);
+    }
+
     // No candidate passed — return first result as fallback
     tracing::warn!("test_vote: no candidate passed tests, returning first result");
-    fallback.ok_or_else(|| "All models failed in test_vote".to_string())
+    let mut out = fallback.ok_or_else(|| "All models failed in test_vote".to_string())?;
+    out.cost = billed;
+    Ok(out)
 }
 
 /// Extract code from a model response — handles markdown code blocks.
@@ -590,6 +642,9 @@ pub async fn cascade_test_models(
     static FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     let mut last_result: Option<ProviderResult> = None;
+    // A candidate that generated code and then failed the tests still burned
+    // tokens. Carry every attempt's cost forward onto whichever result we return.
+    let mut billed = CostBreakdown::zero(&request.model);
 
     for model in models {
         let mut req = request.clone();
@@ -604,6 +659,7 @@ pub async fn cascade_test_models(
                 continue;
             }
         };
+        billed.merge(&result.cost);
 
         if last_result.is_none() {
             last_result = Some(result.clone());
@@ -649,14 +705,18 @@ pub async fn cascade_test_models(
             if let Ok(output) = test_result {
                 if output.status.success() {
                     tracing::info!("cascade_test: model {} passed tests", model);
-                    return Ok(result);
+                    let mut out = result;
+                    out.cost = billed;
+                    return Ok(out);
                 }
             }
         }
     }
 
     tracing::warn!("cascade_test: no model passed tests, returning last result");
-    last_result.ok_or_else(|| "All models failed in cascade_test".to_string())
+    let mut out = last_result.ok_or_else(|| "All models failed in cascade_test".to_string())?;
+    out.cost = billed;
+    Ok(out)
 }
 
 

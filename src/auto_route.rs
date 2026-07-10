@@ -542,6 +542,18 @@ mod tests {
         RequestFacts { prompt_tokens_est: 500, gen_tokens_est: 500, has_tools: false, mode }
     }
 
+    /// A pricer that charges for exactly one fixture model. Prices are operator
+    /// config now, so a test that needs a paid candidate must declare its price
+    /// rather than borrow one from a table of real model names.
+    fn pricer_charging(model: &str) -> Pricer {
+        let mut prices = std::collections::HashMap::new();
+        prices.insert(
+            model.to_string(),
+            crate::cost::ModelPricing { input_per_1m: 3.0, output_per_1m: 15.0 },
+        );
+        Pricer::new(prices, crate::cost::Unpriced::Refuse)
+    }
+
     fn opts() -> RouteOpts {
         RouteOpts {
             fast: vec!["fixture-fast".into()],
@@ -622,12 +634,12 @@ mod tests {
     #[test]
     fn quality_mode_uses_quality_list_and_counterfactual() {
         let mut o = opts();
-        o.quality = vec!["glm-5.2:cloud".into()]; // priced in the table
+        o.quality = vec!["fixture-paid".into()];
         o.quality_mode = true;
         let discovered = vec![dm("fixture-coder", "laptop", 0, true)];
         let msgs = vec![json!({"role": "user", "content": "solve step by step"})];
-        let d = decide(&msgs, &o, &discovered, &Pricer::default(), &facts(Mode::Balanced));
-        assert_eq!(d.chosen.unwrap().model, "glm-5.2:cloud");
+        let d = decide(&msgs, &o, &discovered, &pricer_charging("fixture-paid"), &facts(Mode::Balanced));
+        assert_eq!(d.chosen.unwrap().model, "fixture-paid");
         assert!(d.counterfactual_usd > 0.0, "counterfactual priced from quality[0]");
     }
 
@@ -636,11 +648,23 @@ mod tests {
         let mut o = opts();
         // user explicitly allows a paid alternate after the local preference —
         // in cheap mode the local must win even if the paid one is warm/fast
-        o.coder = vec!["glm-5.2:cloud".into(), "fixture-coder".into()];
+        o.coder = vec!["fixture-paid".into(), "fixture-coder".into()];
         let discovered = vec![dm("fixture-coder", "laptop", 0, true)];
         let msgs = vec![json!({"role": "user", "content": "implement a python function"})];
-        let d = decide(&msgs, &o, &discovered, &Pricer::default(), &facts(Mode::Cheap));
+        let d = decide(&msgs, &o, &discovered, &pricer_charging("fixture-paid"), &facts(Mode::Cheap));
         assert_eq!(d.chosen.unwrap().model, "fixture-coder");
+    }
+
+    #[test]
+    fn an_unpriced_candidate_is_free_only_because_nothing_charges_for_it() {
+        // Regression: the router used to price any unknown model at $0, which made
+        // every cloud model look free to the cost term. Scoring still treats an
+        // unpriced model as $0 — but the dispatch gate refuses it before it can be
+        // served, so the two together never authorise unmetered spend.
+        let p = pricer_charging("fixture-paid");
+        assert!(!p.is_priced("fixture-unknown"));
+        assert!(p.allows("cloud", "fixture-unknown").is_err());
+        assert!(p.allows("local", "fixture-unknown").is_ok());
     }
 
     #[test]
@@ -713,11 +737,11 @@ mod tests {
     fn ineligible_quality_model_zeroes_counterfactual() {
         // quality model discovered but can't do tools on a has_tools request →
         // no savings should be claimed against an impossible alternative.
-        let mut q = dm("glm-5.2:cloud", "laptop", 0, true);
+        let mut q = dm("fixture-paid", "laptop", 0, true);
         q.tools = Some(false);
         let chosen = dm("fixture-coder", "laptop", 0, true);
         let mut o = opts();
-        o.quality = vec!["glm-5.2:cloud".into()];
+        o.quality = vec!["fixture-paid".into()];
         let msgs = vec![json!({"role":"user","content":"implement a python function"})];
         let mut f = facts(Mode::Balanced);
         f.has_tools = true;

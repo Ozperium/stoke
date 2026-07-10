@@ -24,22 +24,33 @@ pub async fn stream_race(
         return Err("No providers for stream_race".to_string());
     }
 
-    // Split into free (race) and paid (sequential fallback)
-    let pricer = crate::cost::Pricer::default();
+    let pricer = crate::cost::global();
     let model = body.get("model").and_then(|m| m.as_str()).unwrap_or("");
-    let is_free = |p: &ProviderConfig| {
-        // Check if the model has a price on this provider
-        // Local providers (Ollama) serve free models; cloud providers cost money
-        let pricing = pricer.get_pricing(model);
-        match pricing {
-            Some(p) => p.input_per_1m == 0.0 && p.output_per_1m == 0.0,
-            None => {
-                // Unknown model: assume local provider (Ollama) is free, cloud is paid
-                !p.name.contains("openrouter") && !p.name.contains("openai")
-                    && !p.name.contains("anthropic") && !p.name.contains("google")
+
+    // The pricing gate. This path posts directly rather than going through
+    // router::call_provider_hop, so a provider that may not serve this model is
+    // dropped from the race here — before any connection is opened.
+    let mut refusal: Option<String> = None;
+    let providers: Vec<&ProviderConfig> = providers
+        .into_iter()
+        .filter(|p| match pricer.allows(&p.tier, model) {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::warn!("stream_race: excluding {}: {}", p.name, e);
+                refusal = Some(e);
+                false
             }
-        }
-    };
+        })
+        .collect();
+    if providers.is_empty() {
+        return Err(refusal.unwrap_or_else(|| "No providers for stream_race".to_string()));
+    }
+
+    // Free tiers race each other; racing metered providers would pay for N
+    // answers to use one. Which tier a provider is on is declared in config —
+    // never inferred from its name, which was how a provider called "my-gpu-box"
+    // pointing at a paid API used to be raced as if it were free.
+    let is_free = |p: &ProviderConfig| crate::cost::is_free_tier(&p.tier);
 
     let free_providers: Vec<&ProviderConfig> = providers.iter().filter(|p| is_free(p)).copied().collect();
     let paid_providers: Vec<&ProviderConfig> = providers.iter().filter(|p| !is_free(p)).copied().collect();
@@ -221,6 +232,30 @@ pub async fn stream_race_models(
     if models.is_empty() {
         return Err("No models for stream_race".to_string());
     }
+
+    // The pricing gate, per racing model: this path posts directly, and each
+    // model in the race is a separate billed request.
+    let pricer = crate::cost::global();
+    let models: Vec<String> = {
+        let mut refusal: Option<String> = None;
+        let kept: Vec<String> = models
+            .iter()
+            .filter(|m| match pricer.allows(&provider.tier, m) {
+                Ok(()) => true,
+                Err(e) => {
+                    tracing::warn!("stream_race_models: excluding {}: {}", m, e);
+                    refusal = Some(e);
+                    false
+                }
+            })
+            .cloned()
+            .collect();
+        if kept.is_empty() {
+            return Err(refusal.unwrap_or_else(|| "No models for stream_race".to_string()));
+        }
+        kept
+    };
+    let models: &[String] = &models;
 
     if models.len() == 1 {
         let url = format!(
