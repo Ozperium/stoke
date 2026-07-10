@@ -88,7 +88,7 @@ Because prompts route to your own machines by default, they never leave your inf
 ### Also in the box
 
 - **Response cache** — exact-match plus semantic (semantic is opt-in via `STOKE_SEMANTIC_CACHE`).
-- **Cost tracking** — non-streaming responses carry a `stoke_cost` field and their spend is recorded per key; cost accounting for streamed responses is not implemented yet (SSE usage parsing is on the roadmap). `/v1/budget` shows per-key spend, `/v1/pricing` shows the price table.
+- **Cost tracking** — non-streaming responses carry a `stoke_cost` field and their spend is recorded per key, including every call a fan-out pattern makes; cost accounting for streamed responses is not implemented yet (SSE usage parsing is on the roadmap). Prices come from `[pricing.models]` in your config — Stoke ships none, and refuses to serve a model it cannot price on a metered provider rather than meter it at $0. `/v1/budget` shows per-key spend, `/v1/pricing` shows the configured prices.
 - **Route profiles** — multiple endpoints, each with its own model, routing pattern, and plugin chain.
 - **Plugins** — webhook hooks (`pre_request`, `prompt_filter`, `post_response`) in any language; JS/TS plugins behind a compile-time feature flag (`--features js-plugins`); built-in PII redaction and JSONL audit log.
 - **OpenAI-compatible** — `/v1/chat/completions` passthrough including SSE streaming and `tool_calls`. Works with any OpenAI-compatible client or agent.

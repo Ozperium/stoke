@@ -51,12 +51,13 @@ returns `429` and the request never reaches a provider:
 - **Loop block check.** If the key tripped the loop breaker and the block hasn't
   expired, reject with the remaining block time.
 - **Budget cap.** If the key has a USD limit (set per key via the `[[keys]]` config
-  table) and cumulative spend has reached it, reject. Spend is recorded per request
-  after completion (step 9). Scope note: streaming responses are passed through
-  byte-for-byte and currently bypass cost accounting — a streamed request does not add
-  to a key's spend (SSE `usage` parsing is not implemented yet). Auth, rate limiting,
-  and loop detection still apply to streaming traffic; only dollar-accrual from streams
-  is deferred.
+  table) and cumulative spend has reached it, reject. Spend is recorded as soon as a
+  non-streaming request's cost is known — before the response hooks run — and includes
+  every provider call the request issued, not just the one whose body is returned.
+  Scope note: streaming responses are passed through byte-for-byte and currently bypass
+  cost accounting — a streamed request does not add to a key's spend (SSE `usage`
+  parsing is not implemented yet). Auth, rate limiting, and loop detection still apply
+  to streaming traffic; only dollar-accrual from streams is deferred.
 - **Rate limit.** Sliding 60-second window of request timestamps per key; over the
   key's configured requests-per-minute (`rate_limit_rpm` in the `[[keys]]` table),
   reject.
@@ -116,7 +117,11 @@ The upstream SSE bytes are passed through unmodified as `text/event-stream`.
 ### 6. Cache lookup (non-streaming, `single` routing)
 
 Only deterministic requests are cacheable: temperature absent or <= 0.01
-(`src/cache.rs`). The cache key is SHA-256 over model + prompt text + `max_tokens`.
+(`src/cache.rs`). The cache key is SHA-256 over a *scope* + model + prompt text +
+`max_tokens`, where the scope is the calling API key and the route path. Entries are
+served back only within their own scope — including the semantic layer, which matches
+by embedding and would otherwise hand one key's answer to another key asking a merely
+similar question.
 
 Lookup is two-layer: exact hash first, then — if `STOKE_SEMANTIC_CACHE` is set — a
 semantic search over cached prompt embeddings (cosine similarity threshold 0.92, TTL
@@ -157,10 +162,35 @@ hop guard.
 ### 8. Cost tracking and response annotation
 
 `Pricer` (`src/cost.rs`) computes a per-request cost breakdown from the provider's
-`usage` field against a static per-1M-token price table. Local models carry a $0.00 API
-price in that table — their marginal cost per request is electricity on hardware you
-already own, not API dollars. The gateway annotates the JSON response with
-non-standard fields that OpenAI clients ignore:
+`usage` field against the operator's `[pricing.models]` table. Stoke ships no prices
+and infers none from a model's name.
+
+Providers on a free tier (`local`, `remote`) need no prices: their marginal cost per
+request is electricity on hardware you already own, not API dollars. Every other tier
+is metered, and `Pricer::allows` refuses to dispatch a model it cannot price. The gate
+sits inside `call_provider_hop`, so it covers single routing, the failover chain, and
+every fusion fan-out — always before a provider is contacted. Serving an unpriced
+model at $0 would leave `budget_usd` blind to the spend, which is the one failure a
+spend firewall cannot have. `[pricing] unpriced = "free"` opts out explicitly.
+
+A fusion pattern issues many provider calls and returns one; the returned
+`CostBreakdown` carries the sum, so `record_spend` books the whole bill rather than
+the winner's share. Spend is recorded before the response hooks run — a plugin that
+blocks or rewrites a body cannot un-bill a call that already happened.
+
+`[limits]` bounds how far one inbound request may fan out: `max_n_samples`,
+`max_vote_models`, and `allow_caller_routing` (off by default, so a caller cannot
+select a multi-call pattern in the request body).
+
+Both the fan-out refusal and the `vote_models` ceiling are enforced on the **resolved**
+routing, after the route profile, request body, config default, auto-router, and
+`pre_request` plugins have all had their say. Checking earlier misses the interesting
+case: `auto` is not itself a fan-out, but `decide()` resolves it to `cascade_test` when
+the caller supplies `test_code` and `entry_point` — so a caller could select a fan-out
+without ever naming one.
+
+The gateway annotates the JSON response with non-standard fields that OpenAI clients
+ignore:
 
 - `stoke_cost` — model, token counts, `cost_usd`
 - `stoke_elapsed_ms` — end-to-end provider latency
@@ -272,7 +302,7 @@ Ollama bound to `127.0.0.1`. Stoke is the only network-facing door, and it requi
 | `src/failover.rs` | Connect-phase streaming failover across ranked candidates; hands the in-flight guard to the stream so load stays counted for the stream's lifetime; `stream_hedged` races two zero-marginal nodes (hop headers on both attempts) |
 | `src/router.rs` | Provider passthrough (`call_provider` / `call_provider_hop` with the hop header), the shared pooled HTTP client, and experimental multi-model request strategies |
 | `src/cache.rs` | Response cache: exact hash layer always on for deterministic requests, semantic embedding layer opt-in, TTL eviction |
-| `src/cost.rs` | Static per-1M-token price table and per-request `CostBreakdown` (the `stoke_cost` field) |
+| `src/cost.rs` | Operator-configured per-1M-token prices, the fail-closed dispatch gate, and per-request `CostBreakdown` (the `stoke_cost` field) |
 | `src/ttft.rs` | Time-to-first-token tracking scaffolding — not yet fed by the request path; live per-node latency EWMA is on `/v1/nodes` instead |
 | `src/auto_route.rs` | Auto-routing v2: heuristic prompt classifier (no LLM call, no network) + candidate scorer — every eligible (model, node) pair scored on estimated cost, predicted latency (measured TTFT/tps, cold-load penalty), and the user's preference order; modes `auto`/`auto-cheap`/`auto-fast`; hard fit exclusions (context window, tool capability); emits the `stoke_route.auto` receipt with counterfactual |
 | `src/stream_fusion.rs` | Experimental streaming strategies (racing candidate connections, first to respond wins) |
@@ -387,7 +417,7 @@ Environment variables (server):
 | `GET /v1/models` | required | Models known from config |
 | `GET /v1/nodes` | required | Live node registry snapshot |
 | `GET /v1/budget` | required | Per-key spend, limits, recent request counts, and the receipts ledger (zero-marginal share + cloud list-price counterfactual, estimates) |
-| `GET /v1/pricing` | required | The price table behind `stoke_cost` |
+| `GET /v1/pricing` | required | The configured prices behind `stoke_cost` |
 | `GET /v1/cache` | required | Cache entry/hit counts |
 | `GET /v1/routes` | required | Configured route profiles |
 

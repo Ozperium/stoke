@@ -9,7 +9,8 @@ port = 8787
 
 # Top-level defaults (must sit above the first [section] header)
 routing = "single"        # "single" (node-aware placement) or "auto" (classify then route)
-default_model = "qwen3:8b"
+# Run `stoke-cli init` to fill this in from the models on your own Ollama.
+default_model = "your-model:tag"
 
 # ─── Providers ──────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ tier = "local"
 # type = "openai_compatible"
 # base_url = "http://192.168.1.40:11434/v1"
 # tier = "remote"
-# models = ["llama3.3:70b", "gemma4:e4b-mlx"]
+# models = ["a-model-on-that-box", "another-one"]
 
 # Cloud tier (optional). Only configure it if you accept that automatic
 # failover may use it — if prompts must never leave your machines, omit it.
@@ -45,7 +46,7 @@ tier = "local"
 # base_url = "https://openrouter.ai/api/v1"
 # api_key_env = "OPENROUTER_API_KEY"
 # tier = "cloud"
-# models = ["glm-5.2:cloud"]
+# models = ["the-model-id-that-provider-uses"]
 
 # Anthropic upstream — enables the /v1/messages endpoint so Claude Code can
 # point ANTHROPIC_BASE_URL=http://localhost:8787 and run under Stoke's caps.
@@ -113,6 +114,37 @@ tier = "local"
 # [[routes]]
 # name = "code"
 # path = "/v1/code/completions"
-# model = "qwen3:8b"
+# model = "your-model:tag"
 # routing = "single"
 # builtins = ["prompt_harness", "code_formatter"]
+
+# ─── Pricing (required for any non-local provider) ───────────────
+# Stoke ships no model names and no prices. A provider on a metered tier
+# (anything that is not "local" or "remote") may only serve a model whose
+# price you declare here — otherwise the request is refused with 403.
+#
+# That refusal is the point. A model metered at $0 moves no meter, so
+# `budget_usd` below would never trip and the cap would be decorative.
+# Copy the numbers from your provider's pricing page.
+#
+# [pricing.models."<the model id you send>"]
+# input_per_1m = 3.00
+# output_per_1m = 15.00
+#
+# Serve unpriced models anyway, accepting that budget_usd cannot see them:
+# [pricing]
+# unpriced = "free"
+
+# ─── Fan-out limits ──────────────────────────────────────────────
+# One inbound request can become many billed provider calls. These are the
+# ceilings; without them the caller, not you, decides how much a request costs.
+# [limits]
+# max_n_samples = 5           # cap on self_consistency samples
+# max_vote_models = 5         # cap on the length of a voting/cascade list
+# allow_caller_routing = false  # may a caller pick a multi-call pattern in the body?
+
+# ─── Per-key enforcement ─────────────────────────────────────────
+# [[keys]]
+# key = "agent-key"           # must also appear in STOKE_API_KEYS
+# budget_usd = 20.0           # hard cap; 429 once cumulative spend reaches it
+# rate_limit_rpm = 60         # sliding 60s window

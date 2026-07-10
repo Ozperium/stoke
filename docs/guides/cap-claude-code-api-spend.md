@@ -44,6 +44,12 @@ tier = "cloud"
 key = "cc-cap-key"
 budget_usd = 20.0
 rate_limit_rpm = 60
+
+# Stoke ships no prices and guesses none. Declare what the model costs.
+# Copy the numbers from Anthropic's pricing page for the model you use.
+[pricing.models."claude-haiku-4"]
+input_per_1m = 0.80
+output_per_1m = 4.00
 ```
 
 Two separate keys are in play, and keeping them straight is the whole trick:
@@ -53,7 +59,15 @@ Two separate keys are in play, and keeping them straight is the whole trick:
 
 When the metered spend for `cc-cap-key` reaches `budget_usd`, the next request is refused with HTTP 429 and a body like `Budget exceeded: $20.0130/$20.0000 for key cc-cap-k` (Stoke identifies the key by its first eight characters). `rate_limit_rpm` caps requests per rolling 60-second window.
 
-One caveat that decides whether the dollar cap does anything: Stoke only meters models it can price. It ships a built-in price table that today knows `claude-haiku-4` and `claude-sonnet-4`; a model ID it doesn't recognize is priced at $0, so its spend never moves the meter. Point Claude Code at a model Stoke prices (this guide uses `claude-haiku-4`), and check the table with `stoke-cli pricing`.
+The `[pricing]` block is not optional bookkeeping — it is what makes the cap real. A dollar cap can only stop spend the gateway can measure, so Stoke refuses to serve a model on a metered provider until you tell it what that model costs:
+
+```
+HTTP 403
+no price configured for model 'claude-opus-4-8' on a 'cloud' provider, so its
+spend cannot be metered and `budget_usd` could not enforce a cap.
+```
+
+That refusal is deliberate. The alternative — quietly metering an unrecognised model at $0 — leaves you with a budget cap that never trips and a dashboard that says you spent nothing. Declare the price, or set `[pricing] unpriced = "free"` if you knowingly want that model served without a dollar ceiling. Local and LAN providers (`tier = "local"` or `"remote"`) need no prices: their compute is not billed per token. Check what Stoke knows with `stoke-cli pricing`.
 
 ## Start Stoke
 
@@ -144,7 +158,7 @@ Read this section before you trust the dollar figure.
 - **It forwards to Anthropic; it does not run Claude Code on local models.** Your traffic still goes to Claude and still bills Anthropic. Stoke controls *whether* a call goes out, not *where* it runs.
 - **Subscriptions can't be dollar-capped.** If you use Claude Code on a Claude Max or Pro subscription rather than a metered API key, there is no per-request dollar price to cap. Stoke can still rate-limit and loop-kill that traffic — it just can't put a USD ceiling on it. Hard `budget_usd` caps apply only to metered API keys.
 - **Streamed responses don't yet accrue spend.** Spend records from non-streaming responses only; streamed-request cost accounting isn't implemented. Claude Code streams by default, so treat the loop breaker and `rate_limit_rpm` — which enforce on *all* traffic, streaming included, alongside auth — as your primary guardrails, and `budget_usd` as a hard backstop for the non-streaming, priced portion.
-- **Pricing comes from a built-in table.** Stoke meters a response by looking its model up in a built-in price table; a model ID it doesn't recognize is priced at $0, so the dollar meter won't move for it. Check which models Stoke prices before you rely on the cap:
+- **You supply the prices, and they can go stale.** Stoke meters a response against the `[pricing.models]` numbers in your config. It ships none and infers none, so a model you haven't priced is refused rather than served for free — but nothing tells you when a provider changes its rates. Check what the gateway believes:
 
 ```bash
 stoke-cli pricing
