@@ -36,5 +36,5 @@ jobs:
         run: ./scripts/smoke_federation.sh
 
       # Guards the claim on the homepage. Each assertion is a bug that shipped once.
-      - name: Smoke — spend firewall (pricing gate, fan-out clamp, cache isolation)
+      - name: Smoke — spend firewall (pricing gate, streamed spend, fan-out clamp, cache isolation)
         run: ./scripts/smoke_spend.sh

@@ -1,6 +1,6 @@
 [package]
 name = "stoke"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "The kill switch for runaway AI. Hard budget caps, loop detection, local-first routing — in one Rust binary."
 license = "MIT"
