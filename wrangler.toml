@@ -1,0 +1,8 @@
+name = "stoke"
+compatibility_date = "2026-03-12"
+pages_build_output_dir = "landing"
+
+[[d1_databases]]
+binding = "STOKE_EVENTS"
+database_name = "stoke_site_events"
+database_id = "c04effbf-1293-4b35-84d3-9fb47519ed73"

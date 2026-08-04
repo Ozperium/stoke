@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/route.css">
+<meta name="robots" content="noindex, follow">
+<link rel="canonical" href="https://stokegate.com/security/">
+<title>Security — Stoke</title>
+<meta name="description" content="Security reporting and trust information for Stoke, the local-first AI gateway.">
+</head>
+<body>
+<nav><div class="nav-inner"><a class="logo" href="/">⬡ Stoke</a><div class="nav-links"><a href="/guides/">Guides</a><a data-track="github_clicked" href="https://github.com/Ozperium/stoke">GitHub</a></div></div></nav>
+<main>
+  <div class="crumb"><a href="/">Stoke</a> / Security</div>
+  <h1>Security</h1>
+  <p class="lede">Stoke is designed to keep the gateway on the request path and Ollama on loopback. The source is open so the security boundary can be inspected.</p>
+  <div class="card">
+    <h2>Report a vulnerability</h2>
+    <p>Please use GitHub's private vulnerability reporting flow rather than posting credentials, exploit details, or sensitive configuration in a public issue.</p>
+    <a class="btn" data-track="github_clicked" href="https://github.com/Ozperium/stoke/security/advisories/new">Report privately on GitHub</a>
+  </div>
+  <h2>Security properties</h2>
+  <ul>
+    <li>Authentication is fail-closed unless local development mode is explicitly enabled.</li>
+    <li>Ollama can remain bound to <code>127.0.0.1</code>; Stoke is the authenticated network door.</li>
+    <li>Budget, rate, and loop checks run before a provider call.</li>
+  </ul>
+  <p>Read the <a data-track="github_clicked" href="https://github.com/Ozperium/stoke/blob/main/ARCHITECTURE.md">architecture</a> and the repository's <a data-track="github_clicked" href="https://github.com/Ozperium/stoke/blob/main/AGENTS.md">security invariants</a>.</p>
+</main>
+<footer>MIT licensed · <a href="https://stokegate.com">stokegate.com</a> · <a data-track="github_clicked" href="https://github.com/Ozperium/stoke">GitHub</a></footer>
+<script src="/tracking.js" defer></script>
+</body>
+</html>

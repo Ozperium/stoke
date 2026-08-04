@@ -245,7 +245,7 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
       <a href="#install">Install</a>
       <a href="#roadmap">What's next</a>
       <a href="/guides/">Guides</a>
-      <a href="https://github.com/Ozperium/stoke" class="nav-cta">GitHub</a>
+      <a data-track="github_clicked" href="https://github.com/Ozperium/stoke" class="nav-cta">GitHub</a>
     </div>
   </div>
 </nav>
@@ -259,8 +259,8 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
         <h1>Your agents. Your machines.<br><span class="hl">Your rules.</span></h1>
         <p class="hero-sub">Route to your own hardware — or the cloud, when you choose. Refuse anything over budget. Kill loops in seconds. One ~5.5&nbsp;MB Rust binary that decides <em>before</em> the money is spent, not a dashboard that reports it after.</p>
         <div class="hero-cta">
-          <a href="#install" class="btn btn-primary">Install in 60 seconds</a>
-          <a href="https://github.com/Ozperium/stoke" class="btn btn-secondary">★ Star on GitHub</a>
+          <a data-track="install_cta_clicked" href="#install" class="btn btn-primary">Install in 60 seconds</a>
+          <a data-track="github_clicked" href="https://github.com/Ozperium/stoke" class="btn btn-secondary">★ Star on GitHub</a>
         </div>
         <p class="hero-note">Works with any OpenAI-compatible agent — point <code>base_url</code> at <code>localhost:8787/v1</code>.<br>Claude Code connects via <code>ANTHROPIC_BASE_URL</code>. Pre-release · MIT · dogfooded daily.</p>
       </div>
@@ -322,7 +322,7 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
         <div class="burn-cap">Unattended overnight burn (8h)</div>
         <div class="burn-num" id="burn-num">$0</div>
         <div class="burn-note">A runaway loop doesn't sleep. Stoke caps it at <b>your number</b>, or trips the loop breaker in seconds.</div>
-        <a href="#install" class="btn btn-primary">Cap it →</a>
+        <a data-track="install_cta_clicked" href="#install" class="btn btn-primary">Cap it →</a>
       </div>
     </div>
   </div>
@@ -701,8 +701,8 @@ tier     = <span class="str">"local"</span></div>
       <h2>Put a firewall between your agents and your bill.</h2>
       <p>Open source, MIT licensed, no signup, no lock-in. Pre-release and built in the open.</p>
       <div class="hero-cta">
-        <a href="#install" class="btn btn-primary">Get started</a>
-        <a href="https://github.com/Ozperium/stoke" class="btn btn-secondary">★ Star on GitHub</a>
+        <a data-track="install_cta_clicked" href="#install" class="btn btn-primary">Get started</a>
+        <a data-track="github_clicked" href="https://github.com/Ozperium/stoke" class="btn btn-secondary">★ Star on GitHub</a>
       </div>
     </div>
   </div>
@@ -721,6 +721,9 @@ tier     = <span class="str">"local"</span></div>
       <a href="https://github.com/Ozperium/stoke/blob/main/ARCHITECTURE.md">Architecture</a>
       <a href="https://github.com/Ozperium/stoke/blob/main/docs/design/routing.md">Routing design</a>
       <a href="/guides/">Guides</a>
+      <a href="/security/">Security</a>
+      <a href="/legal/">Legal</a>
+      <a href="/contact/">Contact</a>
       <a href="/llms.txt">llms.txt</a>
       <a href="https://github.com/Ozperium/stoke/blob/main/skills/stoke/SKILL.md">Agent skill</a>
     </div>
@@ -902,5 +905,6 @@ tier     = <span class="str">"local"</span></div>
   if (cModel) { [cModel, cTok, cRpm].forEach(function (el) { el.addEventListener('input', calc); }); calc(); }
 })();
 </script>
+<script src="/tracking.js" defer></script>
 </body>
 </html>

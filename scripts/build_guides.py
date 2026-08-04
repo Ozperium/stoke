@@ -290,6 +290,7 @@ PAGE = """<!DOCTYPE html>
 <meta property="og:description" content="{description}">
 <meta property="og:url" content="{canonical}">
 <script type="application/ld+json">{jsonld}</script>
+<script src="/tracking.js" defer></script>
 <style>{css}</style>
 </head>
 <body>
@@ -309,7 +310,7 @@ PAGE = """<!DOCTYPE html>
   <a class="btn" href="https://github.com/Ozperium/stoke">Get Stoke on GitHub</a>
 </div>
 </main>
-<footer>MIT licensed · <a href="https://stokegate.com">stokegate.com</a> · <a href="https://github.com/Ozperium/stoke">GitHub</a></footer>
+<footer>MIT licensed · <a href="https://stokegate.com">stokegate.com</a> · <a href="/security/">Security</a> · <a href="/legal/">Legal</a> · <a href="/contact/">Contact</a> · <a href="https://github.com/Ozperium/stoke">GitHub</a></footer>
 </body>
 </html>
 """
