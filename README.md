@@ -111,7 +111,18 @@ cd stoke
 cargo build --release
 ```
 
-Minimal `stoke.toml` for a single local Ollama:
+```bash
+# Guided local setup: discovers Ollama, writes stoke.toml and a protected .env
+stoke setup
+
+# Load the generated key and start the gateway
+set -a; . ./.env; set +a
+stoke serve
+```
+
+`stoke setup` defaults to localhost and local Ollama. Use `stoke setup --bind-all` only when serving a LAN, and keep the generated bearer key enabled.
+
+For a fully manual configuration, use this minimal `stoke.toml` for a single local Ollama:
 
 ```toml
 routing = "single"
