@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stoke · Live control room</title>
+  <link rel="stylesheet" href="/ui/dashboard.css">
+  <script src="/ui/htmx.min.js"></script>
+  <script src="/ui/sse.js"></script>
+</head>
+<body hx-ext="sse" sse-connect="/ui/events">
+  <div class="ambient ambient--one"></div>
+  <div class="ambient ambient--two"></div>
+  <main class="shell">
+    <header class="masthead">
+      <a class="brand" href="/ui" aria-label="Stoke control room">
+        <span class="brand__mark">S</span>
+        <span>STOKE</span>
+      </a>
+      <div class="live"><span class="live__dot"></span>Live gateway</div>
+    </header>
+
+    <section class="hero">
+      <div>
+        <p class="eyebrow">LOCAL ENFORCEMENT</p>
+        <h1>Every decision.<br><span>Before the spend.</span></h1>
+        <p class="lede">Watch requests pass through budget, loop, routing, and provider gates in real time.</p>
+        <div class="demo-action">
+          <button class="demo-action__button" hx-post="/ui/demo" hx-swap="none">Run enforcement demo</button>
+          <span>one request · one deliberate loop</span>
+        </div>
+      </div>
+      <div class="pipeline" aria-label="Stoke request pipeline">
+        <div class="pipeline__step pipeline__step--active"><b>01</b><span>Request</span></div>
+        <i></i>
+        <div class="pipeline__step"><b>02</b><span>Budget</span></div>
+        <i></i>
+        <div class="pipeline__step"><b>03</b><span>Loop guard</span></div>
+        <i></i>
+        <div class="pipeline__step"><b>04</b><span>Route</span></div>
+        <i></i>
+        <div class="pipeline__step"><b>05</b><span>Provider</span></div>
+      </div>
+    </section>
+
+    <section id="summary" class="summary" hx-get="/ui/summary" hx-trigger="load, every 1s" hx-swap="innerHTML">
+      <div class="metric metric--loading"></div><div class="metric metric--loading"></div><div class="metric metric--loading"></div><div class="metric metric--loading"></div>
+    </section>
+
+    <section class="traffic">
+      <div class="section-heading">
+        <div><p class="eyebrow">DECISION FEED</p><h2>Live traffic</h2></div>
+        <span class="section-heading__hint">Newest first</span>
+      </div>
+      <div id="event-list" class="events" sse-swap="event" hx-swap="afterbegin">
+        {{ events_html|safe }}
+      </div>
+    </section>
+  </main>
+</body>
+</html>

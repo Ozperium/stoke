@@ -232,8 +232,9 @@ logged, and its live load and latency are visible on `GET /v1/nodes` instead.
   prefix, optionally the body) to a configured file.
 - JS/TS `post_response` plugins.
 - `BudgetGuard::record_spend` adds the request's cost to the key's cumulative spend —
-  this is what the budget cap in step 2 checks against. It runs on the non-streaming
-  path only; streamed responses do not yet accrue spend (see the scope note in step 2).
+  this is what the budget cap in step 2 checks against. Non-streaming responses record
+  usage directly; streaming responses are metered from SSE usage and charged when the
+  stream ends, with an in-flight reservation held before dispatch.
 - Cacheable responses are stored (with a prompt embedding when semantic cache is on).
 
 ## Node registry and placement
@@ -484,8 +485,6 @@ These do not exist in the code today and nothing above claims them:
 - Anthropic Messages API endpoint (`/v1/messages`) for native Claude Code support.
 - Homebrew formula and a published container image (a `Dockerfile` builds one today,
   but nothing is pushed to a registry yet).
-- ~~Cost accounting for streaming responses (SSE `usage` parsing so streamed requests~~ — done
-  accrue against a key's budget; today only non-streaming responses do).
 - Per-key loop-detection thresholds via config (per-key budgets and rate limits already
   ship in the `[[keys]]` table; loop thresholds are still global constants).
 - Quota-aware cloud escalation and degrade-to-local policy actions.

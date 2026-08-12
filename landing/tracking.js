@@ -25,9 +25,9 @@
   }
 
   document.addEventListener('click', function (event) {
-    var link = event.target.closest('a[data-track], a[href^="https://github.com/Ozperium/stoke"]');
-    if (!link) return;
-    track(link.dataset.track || 'github_clicked', link.href);
+    var target = event.target.closest('[data-track], a[href^="https://github.com/Ozperium/stoke"]');
+    if (!target) return;
+    track(target.dataset.track || 'github_clicked', target.href || '');
   });
 
   var install = document.getElementById('install');

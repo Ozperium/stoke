@@ -76,9 +76,8 @@ tier = "local"
 # ─── Per-key enforcement policy ──────────────────────────────────
 # Each key here must also appear in STOKE_API_KEYS. Applied at startup.
 # budget_usd: hard cumulative spend cap; over it, requests are refused (429).
-#   Note: spend currently accrues on non-streaming responses; streamed-request
-#   cost accounting is on the roadmap. Loop detection and rate limits enforce on
-#   ALL traffic (streaming included), so runaway loops are stopped regardless.
+#   Streamed responses accrue spend from provider usage (or a flagged estimate)
+#   and in-flight reservations prevent concurrent streams from overshooting the cap.
 # rate_limit_rpm: max requests per rolling 60s window (0/omitted = unlimited).
 # (Loop detection is always on; its thresholds are global — per-key tuning is roadmap.)
 
@@ -110,6 +109,9 @@ tier = "local"
 
 # ─── Route profiles (multi-endpoint) ────────────────────────────
 # Each profile is its own POST endpoint with a fixed model and builtins.
+# `allowed_tiers` is an egress allowlist: when it is set, a route refuses
+# every other tier before it can be called. Use ["local", "remote"] for
+# private work that must never fall back to a cloud provider.
 
 # [[routes]]
 # name = "code"
@@ -117,6 +119,7 @@ tier = "local"
 # model = "your-model:tag"
 # routing = "single"
 # builtins = ["prompt_harness", "code_formatter"]
+# allowed_tiers = ["local", "remote"]  # deny cloud fallback
 
 # ─── Pricing (required for any non-local provider) ───────────────
 # Stoke ships no model names and no prices. A provider on a metered tier

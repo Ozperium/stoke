@@ -32,6 +32,7 @@ SLOW_MS = int(ARGS[ARGS.index("--slow-ms") + 1]) if "--slow-ms" in ARGS else 0
 LOCK = threading.Lock()
 CALLS = 0
 STREAM_OPTIONS_SEEN = 0
+LAST_BODY = b""
 
 USAGE = {"prompt_tokens": 1000, "completion_tokens": 1000, "total_tokens": 2000}
 
@@ -50,13 +51,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/count":
             self._json({"calls": CALLS, "stream_options_seen": STREAM_OPTIONS_SEEN})
+        elif self.path == "/last":
+            self._json({"body": LAST_BODY.decode("utf-8", errors="replace")})
         elif self.path.startswith("/api/tags") or self.path.startswith("/api/ps"):
             self._json({"models": []})
         else:
             self._json({}, 404)
 
     def do_POST(self):
-        global CALLS, STREAM_OPTIONS_SEEN
+        global CALLS, LAST_BODY, STREAM_OPTIONS_SEEN
         raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         if "chat/completions" not in self.path and "/v1/messages" not in self.path:
             self._json({}, 404)
@@ -68,6 +71,7 @@ class Handler(BaseHTTPRequestHandler):
 
         with LOCK:
             CALLS += 1
+            LAST_BODY = raw
             if "stream_options" in req:
                 STREAM_OPTIONS_SEEN += 1
 

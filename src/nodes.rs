@@ -252,6 +252,18 @@ impl NodeRegistry {
         providers: &'a [ProviderConfig],
         exclude_stoke: bool,
     ) -> (Vec<&'a ProviderConfig>, Vec<String>) {
+        self.rank_with_tiers(model, providers, exclude_stoke, &[])
+    }
+
+    /// Like `rank`, restricted to explicitly allowed provider tiers when present.
+    /// An empty allowlist preserves normal routing across every configured tier.
+    pub fn rank_with_tiers<'a>(
+        &self,
+        model: &str,
+        providers: &'a [ProviderConfig],
+        exclude_stoke: bool,
+        allowed_tiers: &[String],
+    ) -> (Vec<&'a ProviderConfig>, Vec<String>) {
         let mut explain = Vec::new();
         // (provider, score, tier_rank, inflight, ewma)
         let mut candidates: Vec<(&ProviderConfig, u8, u8, usize, f64)> = Vec::new();
@@ -259,6 +271,10 @@ impl NodeRegistry {
         for p in providers {
             if exclude_stoke && p.r#type == "stoke" {
                 explain.push(format!("{}: excluded (hop guard)", p.name));
+                continue;
+            }
+            if !allowed_tiers.is_empty() && !allowed_tiers.iter().any(|tier| tier == &p.tier) {
+                explain.push(format!("{}: excluded (tier policy)", p.name));
                 continue;
             }
             let entry = self.nodes.get(&p.name);
@@ -818,6 +834,20 @@ mod tests {
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].name, "laptop");
         assert!(explain.iter().any(|e| e.contains("fed-b: excluded (hop guard)")));
+    }
+
+    #[test]
+    fn tier_policy_excludes_cloud_providers() {
+        let providers = vec![
+            provider("laptop", "local", &["m1"]),
+            provider("cloud", "cloud", &["m1"]),
+        ];
+        let reg = registry_with(&providers);
+        let allowed = ["local".to_string(), "remote".to_string()];
+        let (ranked, explain) = reg.rank_with_tiers("m1", &providers, false, &allowed);
+        assert_eq!(ranked.len(), 1);
+        assert_eq!(ranked[0].name, "laptop");
+        assert!(explain.iter().any(|e| e.contains("cloud: excluded (tier policy)")));
     }
 
     #[test]

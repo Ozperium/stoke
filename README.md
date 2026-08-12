@@ -26,7 +26,55 @@ A background registry polls each Ollama node's `/api/tags` (models pulled) and `
 
 Non-streaming responses carry a `stoke_route` field explaining the decision — the chosen node and why every candidate ranked where it did. For streamed requests the same placement is logged and visible via `GET /v1/nodes`. Routing decisions are always inspectable.
 
-### Auto-routing: an optimizer, not a guesser
+### Three-node topology
+
+Stoke keeps the client endpoint stable while its registry discovers model inventory, warm state, health, load, and measured performance from configured capacity. The same pattern scales from one local Ollama to multiple local or federated nodes:
+
+```toml
+# gateway receiving client traffic
+[[providers]]
+name = "ollama-local"
+type = "openai_compatible"
+base_url = "http://127.0.0.1:11434/v1"
+tier = "local"
+
+[[providers]]
+name = "gpu-west"
+type = "openai_compatible"
+base_url = "http://192.168.1.40:11434/v1"
+tier = "remote"
+models = ["coder-35b"]
+
+[[providers]]
+name = "cpu-east"
+type = "openai_compatible"
+base_url = "http://192.168.1.41:11434/v1"
+tier = "remote"
+models = ["chat-8b"]
+
+# A federated Stoke is configured the same way, with richer /v1/nodes state.
+[[providers]]
+name = "studio"
+type = "stoke"
+base_url = "http://192.168.1.33:8787/v1"
+api_key_env = "STUDIO_STOKE_KEY"
+tier = "remote"
+```
+
+Clients continue to use `OPENAI_BASE_URL=http://localhost:8787/v1`. Stoke polls `GET /v1/nodes`, filters by route policy, prefers eligible warm capacity, and fails over when a node becomes unavailable. Clients do not maintain a topology map.
+
+The authenticated node view is concrete JSON, not a health-only ping:
+
+```json
+{
+  "nodes": [{
+    "name": "gpu-west", "tier": "remote", "healthy": true,
+    "models": ["coder-35b"], "warm_models": ["coder-35b"],
+    "in_flight": 0, "latency_ewma_ms": 2100
+  }]
+}
+```
+
 
 Send `"model": "auto"` (or pick it in your agent's model list) and Stoke scores every eligible (model, node) candidate on **estimated cost, predicted latency (from measured stats), and your stated preference order**, then picks. `auto-cheap` weights spend down; `auto-fast` weights speed. Candidates come only from your config and your discovered nodes — Stoke ships with zero model names.
 
@@ -89,13 +137,15 @@ Because prompts route to your own machines by default, they never leave your inf
 
 - **Response cache** — exact-match plus semantic (semantic is opt-in via `STOKE_SEMANTIC_CACHE`).
 - **Cost tracking** — non-streaming responses carry a `stoke_cost` field, and both streamed and non-streamed responses record their spend per key, including every call a fan-out pattern makes. Streamed spend is read from the provider's own usage report as the stream passes; if a metered provider reports none, Stoke bills an estimate and says so (`estimated_usd` in `/v1/budget`) rather than booking $0. Prices come from `[pricing.models]` in your config — Stoke ships none, and refuses to serve a model it cannot price on a metered provider rather than meter it at $0. Before dispatching, Stoke holds the most a request could cost against the key's cap and refuses it if the hold would not fit, so concurrent streams cannot overshoot while none of them has been charged yet. `/v1/budget` shows per-key spend, held money, and the configured prices are at `/v1/pricing`.
-- **Route profiles** — multiple endpoints, each with its own model, routing pattern, and plugin chain.
+- **Route profiles** — multiple endpoints, each with its own model, routing pattern, plugin chain, and optional `allowed_tiers` egress allowlist. A route set to `["local", "remote"]` refuses cloud fallback before any provider is called.
 - **Plugins** — webhook hooks (`pre_request`, `prompt_filter`, `post_response`) in any language; JS/TS plugins behind a compile-time feature flag (`--features js-plugins`); built-in PII redaction and JSONL audit log.
 - **OpenAI-compatible** — `/v1/chat/completions` passthrough including SSE streaming and `tool_calls`. Works with any OpenAI-compatible client or agent.
 
 Single Rust binary (~5.5 MB release build), zero runtime dependencies, TOML config, default port 8787.
 
 ## Quickstart
+
+The product boundary and the answer to “where do the models come from?” are recorded in [`docs/control-plane-positioning.md`](docs/control-plane-positioning.md). Stoke is a control plane for capacity you attach; it does not ship a hidden model catalogue or provider credits.
 
 Static binaries for macOS (arm64/x64) and Linux (x64/arm64) are built from every commit on `main` and published to a rolling `nightly` prerelease. The installer picks the right one, verifies its checksum, and falls back to compiling from source on any other platform.
 
@@ -207,6 +257,8 @@ The registry polls both nodes and places each request on whichever machine has t
 | Endpoint | What it returns |
 |---|---|
 | `GET /health` | Liveness. The only endpoint that does not require auth. |
+| `GET /ui` | Embedded live control room: budget state, node health, and a real-time enforcement decision feed. In authenticated mode, use the browser's Basic Auth prompt with any username and a Stoke API key as the password. |
+| `POST /ui/demo` | Runs five real, repeated requests through Stoke so the live feed visibly shows allowed/cache decisions followed by loop enforcement. |
 | `POST /v1/chat/completions` | OpenAI-compatible chat, streaming and `tool_calls` included; non-streaming responses carry `stoke_cost` and `stoke_route` (for streams, placement is in the logs and on `/v1/nodes`). |
 | `POST /v1/messages` | Anthropic Messages API — enforced passthrough to a configured `anthropic` provider. Lets Claude Code point `ANTHROPIC_BASE_URL` at Stoke. Same auth/budget/rate/loop checks; cost in the `x-stoke-cost` response header. |
 | `GET /v1/models` | Models declared in provider config, per provider (live per-node inventory is on `/v1/nodes`). |

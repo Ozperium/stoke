@@ -22,12 +22,21 @@ use axum::{
 use futures_util::StreamExt;
 use serde_json::Value;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::config::ProviderConfig;
 use crate::router::SHARED_CLIENT;
 use crate::AppState;
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
+
+fn message_outcome(status: StatusCode) -> crate::dashboard::Outcome {
+    if status.is_success() {
+        crate::dashboard::Outcome::Allowed
+    } else {
+        crate::dashboard::Outcome::Failed
+    }
+}
 
 pub async fn messages(
     State(state): State<AppState>,
@@ -63,6 +72,16 @@ pub async fn messages(
         .check_with_prompt(&api_key, &prompt_hash, &prompt_text)
         .await
     {
+        crate::record_decision(
+            &state,
+            crate::dashboard::Outcome::Blocked,
+            &model,
+            "anthropic",
+            "",
+            reason.clone(),
+            0.0,
+            0,
+        );
         return (StatusCode::TOO_MANY_REQUESTS, reason).into_response();
     }
 
@@ -70,6 +89,16 @@ pub async fn messages(
     let provider = match state.config.providers.iter().find(|p| p.r#type == "anthropic") {
         Some(p) => p,
         None => {
+            crate::record_decision(
+                &state,
+                crate::dashboard::Outcome::Blocked,
+                &model,
+                "anthropic",
+                "",
+                "No Anthropic provider configured",
+                0.0,
+                0,
+            );
             return (
                 StatusCode::BAD_REQUEST,
                 "No Anthropic provider configured. Add a provider with type = \"anthropic\" \
@@ -84,6 +113,16 @@ pub async fn messages(
     // price would be forwarded and metered at $0 — the budget cap would never move
     // for the one client this endpoint exists to serve.
     if let Err(reason) = crate::cost::global().allows(&provider.tier, &model) {
+        crate::record_decision(
+            &state,
+            crate::dashboard::Outcome::Blocked,
+            &model,
+            "anthropic",
+            &provider.name,
+            reason.clone(),
+            0.0,
+            0,
+        );
         return (StatusCode::FORBIDDEN, reason).into_response();
     }
 
@@ -99,7 +138,19 @@ pub async fn messages(
         crate::cost::global().max_cost(&model, (prompt_text.len() / 4) as u64, max_tokens),
     ) {
         Ok(r) => r,
-        Err(reason) => return (StatusCode::TOO_MANY_REQUESTS, reason).into_response(),
+        Err(reason) => {
+            crate::record_decision(
+                &state,
+                crate::dashboard::Outcome::Blocked,
+                &model,
+                "anthropic",
+                &provider.name,
+                reason.clone(),
+                0.0,
+                0,
+            );
+            return (StatusCode::TOO_MANY_REQUESTS, reason).into_response();
+        }
     };
 
     if stream {
@@ -121,9 +172,20 @@ async fn forward_once(
     req: &Value,
 ) -> Response {
     let url = anthropic_url(provider);
+    let started = Instant::now();
     let resp = match anthropic_request(provider, &url, req).send().await {
         Ok(r) => r,
         Err(e) => {
+            crate::record_decision(
+                state,
+                crate::dashboard::Outcome::Failed,
+                model,
+                "anthropic",
+                &provider.name,
+                format!("Anthropic request failed: {e}"),
+                0.0,
+                started.elapsed().as_millis() as u64,
+            );
             return (StatusCode::BAD_GATEWAY, format!("Anthropic request failed: {}", e))
                 .into_response()
         }
@@ -132,6 +194,16 @@ async fn forward_once(
     let body: Value = match resp.json().await {
         Ok(v) => v,
         Err(e) => {
+            crate::record_decision(
+                state,
+                crate::dashboard::Outcome::Failed,
+                model,
+                "anthropic",
+                &provider.name,
+                format!("Invalid Anthropic response: {e}"),
+                0.0,
+                started.elapsed().as_millis() as u64,
+            );
             return (StatusCode::BAD_GATEWAY, format!("Invalid Anthropic response: {}", e))
                 .into_response()
         }
@@ -152,6 +224,20 @@ async fn forward_once(
         })
         .unwrap_or(0.0);
     state.budget.record_spend(api_key, cost_usd);
+    crate::record_decision(
+        state,
+        message_outcome(status),
+        model,
+        "anthropic",
+        &provider.name,
+        if status.is_success() {
+            "Anthropic response"
+        } else {
+            "Anthropic upstream rejected the request"
+        },
+        cost_usd,
+        started.elapsed().as_millis() as u64,
+    );
     tracing::info!("/v1/messages: model={} provider={} cost=${:.6}", model, provider.name, cost_usd);
 
     let mut out = Json(body).into_response();
@@ -241,8 +327,19 @@ async fn forward_stream(
     reservation: Option<crate::budget::SpendReservation>,
 ) -> Response {
     let url = anthropic_url(provider);
+    let started = Instant::now();
     match anthropic_request(provider, &url, req).send().await {
         Ok(resp) if resp.status().is_success() => {
+            crate::record_decision(
+                state,
+                crate::dashboard::Outcome::Allowed,
+                model,
+                "anthropic",
+                &provider.name,
+                "Anthropic stream opened",
+                0.0,
+                started.elapsed().as_millis() as u64,
+            );
             // A free-tier Anthropic-compatible upstream (someone's local proxy)
             // costs nothing per token; do not pretend to bill it.
             let mut reservation = reservation;
@@ -270,9 +367,31 @@ async fn forward_stream(
             let code = StatusCode::from_u16(resp.status().as_u16())
                 .unwrap_or(StatusCode::BAD_GATEWAY);
             let text = resp.text().await.unwrap_or_default();
+            crate::record_decision(
+                state,
+                crate::dashboard::Outcome::Failed,
+                model,
+                "anthropic",
+                &provider.name,
+                format!("Anthropic upstream returned {code}"),
+                0.0,
+                started.elapsed().as_millis() as u64,
+            );
             (code, text).into_response()
         }
-        Err(e) => (StatusCode::BAD_GATEWAY, format!("Anthropic stream failed: {}", e)).into_response(),
+        Err(e) => {
+            crate::record_decision(
+                state,
+                crate::dashboard::Outcome::Failed,
+                model,
+                "anthropic",
+                &provider.name,
+                format!("Anthropic stream failed: {e}"),
+                0.0,
+                started.elapsed().as_millis() as u64,
+            );
+            (StatusCode::BAD_GATEWAY, format!("Anthropic stream failed: {}", e)).into_response()
+        }
     }
 }
 
@@ -331,6 +450,12 @@ fn push_content_text(content: &Value, out: &mut Vec<String>) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn status_outcomes_distinguish_provider_success_from_failure() {
+        assert_eq!(message_outcome(StatusCode::OK), crate::dashboard::Outcome::Allowed);
+        assert_eq!(message_outcome(StatusCode::BAD_GATEWAY), crate::dashboard::Outcome::Failed);
+    }
 
     #[test]
     fn extracts_string_and_block_content_and_system() {

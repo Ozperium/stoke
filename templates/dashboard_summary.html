@@ -1,0 +1,21 @@
+<article class="metric metric--spend">
+  <div class="metric__label">Committed spend <span>USD</span></div>
+  <div class="metric__value">{{ spend }}</div>
+  <div class="budget-bar"><span style="width: {{ budget_percent }}%"></span></div>
+  <div class="metric__foot"><span>{{ reserved }} in flight</span><span>{{ limit }} limit</span></div>
+</article>
+<article class="metric">
+  <div class="metric__label">Requests <span>ALL TIME</span></div>
+  <div class="metric__value">{{ total }}</div>
+  <div class="metric__foot"><span>{{ allowed }} allowed</span><span>{{ cache_hits }} cached</span></div>
+</article>
+<article class="metric metric--blocked">
+  <div class="metric__label">Stopped <span>ENFORCED</span></div>
+  <div class="metric__value">{{ blocked }}</div>
+  <div class="metric__foot"><span>Before provider call</span><span>{{ failed }} failed</span></div>
+</article>
+<article class="metric">
+  <div class="metric__label">Nodes <span>HEALTHY</span></div>
+  <div class="metric__value metric__value--nodes">{{ healthy_nodes }} / {{ total_nodes }}</div>
+  <div class="metric__foot"><span>Live registry</span><span class="online">● connected</span></div>
+</article>

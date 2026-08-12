@@ -284,6 +284,16 @@ impl Config {
         if self.limits.max_n_samples == 0 || self.limits.max_vote_models == 0 {
             return Err("[limits] max_n_samples and max_vote_models must be >= 1".to_string());
         }
+        for route in &self.routes {
+            for tier in &route.allowed_tiers {
+                if !matches!(tier.as_str(), "local" | "remote" | "cloud") {
+                    return Err(format!(
+                        "route '{}' has unsupported allowed_tiers value '{}'; use local, remote, or cloud",
+                        route.name, tier
+                    ));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -417,6 +427,16 @@ port = 8787
              [[providers]]\nname = \"mystery\"\nbase_url = \"https://example.com/v1\"\n"
         ));
         assert!(c.validate().is_ok(), "unpriced=free means tiers no longer gate spend");
+    }
+
+    #[test]
+    fn an_unknown_route_tier_is_rejected_at_boot() {
+        let c = cfg(&format!(
+            "{BASE}\n[[routes]]\nname = \"private\"\npath = \"/v1/private/completions\"\nrouting = \"single\"\nallowed_tiers = [\"private\"]\n"
+        ));
+        let err = c.validate().unwrap_err();
+        assert!(err.contains("private"));
+        assert!(err.contains("allowed_tiers"));
     }
 
     #[test]

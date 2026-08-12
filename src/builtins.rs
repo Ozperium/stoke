@@ -442,6 +442,9 @@ pub struct RouteProfile {
     /// Built-in plugins to enable for this profile
     #[serde(default)]
     pub builtins: Vec<String>,
+    /// Provider tiers this route may use. Empty permits every configured tier.
+    #[serde(default)]
+    pub allowed_tiers: Vec<String>,
     /// Whether to enable streaming for this profile
     #[serde(default = "default_true")]
     pub stream: bool,

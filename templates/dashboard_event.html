@@ -1,0 +1,17 @@
+<article class="event event--{{ outcome_class }}" data-event-id="{{ id }}">
+  <div class="event__rail"><span></span></div>
+  <div class="event__body">
+    <div class="event__topline">
+      <span class="event__outcome">{{ outcome_label }}</span>
+      <time>{{ timestamp }}</time>
+    </div>
+    <div class="event__decision">{{ reason }}</div>
+    <div class="event__meta">
+      {% if !model.is_empty() %}<span>{{ model }}</span>{% endif %}
+      {% if !route.is_empty() %}<span>{{ route }}</span>{% endif %}
+      {% if !provider.is_empty() %}<span>{{ provider }}</span>{% endif %}
+      {% if !elapsed.is_empty() %}<span>{{ elapsed }}</span>{% endif %}
+      {% if !cost.is_empty() %}<span>{{ cost }}</span>{% endif %}
+    </div>
+  </div>
+</article>

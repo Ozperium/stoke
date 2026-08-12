@@ -49,6 +49,13 @@ tier = "remote"
 
 [auto_route]
 hedge = true
+
+[[routes]]
+name = "private"
+path = "/v1/private/completions"
+model = "testmodel:latest"
+routing = "single"
+allowed_tiers = ["remote"]
 EOF
 
 echo "==> starting stoke on :$STOKE_PORT"
@@ -63,6 +70,18 @@ done
 sleep 2 # let the first poll cycle complete
 
 fail() { echo "FAIL: $1"; echo "--- stoke.log ---"; tail -20 "$WORK_DIR/stoke.log"; exit 1; }
+
+echo "==> assert: embedded live control room is served"
+curl -fsS "http://127.0.0.1:$STOKE_PORT/ui" | grep -q "Live control room" \
+  || fail "dashboard page"
+curl -fsS "http://127.0.0.1:$STOKE_PORT/ui/htmx.min.js" | grep -q "htmx" \
+  || fail "embedded htmx"
+curl -fsS "http://127.0.0.1:$STOKE_PORT/ui/summary" | grep -q "Committed spend" \
+  || fail "dashboard summary"
+curl -sN --max-time 5 "http://127.0.0.1:$STOKE_PORT/ui/events" > "$WORK_DIR/dashboard-events.out" &
+DASHBOARD_SSE_PID=$!
+sleep 0.2
+
 
 echo "==> assert: both nodes discovered, warm state seen"
 NODES=$(curl -s "http://127.0.0.1:$STOKE_PORT/v1/nodes")
@@ -84,6 +103,10 @@ r = json.load(sys.stdin)
 assert r['stoke_route']['node'] == 'node-warm', f\"routed to {r['stoke_route']['node']}\"
 assert 'node-warm' in r['choices'][0]['message']['content']
 " || fail "warm placement"
+
+wait "$DASHBOARD_SSE_PID" || true
+grep -q "event: event" "$WORK_DIR/dashboard-events.out" || fail "dashboard SSE feed"
+grep -q "node-warm" "$WORK_DIR/dashboard-events.out" || fail "dashboard dispatch event"
 
 echo "==> assert: /api/show metadata lands in the registry (context + tools)"
 sleep 2 # extra poll cycle for lazy meta fetch
@@ -144,7 +167,25 @@ sleep 2
 curl -s "http://127.0.0.1:$STOKE_PORT/v1/nodes" | python3 -c "
 import json, sys
 nodes = {n['name']: n for n in json.load(sys.stdin)['nodes']}
-assert not nodes['node-warm']['healthy'], 'dead node still marked healthy'
+assert not nodes['node-warm']['healthy'], 'dead node still marked unhealthy'
 " || fail "health marking"
 
-echo "SMOKE TEST PASSED ✔ (discovery, warm placement, failover, health)"
+echo "==> assert: private route refuses an unapproved fallback"
+PRIVATE_STATUS=$(curl -s -o "$WORK_DIR/private.out" -w "%{http_code}" \
+  -X POST "http://127.0.0.1:$STOKE_PORT/v1/private/completions" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"ignored-by-private-route","messages":[{"role":"user","content":"do not send this to cloud"}]}')
+[[ "$PRIVATE_STATUS" == "403" ]] || fail "private route allowed an unapproved fallback"
+
+echo "==> assert: enforcement demo triggers real traffic and a visible refusal"
+DEMO_STATUS=$(curl -s -o "$WORK_DIR/demo.out" -w "%{http_code}" \
+  -X POST "http://127.0.0.1:$STOKE_PORT/ui/demo")
+[[ "$DEMO_STATUS" == "202" ]] || fail "demo did not start"
+for _ in 1 2 3 4 5; do
+  curl -fsS "http://127.0.0.1:$STOKE_PORT/ui" | grep -q "Loop detected" && break
+  sleep 0.2
+done
+curl -fsS "http://127.0.0.1:$STOKE_PORT/ui" | grep -q "Loop detected" \
+  || fail "demo loop refusal missing from dashboard"
+
+echo "SMOKE TEST PASSED ✔ (dashboard, enforcement feed, demo, discovery, placement, failover, health)"

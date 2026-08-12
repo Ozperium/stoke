@@ -4,6 +4,7 @@ mod builtins;
 mod config;
 mod cost;
 mod cache;
+mod dashboard;
 mod failover;
 mod messages;
 mod nodes;
@@ -24,12 +25,17 @@ use axum::{
     extract::{Request, State},
     http::StatusCode,
     middleware::{self, Next},
-    response::{Json, IntoResponse, Response},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        Html, Json, IntoResponse, Response,
+    },
     routing::{get, post},
     Router,
 };
 use serde_json::{json, Value};
+use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing_subscriber;
 
 use futures_util::StreamExt;
@@ -48,6 +54,8 @@ pub struct AppState {
     ttft: Arc<TtftTracker>,
     auth: Arc<Auth>,
     budget: Arc<BudgetGuard>,
+    dashboard: Arc<dashboard::Dashboard>,
+    demo_gate: Arc<tokio::sync::Mutex<()>>,
     nodes: Arc<nodes::NodeRegistry>,
     plugins: Arc<plugins::Plugins>,
     builtins: Arc<builtins::Builtins>,
@@ -60,34 +68,35 @@ pub struct AppState {
 /// gateway instead of answering. Handle the three flags a person actually
 /// types, and refuse anything else rather than daemonising by surprise.
 fn handle_flags() {
-    for arg in std::env::args().skip(1) {
-        match arg.as_str() {
-            "--version" | "-V" => {
-                println!("stoke {}", env!("CARGO_PKG_VERSION"));
-                std::process::exit(0);
-            }
-            "--help" | "-h" => {
-                eprintln!(
-                    "stoke {} — the gateway daemon.\n\n\
-                     Usage: stoke\n\n\
-                     Reads stoke.toml from the current directory or ~/.config/stoke/,\n\
-                     then serves. It takes no options; use stoke-cli to manage config.\n\n\
-                     Options:\n  \
-                       -V, --version   print version and exit\n  \
-                       -h, --help      print this help and exit\n\n\
-                     Environment:\n  \
-                       STOKE_API_KEYS  comma-separated keys; required unless STOKE_DEV=1\n  \
-                       STOKE_DEV       set to 1 to allow unauthenticated local requests\n\n\
-                     Docs: https://stokegate.com",
-                    env!("CARGO_PKG_VERSION")
-                );
-                std::process::exit(0);
-            }
-            other => {
-                eprintln!("stoke: unknown option: {other}");
-                eprintln!("Try 'stoke --help'. To manage config, use 'stoke-cli'.");
-                std::process::exit(2);
-            }
+    let Some(arg) = std::env::args().nth(1) else {
+        return;
+    };
+    match arg.as_str() {
+        "--version" | "-V" => {
+            println!("stoke {}", env!("CARGO_PKG_VERSION"));
+            std::process::exit(0);
+        }
+        "--help" | "-h" => {
+            eprintln!(
+                "stoke {} — the gateway daemon.\n\n\
+                 Usage: stoke\n\n\
+                 Reads stoke.toml from the current directory or ~/.config/stoke/,\n\
+                 then serves. It takes no options; use stoke-cli to manage config.\n\n\
+                 Options:\n  \
+                   -V, --version   print version and exit\n  \
+                   -h, --help      print this help and exit\n\n\
+                 Environment:\n  \
+                   STOKE_API_KEYS  comma-separated keys; required unless STOKE_DEV=1\n  \
+                   STOKE_DEV       set to 1 to allow unauthenticated local requests\n\n\
+                 Docs: https://stokegate.com",
+                env!("CARGO_PKG_VERSION")
+            );
+            std::process::exit(0);
+        }
+        other => {
+            eprintln!("stoke: unknown option: {other}");
+            eprintln!("Try 'stoke --help'. To manage config, use 'stoke-cli'.");
+            std::process::exit(2);
         }
     }
 }
@@ -174,6 +183,8 @@ async fn main() {
         ttft: Arc::new(TtftTracker::new()),
         auth: Arc::new(Auth::new()),
         budget: Arc::new(budget),
+        dashboard: Arc::new(dashboard::Dashboard::new(100)),
+        demo_gate: Arc::new(tokio::sync::Mutex::new(())),
         nodes: node_registry,
         plugins: Arc::new(plugins::Plugins::new(
             plugins_config,
@@ -189,6 +200,13 @@ async fn main() {
     let app = {
         let base_router = Router::new()
             .route("/health", get(health))
+            .route("/ui", get(ui_page))
+            .route("/ui/summary", get(ui_summary))
+            .route("/ui/events", get(ui_events))
+            .route("/ui/demo", post(ui_demo))
+            .route("/ui/dashboard.css", get(ui_css))
+            .route("/ui/htmx.min.js", get(ui_htmx))
+            .route("/ui/sse.js", get(ui_sse_js))
             .route("/v1/models", get(list_models))
             .route("/v1/pricing", get(list_pricing))
             .route("/v1/cache", get(cache_stats))
@@ -222,22 +240,218 @@ async fn health() -> Json<Value> {
     Json(json!({ "status": "ok", "service": "stoke" }))
 }
 
+async fn ui_page(State(state): State<AppState>) -> Response {
+    match dashboard::render_page(&state.dashboard.snapshot()) {
+        Ok(html) => Html(html).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Dashboard rendering failed: {error}"),
+        ).into_response(),
+    }
+}
+
+fn dashboard_snapshot(state: &AppState) -> dashboard::Snapshot {
+    let (spend_usd, limit_usd, reserved_usd) = state.budget.stats().iter().fold(
+        (0.0, 0.0, 0.0),
+        |(spend, limit, reserved), (_, key_spend, key_limit, _, _, key_reserved)| {
+            (spend + key_spend, limit + key_limit.max(0.0), reserved + key_reserved)
+        },
+    );
+    let node_snapshot = state.nodes.snapshot();
+    let (healthy_nodes, total_nodes) = dashboard::node_counts(&node_snapshot);
+
+    dashboard::Snapshot {
+        summary: state.dashboard.summary(),
+        spend_usd,
+        limit_usd,
+        reserved_usd,
+        healthy_nodes,
+        total_nodes,
+    }
+}
+
+async fn ui_summary(State(state): State<AppState>) -> Response {
+    match dashboard::render_summary(&dashboard_snapshot(&state)) {
+        Ok(html) => Html(html).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Dashboard rendering failed: {error}"),
+        ).into_response(),
+    }
+}
+
+async fn ui_events(
+    State(state): State<AppState>,
+) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
+    let receiver = state.dashboard.subscribe();
+    let stream = futures_util::stream::unfold(receiver, |mut receiver| async move {
+        loop {
+            match receiver.recv().await {
+                Ok(event) => {
+                    let html = dashboard::render_event(&event).unwrap_or_else(|_| {
+                        "<div class=\"event event--failed\">Could not render event</div>".into()
+                    });
+                    return Some((Ok(Event::default().event("event").data(html)), receiver));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    });
+    Sse::new(stream).keep_alive(
+        KeepAlive::new().interval(Duration::from_secs(15)).text("keepalive"),
+    )
+}
+
+async fn ui_demo(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let model = state
+        .config
+        .default_model
+        .clone()
+        .or_else(|| {
+            state
+                .nodes
+                .snapshot()
+                .get("nodes")
+                .and_then(Value::as_array)
+                .and_then(|nodes| nodes.first())
+                .and_then(|node| node.get("models"))
+                .and_then(Value::as_array)
+                .and_then(|models| models.first())
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+    let Some(model) = model.filter(|model| !model.is_empty()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Configure default_model or discover a provider model before running the demo",
+        )
+            .into_response();
+    };
+    let demo_permit = match state.demo_gate.clone().try_lock_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return (
+                StatusCode::CONFLICT,
+                "An enforcement demo is already running",
+            )
+                .into_response();
+        }
+    };
+
+    let mut demo_headers = axum::http::HeaderMap::new();
+    if let Some(key) = headers
+        .get("authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(dashboard::api_key_from_basic)
+    {
+        demo_headers.insert(
+            "authorization",
+            format!("Bearer {key}").parse().unwrap(),
+        );
+    }
+
+    tokio::spawn(async move {
+        let _demo_permit = demo_permit;
+        let uri: axum::http::Uri = "/v1/chat/completions".parse().unwrap();
+        for _ in 0..5 {
+            let request = ChatCompletionRequest {
+                model: model.clone(),
+                messages: vec![json!({
+                    "role": "user",
+                    "content": "Stoke enforcement demo: repeat this request"
+                })],
+                temperature: Some(0.0),
+                max_tokens: Some(16),
+                stream: Some(false),
+                extra: serde_json::Map::new(),
+            };
+            let _ = chat_completions(
+                State(state.clone()),
+                demo_headers.clone(),
+                uri.clone(),
+                Json(request),
+            )
+            .await;
+        }
+    });
+
+    (StatusCode::ACCEPTED, "Enforcement demo started").into_response()
+}
+
+async fn ui_css() -> impl IntoResponse {
+    ([("content-type", "text/css; charset=utf-8")], include_str!("../assets/dashboard.css"))
+}
+
+async fn ui_htmx() -> impl IntoResponse {
+    ([("content-type", "text/javascript; charset=utf-8")], include_str!("../assets/htmx.min.js"))
+}
+
+async fn ui_sse_js() -> impl IntoResponse {
+    ([("content-type", "text/javascript; charset=utf-8")], include_str!("../assets/sse.js"))
+}
+
+fn record_decision(
+    state: &AppState,
+    outcome: dashboard::Outcome,
+    model: &str,
+    route: &str,
+    provider: &str,
+    reason: impl Into<String>,
+    cost_usd: f64,
+    elapsed_ms: u64,
+) {
+    state.dashboard.record(dashboard::EventInput {
+        outcome,
+        model: model.to_string(),
+        route: route.to_string(),
+        provider: provider.to_string(),
+        reason: reason.into(),
+        cost_usd,
+        elapsed_ms,
+    });
+}
+
 /// Auth gate for every endpoint except /health (liveness probes stay open).
 /// Mirrors the fail-closed rules of `Auth::validate`: no keys + no STOKE_DEV
 /// rejects everything; configured keys require a matching Bearer token.
 async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    if req.uri().path() == "/health" {
+    let path = req.uri().path().to_string();
+    if path == "/health" {
         return next.run(req).await;
     }
-    let auth_header = req
-        .headers()
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .map(|s| s.to_string());
-    if state.auth.validate(auth_header.as_deref()).is_none() {
-        return (StatusCode::UNAUTHORIZED, "Invalid or missing API key").into_response();
+
+    if path.starts_with("/ui") {
+        let dev_authorized = state.auth.validate(None).is_some();
+        let basic_authorized = req
+            .headers()
+            .get("authorization")
+            .and_then(|h| h.to_str().ok())
+            .and_then(dashboard::api_key_from_basic)
+            .and_then(|key| state.auth.validate(Some(&format!("Bearer {key}"))))
+            .is_some();
+        if dev_authorized || basic_authorized {
+            return next.run(req).await;
+        }
+        return Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .header("www-authenticate", "Basic realm=\"Stoke control room\"")
+            .body(axum::body::Body::from("Stoke API key required"))
+            .unwrap();
     }
-    next.run(req).await
+
+    let auth_header = req.headers().get("authorization").and_then(|h| h.to_str().ok());
+    match state.auth.validate(auth_header) {
+        Some(key) => {
+            let mut req = req;
+            req.extensions_mut().insert(key);
+            next.run(req).await
+        }
+        None => (StatusCode::UNAUTHORIZED, "Invalid or missing API key").into_response(),
+    }
 }
 
 async fn cache_stats(State(state): State<AppState>) -> Json<Value> {
@@ -294,23 +508,29 @@ async fn nodes_status(State(state): State<AppState>) -> Json<Value> {
     Json(state.nodes.snapshot())
 }
 
-/// All providers, minus federated Stoke gateways when the hop guard is active.
-fn eligible_providers(config: &Config, exclude_stoke: bool) -> Vec<&ProviderConfig> {
+/// Configured providers, minus federation loops and any tiers a route disallows.
+/// An empty tier list means the route permits every configured provider.
+fn eligible_providers<'a>(
+    config: &'a Config,
+    exclude_stoke: bool,
+    allowed_tiers: &[String],
+) -> Vec<&'a ProviderConfig> {
     config
         .providers
         .iter()
         .filter(|p| !(exclude_stoke && p.r#type == "stoke"))
+        .filter(|p| allowed_tiers.is_empty() || allowed_tiers.iter().any(|tier| tier == &p.tier))
         .collect()
 }
 
-/// `Config::provider_for_model` with the hop-guard filter applied: a request
-/// that already crossed a Stoke gateway must never select another one.
+/// `Config::provider_for_model` with hop-guard and route-tier filters applied.
 fn provider_for_model_filtered<'a>(
     config: &'a Config,
     model: &str,
     exclude_stoke: bool,
+    allowed_tiers: &[String],
 ) -> Option<&'a ProviderConfig> {
-    let candidates = eligible_providers(config, exclude_stoke);
+    let candidates = eligible_providers(config, exclude_stoke, allowed_tiers);
     candidates
         .iter()
         .find(|p| !p.models.is_empty() && p.models.iter().any(|m| m == model))
@@ -533,6 +753,7 @@ async fn list_routes(State(state): State<AppState>) -> Json<Value> {
             "model": r.model,
             "vote_models": r.vote_models,
             "builtins": r.builtins,
+            "allowed_tiers": r.allowed_tiers,
             "stream": r.stream,
             "budget_usd": r.budget_usd,
             "rate_limit": r.rate_limit,
@@ -575,6 +796,16 @@ async fn chat_completions(
 
     // Budget + rate limit check + loop detection (exact + semantic)
     if let Err(reason) = state.budget.check_with_prompt(&api_key, &prompt_hash, &prompt_text).await {
+        record_decision(
+            &state,
+            dashboard::Outcome::Blocked,
+            &req.model,
+            "enforcement",
+            "",
+            reason.clone(),
+            0.0,
+            0,
+        );
         return (StatusCode::TOO_MANY_REQUESTS, reason).into_response();
     }
 
@@ -592,6 +823,9 @@ async fn chat_completions(
     // Resolve route profile by path (multi-endpoint routing)
     let path = uri.path();
     let route_profile = state.config.routes.iter().find(|r| r.path == path);
+    let allowed_tiers = route_profile
+        .map(|profile| profile.allowed_tiers.as_slice())
+        .unwrap_or(&[]);
 
     let mut model = req.model.clone();
 
@@ -896,15 +1130,22 @@ async fn chat_completions(
         && routing_from_caller
         && !state.config.limits.allow_caller_routing
     {
-        return (
-            StatusCode::FORBIDDEN,
-            format!(
-                "routing resolved to \"{routing}\", which issues multiple provider calls per \
-                 request, and the caller selected it. Pin it in a [[routes]] profile or the \
-                 top-level `routing` setting, or set [limits] allow_caller_routing = true."
-            ),
-        )
-            .into_response();
+        let reason = format!(
+            "routing resolved to \"{routing}\", which issues multiple provider calls per \
+             request, and the caller selected it. Pin it in a [[routes]] profile or the \
+             top-level `routing` setting, or set [limits] allow_caller_routing = true."
+        );
+        record_decision(
+            &state,
+            dashboard::Outcome::Blocked,
+            &model,
+            &routing,
+            "",
+            reason.clone(),
+            0.0,
+            0,
+        );
+        return (StatusCode::FORBIDDEN, reason).into_response();
     }
 
     // Ceiling on the fan-out width, whatever its source — including the
@@ -940,6 +1181,16 @@ async fn chat_completions(
     if let Some(ref key) = cache_key {
         if let Some((_matched_key, cached)) = state.cache.get_smart(key, &cache_scope, &cache_prompt).await {
             tracing::info!("cache hit: key={}", &key[..8]);
+            record_decision(
+                &state,
+                dashboard::Outcome::CacheHit,
+                &model,
+                &routing,
+                "response cache",
+                "Deterministic response reused",
+                0.0,
+                0,
+            );
             let mut response_json = cached;
             if let Some(obj) = response_json.as_object_mut() {
                 obj.insert("stoke_cache".into(), json!("hit"));
@@ -969,7 +1220,19 @@ async fn chat_completions(
     );
     let mut reservation = match state.budget.try_reserve(&api_key, hold) {
         Ok(r) => r,
-        Err(reason) => return (StatusCode::TOO_MANY_REQUESTS, reason).into_response(),
+        Err(reason) => {
+            record_decision(
+                &state,
+                dashboard::Outcome::Blocked,
+                &model,
+                &routing,
+                "budget guard",
+                reason.clone(),
+                0.0,
+                0,
+            );
+            return (StatusCode::TOO_MANY_REQUESTS, reason).into_response();
+        }
     };
 
     // Streaming: supported for single routing (direct passthrough) and stream_race.
@@ -988,7 +1251,7 @@ async fn chat_completions(
             if !vote_models.is_empty() {
                 // always exclude federated gateways from races: stream_fusion
                 // doesn't propagate x-stoke-hop, and racing a gateway amplifies load
-                let provider = provider_for_model_filtered(&state.config, &model, true)
+                let provider = provider_for_model_filtered(&state.config, &model, true, allowed_tiers)
                     .ok_or_else(|| (StatusCode::NOT_FOUND, format!("No provider for model: {}", model)));
                 match provider {
                     Ok(p) => stream_fusion::stream_race_models(p, &vote_models, &body)
@@ -1002,7 +1265,7 @@ async fn chat_completions(
                     Err(e) => Err(e),
                 }
             } else {
-                let providers: Vec<_> = eligible_providers(&state.config, true);
+                let providers: Vec<_> = eligible_providers(&state.config, true, allowed_tiers);
                 stream_fusion::stream_race(providers, &body)
                     .await
                     .map(|(pname, resp)| {
@@ -1014,13 +1277,16 @@ async fn chat_completions(
         } else {
             // Single routing with failover — candidates ordered by node placement
             // (warm > cold > unknown; ties by tier, in-flight, latency EWMA)
-            let (ranked, explain) = state.nodes.rank(&model, &state.config.providers, exclude_stoke);
+            let (ranked, explain) = state.nodes.rank_with_tiers(&model, &state.config.providers, exclude_stoke, allowed_tiers);
             tracing::info!("stream placement: {}", explain.join("; "));
             if ranked.is_empty() {
-                return (
-                    StatusCode::NOT_FOUND,
-                    format!("No provider for model: {} ({})", model, explain.join("; ")),
-                ).into_response();
+                let code = if allowed_tiers.is_empty() { StatusCode::NOT_FOUND } else { StatusCode::FORBIDDEN };
+                let message = if allowed_tiers.is_empty() {
+                    format!("No provider for model: {} ({})", model, explain.join("; "))
+                } else {
+                    format!("Route policy forbids every provider for model: {} ({})", model, explain.join("; "))
+                };
+                return (code, message).into_response();
             }
             // Hedged dispatch (opt-in): small prompt + top-2 candidates both
             // zero-marginal and verifiably holding the model → race them,
@@ -1064,6 +1330,16 @@ async fn chat_completions(
                 if let Some(note) = &auto_note {
                     tracing::info!("stoke_auto (stream): {}", note);
                 }
+                record_decision(
+                    &state,
+                    dashboard::Outcome::Allowed,
+                    &served_model,
+                    &routing,
+                    &node_name,
+                    "Stream opened",
+                    0.0,
+                    connect_ms,
+                );
                 // The meter owns the guard: it measures TTFT + tokens/sec into
                 // the registry and keeps in-flight accurate for the stream's
                 // whole life (client disconnect included).
@@ -1111,6 +1387,20 @@ async fn chat_completions(
             Err((code, msg)) => {
                 // Same policy-vs-upstream distinction as the non-streaming path.
                 let code = if cost::is_unpriced_error(&msg) { StatusCode::FORBIDDEN } else { code };
+                record_decision(
+                    &state,
+                    if code == StatusCode::FORBIDDEN {
+                        dashboard::Outcome::Blocked
+                    } else {
+                        dashboard::Outcome::Failed
+                    },
+                    &model,
+                    &routing,
+                    "",
+                    msg.clone(),
+                    0.0,
+                    0,
+                );
                 return (code, msg).into_response();
             }
         }
@@ -1128,14 +1418,14 @@ async fn chat_completions(
             if test_code.is_empty() || entry_point.is_empty() {
                 return Err((StatusCode::BAD_REQUEST, "test_vote requires 'test_code' and 'entry_point' fields".to_string()));
             }
-            let provider = provider_for_model_filtered(&state.config, &model, exclude_stoke)
+            let provider = provider_for_model_filtered(&state.config, &model, exclude_stoke, allowed_tiers)
                 .ok_or_else(|| (StatusCode::NOT_FOUND, format!("No provider for model: {}", model)))?;
             test_vote_models(provider, &vote_models, &req, &test_code, &entry_point)
                 .await
                 .map_err(|e| (StatusCode::BAD_GATEWAY, e))
         }
         "cascade" => {
-            let providers: Vec<_> = eligible_providers(&state.config, exclude_stoke);
+            let providers: Vec<_> = eligible_providers(&state.config, exclude_stoke, allowed_tiers);
             cascade(providers, &req)
                 .await
                 .map_err(|e| (StatusCode::BAD_GATEWAY, e))
@@ -1147,14 +1437,14 @@ async fn chat_completions(
             if test_code.is_empty() || entry_point.is_empty() {
                 return Err((StatusCode::BAD_REQUEST, "cascade_test requires 'test_code' and 'entry_point' fields".to_string()));
             }
-            let provider = provider_for_model_filtered(&state.config, &model, exclude_stoke)
+            let provider = provider_for_model_filtered(&state.config, &model, exclude_stoke, allowed_tiers)
                 .ok_or_else(|| (StatusCode::NOT_FOUND, format!("No provider for model: {}", model)))?;
             cascade_test_models(provider, &vote_models, &req, &test_code, &entry_point)
                 .await
                 .map_err(|e| (StatusCode::BAD_GATEWAY, e))
         }
         "self_consistency" => {
-            let provider = provider_for_model_filtered(&state.config, &model, exclude_stoke)
+            let provider = provider_for_model_filtered(&state.config, &model, exclude_stoke, allowed_tiers)
                 .ok_or_else(|| (StatusCode::NOT_FOUND, format!("No provider for model: {}", model)))?;
             self_consistency(provider, &model, &req, n_samples, sc_temperature)
                 .await
@@ -1163,12 +1453,15 @@ async fn chat_completions(
         _ => {
             // Node-aware placement: rank candidates (warm > cold > unknown;
             // ties by tier, in-flight count, latency EWMA), try best-first.
-            let (ranked, explain) = state.nodes.rank(&model, &state.config.providers, exclude_stoke);
+            let (ranked, explain) = state.nodes.rank_with_tiers(&model, &state.config.providers, exclude_stoke, allowed_tiers);
             if ranked.is_empty() {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    format!("No provider for model: {} ({})", model, explain.join("; ")),
-                ));
+                let code = if allowed_tiers.is_empty() { StatusCode::NOT_FOUND } else { StatusCode::FORBIDDEN };
+                let message = if allowed_tiers.is_empty() {
+                    format!("No provider for model: {} ({})", model, explain.join("; "))
+                } else {
+                    format!("Route policy forbids every provider for model: {} ({})", model, explain.join("; "))
+                };
+                return Err((code, message));
             }
             let mut last_err = (StatusCode::BAD_GATEWAY, "no candidate attempted".to_string());
             let mut outcome = None;
@@ -1213,6 +1506,20 @@ async fn chat_completions(
             // reads as a provider failure. It is not one — nothing upstream was
             // contacted. Answer 403 so an operator sees a policy refusal.
             let code = if cost::is_unpriced_error(&msg) { StatusCode::FORBIDDEN } else { code };
+            record_decision(
+                &state,
+                if code == StatusCode::FORBIDDEN {
+                    dashboard::Outcome::Blocked
+                } else {
+                    dashboard::Outcome::Failed
+                },
+                &model,
+                &routing,
+                "",
+                msg.clone(),
+                0.0,
+                0,
+            );
             return (code, msg).into_response();
         }
     };
@@ -1223,6 +1530,16 @@ async fn chat_completions(
         result.provider_name,
         result.elapsed_ms,
         result.cost.cost_usd
+    );
+    record_decision(
+        &state,
+        dashboard::Outcome::Allowed,
+        &model,
+        &routing,
+        &result.provider_name,
+        "Provider call completed",
+        result.cost.cost_usd,
+        result.elapsed_ms,
     );
 
     // Record spend the moment the money is known to be gone — before the response

@@ -62,12 +62,31 @@ post() {
     "http://127.0.0.1:$STOKE_PORT/v1/chat/completions" \
     -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -d "$2"
 }
+post_path() {
+  curl -s -o "$WORK_DIR/resp.json" -w '%{http_code}' --max-time 20 \
+    "http://127.0.0.1:$STOKE_PORT$1" \
+    -H "Authorization: Bearer $KEY_A" -H 'Content-Type: application/json' -d "$2"
+}
 start_stoke() {
   ( cd "$WORK_DIR" && exec env STOKE_API_KEYS="$KEY_A,$KEY_B" \
       "$REPO_DIR/target/debug/stoke" > "$WORK_DIR/stoke.log" 2>&1 ) &
   sleep 3
 }
 stop_stoke() { pkill -f "$REPO_DIR/target/debug/stoke" 2>/dev/null || true; sleep 1; }
+run_with_timeout() {
+  local seconds="$1"
+  shift
+  python3 - "$seconds" "$@" <<'PY'
+import subprocess
+import sys
+
+try:
+    result = subprocess.run(sys.argv[2:], timeout=float(sys.argv[1]))
+except subprocess.TimeoutExpired:
+    raise SystemExit(124)
+raise SystemExit(result.returncode)
+PY
+}
 
 write_config() {  # $1 = extra TOML appended
   cat > "$WORK_DIR/stoke.toml" <<EOF
@@ -139,10 +158,79 @@ port = $STOKE_PORT
 name = "mystery"
 base_url = "http://127.0.0.1:$UP_PORT/v1"
 EOF
-if ( cd "$WORK_DIR" && env STOKE_API_KEYS="$KEY_A" timeout 5 "$REPO_DIR/target/debug/stoke" >"$WORK_DIR/boot.log" 2>&1 ); then
+if ( cd "$WORK_DIR" && STOKE_API_KEYS="$KEY_A" run_with_timeout 5 "$REPO_DIR/target/debug/stoke" >"$WORK_DIR/boot.log" 2>&1 ); then
   fail "started with an untiered provider"
 fi
 grep -q "tier" "$WORK_DIR/boot.log" || fail "boot error did not mention the tier"
+
+write_config ""
+start_stoke
+
+# ── Repeated prompts trip the loop breaker ───────────────────────────
+echo "==> assert: five repeated prompts trip the loop breaker before another provider call"
+for _ in 1 2 3 4 5; do
+  CODE=$(post "$KEY_A" '{"model":"priced-model","temperature":0.7,"messages":[{"role":"user","content":"repeat this loop probe"}]}')
+done
+[ "$CODE" = "429" ] || fail "fifth repeated prompt: expected 429, got $CODE"
+grep -q "Loop detected" "$WORK_DIR/resp.json" || fail "loop refusal did not identify the loop"
+stop_stoke
+
+# ── Built-in PII redaction reaches the provider only after filtering ──
+echo "==> assert: built-in PII redaction masks a credential before upstream dispatch"
+write_config '
+[builtins.pii_redact]
+replacement = "[REDACTED]"
+
+[[routes]]
+name = "safe"
+path = "/v1/safe/completions"
+model = "priced-model"
+routing = "single"
+builtins = ["pii_redact"]'
+start_stoke
+SECRET="sk-proj-abcdefghijklmnopqrstuv"
+CODE=$(post_path "/v1/safe/completions" "{\"model\":\"priced-model\",\"messages\":[{\"role\":\"user\",\"content\":\"send $SECRET to the model\"}]}" )
+[ "$CODE" = "200" ] || fail "PII route: expected 200, got $CODE"
+UPSTREAM_BODY=$(curl -s "http://127.0.0.1:$UP_PORT/last" | python3 -c 'import json,sys; print(json.load(sys.stdin)["body"])')
+python3 - "$SECRET" "$UPSTREAM_BODY" <<'PYEOF'
+import sys
+secret, body = sys.argv[1:]
+assert secret not in body, "credential reached the provider"
+assert "[REDACTED]" in body, "redaction marker was not forwarded"
+PYEOF
+stop_stoke
+
+# ── JSONL audit persistence ─────────────────────────────────────────
+echo "==> assert: an opted-in route persists metadata-only audit evidence"
+AUDIT_PATH="$WORK_DIR/stoke-audit.jsonl"
+write_config "
+[builtins.audit_log]
+path = \"$AUDIT_PATH\"
+log_body = false
+
+[[routes]]
+name = \"audited\"
+path = \"/v1/audited/completions\"
+model = \"priced-model\"
+routing = \"single\"
+builtins = [\"audit_log\"]"
+start_stoke
+CODE=$(post_path "/v1/audited/completions" '{"model":"priced-model","messages":[{"role":"user","content":"audit proof body"}]}')
+[ "$CODE" = "200" ] || fail "audit route: expected 200, got $CODE"
+python3 - "$AUDIT_PATH" "$KEY_A" <<'PYEOF'
+import json
+import sys
+
+path, key = sys.argv[1:]
+with open(path) as stream:
+    entry = json.loads(stream.readline())
+assert entry["model"] == "priced-model"
+assert entry["key"] == key[:8]
+assert isinstance(entry["cost_usd"], (int, float))
+assert isinstance(entry["elapsed_ms"], int)
+assert "response" not in entry, "metadata-only audit unexpectedly logged the response body"
+PYEOF
+stop_stoke
 
 # ── The pricing gate ─────────────────────────────────────────────────
 write_config ""
@@ -471,4 +559,4 @@ assert abs(k['reserved_usd']) < 1e-9, 'the hold leaked'
 
 stop_stoke
 echo
-echo "SPEND FIREWALL SMOKE PASSED ✔ (pricing gate, streamed spend, in-flight holds, served-model billing, boot validation, fan-out clamp, full billing, cache isolation)"
+echo "SPEND FIREWALL SMOKE PASSED ✔ (pricing gate, PII redaction, streamed spend, loop refusal, in-flight holds, served-model billing, boot validation, fan-out clamp, full billing, cache isolation)"

@@ -2,6 +2,9 @@ const EVENTS = new Set([
   'install_cta_clicked',
   'install_section_viewed',
   'github_clicked',
+  'panel_demo_clicked',
+  'local_capacity_cta_clicked',
+  'guides_clicked',
 ]);
 
 export async function onRequestPost({ request, env }) {
