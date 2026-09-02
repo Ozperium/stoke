@@ -131,6 +131,12 @@
     }
     .node.center{border-color:rgba(255,107,44,.45);background:linear-gradient(180deg, rgba(255,107,44,.11), rgba(255,107,44,.035))}
     .flow-arrow{text-align:center;color:var(--accent);font-size:28px}
+    .concept{
+      margin-top:30px;border:1px solid var(--line);border-radius:22px;
+      background:#ffffff;padding:18px
+    }
+    .concept img{display:block;width:100%;height:auto;border-radius:12px}
+    .concept figcaption{margin-top:12px;color:#58606a;font-size:14px;text-align:center}
     .chips{display:flex;flex-wrap:wrap;gap:9px;margin-top:16px}
     .chip{
       font-size:12px;color:#dce1e7;border:1px solid var(--line);
@@ -347,6 +353,11 @@
           </div>
         </div>
       </div>
+
+      <figure class="concept">
+        <img src="/concept.jpg" alt="Selsey AI Control Layer — porównanie: obecnie każdy pracownik działa osobno z własnym Claude Code; z warstwą kontroli jeden punkt zarządza routingiem, kosztami, skillami, uprawnieniami i monitoringiem" loading="lazy" width="1600" height="710" />
+        <figcaption>Koncepcja: z chaosu indywidualnych eksperymentów do skalowalnych procesów — jedna warstwa kontroli między pracownikami a modelami.</figcaption>
+      </figure>
 
       <div class="note">
         <b>Co ta warstwa realnie robi dziś:</b> Claude Code działa przez nią bez zmian (passthrough Anthropic Messages),
