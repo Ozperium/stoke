@@ -359,12 +359,6 @@
         <figcaption>Koncepcja: z chaosu indywidualnych eksperymentów do skalowalnych procesów — jedna warstwa kontroli między pracownikami a modelami.</figcaption>
       </figure>
 
-      <div class="note">
-        <b>Co ta warstwa realnie robi dziś:</b> Claude Code działa przez nią bez zmian (passthrough Anthropic Messages),
-        Codex — przez OpenAI Responses. Routing i failover między dostawcami, w tym OpenRouter i modele lokalne.
-        Budżety i limity per klucz, wykrywanie pętli, dziennik wykonania. Self-hosted — bez zewnętrznego pośrednika.
-      </div>
-
       <div class="before-after">
         <div class="state">
           <h3>Przed</h3>
@@ -494,17 +488,6 @@
         Warstwa może powstawać stopniowo, razem z realnymi use case’ami, a nie przed nimi.
       </p>
     </section>
-
-    <div class="footer-cta">
-      <div>
-        <h2>Proponowany next step</h2>
-        <p>
-          Krótka walidacja z Dmytro: czy ten kierunek odpowiada na jego obecne pytania,
-          wybór pierwszego procesu i ustalenie minimalnego zakresu pilota. 15 minut, bez zobowiązań.
-        </p>
-      </div>
-      <a class="cta" href="#pilot">Start od jednego procesu →</a>
-    </div>
 
     <footer>
       Roboczy materiał do dyskusji • Selsey Next • 2026
