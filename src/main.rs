@@ -1,6 +1,7 @@
 mod auto_route;
 mod budget;
 mod builtins;
+mod client_run;
 mod config;
 mod cost;
 mod cache;
@@ -9,6 +10,7 @@ mod failover;
 mod messages;
 mod nodes;
 mod plugins;
+mod responses;
 mod router;
 mod sse;
 mod stream_fusion;
@@ -63,15 +65,18 @@ pub struct AppState {
     js_plugins: Arc<js_plugins::JsPlugins>,
 }
 
-/// `stoke` takes no subcommands — it serves. But an unrecognised argv used to
-/// fall through and silently bind a port, so `stoke --version` started a
-/// gateway instead of answering. Handle the three flags a person actually
-/// types, and refuse anything else rather than daemonising by surprise.
+/// With no arguments `stoke` serves. The `run` subcommand launches supported
+/// coding agents through that gateway; other arguments must not silently start
+/// a daemon.
 fn handle_flags() {
     let Some(arg) = std::env::args().nth(1) else {
         return;
     };
     match arg.as_str() {
+        "run" => {
+            let args: Vec<String> = std::env::args().skip(2).collect();
+            std::process::exit(client_run::run(&args));
+        }
         "--version" | "-V" => {
             println!("stoke {}", env!("CARGO_PKG_VERSION"));
             std::process::exit(0);
@@ -79,9 +84,11 @@ fn handle_flags() {
         "--help" | "-h" => {
             eprintln!(
                 "stoke {} — the gateway daemon.\n\n\
-                 Usage: stoke\n\n\
+                 Usage: stoke\n       stoke run <claude|codex> [-- <args...>]\n\n\
                  Reads stoke.toml from the current directory or ~/.config/stoke/,\n\
-                 then serves. It takes no options; use stoke-cli to manage config.\n\n\
+                 then serves when invoked without arguments.\n\n\
+                 Commands:\n  \
+                   run              launch Claude Code or Codex through Stoke\n\n\
                  Options:\n  \
                    -V, --version   print version and exit\n  \
                    -h, --help      print this help and exit\n\n\
@@ -215,6 +222,7 @@ async fn main() {
             .route("/v1/nodes", get(nodes_status))
             .route("/v1/chat/completions", post(chat_completions))
             .route("/v1/messages", post(messages::messages))
+            .route("/v1/responses", post(responses::responses))
             .route("/v1/routes", get(list_routes));
 
         // Register dynamic route profiles

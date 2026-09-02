@@ -9,7 +9,8 @@ Stoke is an enforcement gateway, not an observability tool. Dashboards report wh
 - Default listen address: `127.0.0.1:8787`. Config file: `stoke.toml` (TOML).
 - **Fail-closed:** with no `STOKE_API_KEYS` set and no `STOKE_DEV=1`, every request is rejected. This is intentional. Every endpoint except `GET /health` requires `Authorization: Bearer <key>`.
 - OpenAI-compatible clients: set `OPENAI_BASE_URL=http://127.0.0.1:8787/v1`.
-- Claude Code: set `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` (uses `POST /v1/messages`, which forwards to a configured `anthropic` provider — it does **not** translate Anthropic requests onto local models).
+- Claude Code: `STOKE_API_KEY=... stoke run claude` (uses native `POST /v1/messages` passthrough to a configured `anthropic` provider; it does **not** translate Anthropic requests onto local models).
+- Codex CLI: `STOKE_API_KEY=... stoke run codex` (injects a custom provider using native `POST /v1/responses` passthrough; it uses the gateway's OpenAI API credential, not ChatGPT subscription billing).
 - Stoke ships with **no model names**. Models come from your config or are discovered on your own Ollama nodes.
 
 ## Endpoints
@@ -17,6 +18,7 @@ Stoke is an enforcement gateway, not an observability tool. Dashboards report wh
 - `GET /health` — liveness. The only unauthenticated endpoint.
 - `POST /v1/chat/completions` — OpenAI-compatible, SSE streaming and `tool_calls` supported.
 - `POST /v1/messages` — Anthropic Messages API, enforced passthrough.
+- `POST /v1/responses` — OpenAI Responses API, enforced JSON/SSE passthrough for Codex CLI.
 - `GET /v1/nodes` — live registry: per-node health, pulled/warm models, in-flight count, measured latency.
 - `GET /v1/budget` — per-key spend and limits, plus the savings receipts ledger.
 - `GET /v1/models`, `GET /v1/pricing`, `GET /v1/cache`, `GET /v1/routes`.

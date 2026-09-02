@@ -1,17 +1,18 @@
 # Stoke Architecture
 
 Stoke is a single Rust binary (release build ~5.5 MB, zero runtime dependencies) that sits
-between AI agents and model providers. It exposes an OpenAI-compatible
-`/v1/chat/completions` endpoint (including SSE streaming and `tool_calls` passthrough) and
-enforces policy *before* any provider is called: authentication, per-key budget caps in
-USD, per-key rate limits, and loop detection. Requests that violate policy are refused,
-not logged-and-forwarded.
+between AI agents and model providers. It exposes OpenAI Chat Completions
+(`/v1/chat/completions`), OpenAI Responses (`/v1/responses`), and Anthropic Messages
+(`/v1/messages`) endpoints, including native SSE and tool-call passthrough, and enforces
+policy *before* any provider is called: authentication, per-key budget caps in USD,
+per-key rate limits, and loop detection. Requests that violate policy are refused, not
+logged-and-forwarded.
 
 Two binaries build from this crate (`Cargo.toml`):
 
 | Binary | Entry | Role |
 |---|---|---|
-| `stoke` | `src/main.rs` | The gateway server (default port 8787) |
+| `stoke` | `src/main.rs` | The gateway server (default port 8787), plus `run claude` / `run codex` client launchers |
 | `stoke-cli` | `src/cli.rs` | Companion CLI: `init`, `serve`, `route`, `bench`, `models`, `pricing`, `routes`, `version` |
 
 Install options: build from a clone with `cargo build --release`, download prebuilt
@@ -19,11 +20,24 @@ Install options: build from a clone with `cargo build --release`, download prebu
 `.github/workflows/release.yml`), or build the static Docker image from the included
 `Dockerfile`.
 
+The launchers are implemented in `src/client_run.rs`. They change only the child
+process environment/configuration: Claude Code receives Stoke as its Anthropic base URL,
+while Codex receives a temporary custom provider using the Responses wire API. Provider
+credentials remain in the separately running gateway process.
+
 ## Request pipeline
 
 Everything below is the actual order of operations in `chat_completions`
 (`src/main.rs`), the handler behind `/v1/chat/completions` and every configured route
 profile path.
+
+`src/messages.rs` and `src/responses.rs` implement protocol-native passthrough for
+Claude Code and Codex respectively. Both reuse fail-closed authentication and run budget,
+rate, loop, in-flight reservation, usage accounting, and decision recording before and
+around the upstream call. They do not translate either protocol into Chat Completions.
+Claude feature headers (`anthropic-*` and `x-claude-code-*`) and Codex Responses headers
+are forwarded from an allowlist; the incoming Stoke authorization credential is never
+forwarded upstream.
 
 ### 1. Authentication (fail-closed middleware)
 

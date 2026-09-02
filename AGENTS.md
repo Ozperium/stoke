@@ -10,9 +10,11 @@ cargo build --release       # ~5.5 MB stripped binary
 cargo test                  # unit + integration tests, all must pass
 ./scripts/smoke.sh          # end-to-end: discovery, placement, streaming, failover — no Ollama needed
 ./scripts/smoke_federation.sh   # two gateways, hop guard, cycle safety
+./scripts/smoke_responses.sh    # native Responses JSON/SSE passthrough
+./scripts/smoke_client_run.sh   # Claude Code/Codex launcher contract
 ```
 
-CI (`.github/workflows/ci.yml`) runs all four on every push and PR. Run them locally before you push. The smoke scripts spin up stdlib mock Ollama nodes, so they need only `python3` and `curl`.
+CI (`.github/workflows/ci.yml`) runs the test suite and all five smoke harnesses on every push and PR. Run them locally before you push. The smoke scripts use stdlib mocks, so they need only `python3` and `curl`.
 
 ## Layout
 
@@ -21,6 +23,8 @@ CI (`.github/workflows/ci.yml`) runs all four on every push and PR. Run them loc
 - `src/nodes.rs` — the node registry: discovery, warm/load-aware placement, federation.
 - `src/auto_route.rs` — the auto-routing scorer.
 - `src/messages.rs` — the Anthropic `/v1/messages` endpoint.
+- `src/responses.rs` — the OpenAI `/v1/responses` endpoint.
+- `src/client_run.rs` — `stoke run claude|codex` child-process launchers.
 - `src/config.rs`, `src/cache.rs`, `src/failover.rs`, `src/router.rs`, `src/cli.rs`.
 - `scripts/` — smoke harnesses and a mock Ollama.
 - `landing/` — the marketing site (Cloudflare Pages) and the POSIX `install.sh`.

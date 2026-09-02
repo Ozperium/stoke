@@ -218,7 +218,7 @@ api_key  = stk-mykey
 
 and every request your agent makes now passes through budget caps, rate limits, and the loop breaker first.
 
-**Claude Code** speaks the Anthropic Messages API, so point it at Stoke with `ANTHROPIC_BASE_URL=http://localhost:8787` and add an Anthropic upstream provider:
+**Claude Code** speaks the Anthropic Messages API. Add an Anthropic upstream provider:
 
 ```toml
 [[providers]]
@@ -229,7 +229,25 @@ api_key_env = "ANTHROPIC_API_KEY"
 tier = "cloud"
 ```
 
-`POST /v1/messages` runs the same enforcement, then forwards to Anthropic. (Running Claude Code against your *local* models needs Anthropic↔OpenAI translation — that's on the roadmap; today it forwards to an Anthropic upstream.)
+Then launch Claude Code with the gateway environment isolated from the upstream key:
+
+```bash
+STOKE_API_KEY=stk-mykey stoke run claude
+# Forward Claude arguments after --:
+STOKE_API_KEY=stk-mykey stoke run claude -- --print "Review this repository"
+```
+
+`stoke run claude` sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` for the child process and removes `ANTHROPIC_API_KEY` from that child. The separately running Stoke server keeps the real upstream credential. `POST /v1/messages` runs auth, budget, rate, and loop enforcement, then forwards the request and Claude Code's `anthropic-*` feature headers to Anthropic. (Running Claude Code against your *local* models needs Anthropic↔OpenAI translation — that's on the roadmap; today it forwards to an Anthropic upstream.)
+
+**Codex CLI** uses OpenAI's Responses API. Configure an OpenAI upstream provider and list the Codex model it may use, then run:
+
+```bash
+STOKE_API_KEY=stk-mykey stoke run codex
+# Non-interactive example:
+STOKE_API_KEY=stk-mykey stoke run codex -- exec "Review this repository"
+```
+
+The launcher injects a temporary Codex custom provider with `wire_api = "responses"`, points it at Stoke, disables the WebSocket transport, and keeps the client key in `STOKE_API_KEY` rather than argv. Stoke forwards `POST /v1/responses` without translating its request, response, tool-call, or SSE event shapes. This path uses the API credential held by the Stoke server; it does not proxy ChatGPT subscription/OAuth billing.
 
 ## Multi-machine setup
 
@@ -260,7 +278,8 @@ The registry polls both nodes and places each request on whichever machine has t
 | `GET /ui` | Embedded live control room: budget state, node health, and a real-time enforcement decision feed. In authenticated mode, use the browser's Basic Auth prompt with any username and a Stoke API key as the password. |
 | `POST /ui/demo` | Runs five real, repeated requests through Stoke so the live feed visibly shows allowed/cache decisions followed by loop enforcement. |
 | `POST /v1/chat/completions` | OpenAI-compatible chat, streaming and `tool_calls` included; non-streaming responses carry `stoke_cost` and `stoke_route` (for streams, placement is in the logs and on `/v1/nodes`). |
-| `POST /v1/messages` | Anthropic Messages API — enforced passthrough to a configured `anthropic` provider. Lets Claude Code point `ANTHROPIC_BASE_URL` at Stoke. Same auth/budget/rate/loop checks; cost in the `x-stoke-cost` response header. |
+| `POST /v1/messages` | Anthropic Messages API — enforced passthrough to a configured `anthropic` provider, including safe `anthropic-*` and `x-claude-code-*` feature headers. Used by `stoke run claude`; cost is in `x-stoke-cost`. |
+| `POST /v1/responses` | OpenAI Responses API — native JSON/SSE passthrough to a configured OpenAI-compatible provider. Used by `stoke run codex`; same auth/budget/rate/loop enforcement, with measured stream usage charged when the stream closes. |
 | `GET /v1/models` | Models declared in provider config, per provider (live per-node inventory is on `/v1/nodes`). |
 | `GET /v1/nodes` | Live node registry: health, pulled/warm models, in-flight counts, latency EWMA. |
 | `GET /v1/budget` | Per-key spend, limits, recent activity, and the receipts ledger (zero-marginal share, cloud list-price counterfactual). |
@@ -278,6 +297,8 @@ Claims above are runnable, not asserted:
 
 ```bash
 cargo test                       # unit + integration tests
+./scripts/smoke_responses.sh     # Responses JSON/SSE passthrough and Codex headers
+./scripts/smoke_client_run.sh    # Claude Code/Codex launcher environment and argv
 ./scripts/smoke.sh               # mocks two Ollama nodes: proves discovery, warm-first
                                  # placement, streaming in-flight accounting, failover
                                  # when the warm node dies, and health-based exclusion
@@ -293,6 +314,7 @@ Both smoke scripts need only `python3`, `curl`, and `cargo`; no Ollama required.
 Planned, not built. Nothing here is a current-feature claim.
 
 - [x] Anthropic Messages API endpoint (`/v1/messages`) — Claude Code via `ANTHROPIC_BASE_URL`, enforced passthrough to an `anthropic` provider *(shipped)*
+- [x] OpenAI Responses API endpoint (`/v1/responses`) and `stoke run claude|codex` launchers *(shipped)*
 - [ ] Anthropic ↔ OpenAI translation, so Claude Code can run against your **local** models (today `/v1/messages` forwards to an Anthropic upstream)
 - [ ] Homebrew formula and Docker images *(release CI and Dockerfile are in the repo; first tagged release pending)*
 - [x] Cost accounting for streamed responses (SSE usage parsing) so streamed spend counts against budget caps

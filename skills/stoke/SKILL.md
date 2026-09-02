@@ -59,19 +59,20 @@ curl -s -H "Authorization: Bearer agent-key" localhost:8787/v1/nodes
 
 ## 5. Point the agent at it
 
-OpenAI-compatible agents (OpenCode, aider, Codex, most SDKs):
+OpenAI Chat Completions clients (OpenCode, aider, most SDKs):
 
 ```
 OPENAI_BASE_URL=http://127.0.0.1:8787/v1
 ```
 
-Claude Code speaks the Anthropic Messages API:
+Claude Code and Codex CLI have dedicated launchers:
 
-```
-ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+```sh
+STOKE_API_KEY=<gateway-key> stoke run claude
+STOKE_API_KEY=<gateway-key> stoke run codex
 ```
 
-This requires an `anthropic` provider in `stoke.toml`, and it forwards to Anthropic. It does **not** translate Anthropic requests onto local models — do not tell the user Claude Code will run on their GPUs.
+Claude Code requires an `anthropic` provider and uses native `/v1/messages` passthrough. Codex requires an OpenAI-compatible provider and uses native `/v1/responses` passthrough. Neither path translates protocols onto local models, and Codex uses the gateway's metered API credential rather than ChatGPT subscription/OAuth billing.
 
 Send the key as `Authorization: Bearer agent-key`.
 

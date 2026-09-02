@@ -83,16 +83,13 @@ The real key lives only in this process's environment. Anyone hitting the gatewa
 
 ## Point Claude Code at Stoke
 
-Claude Code authenticates to a base URL with a Bearer token when you set `ANTHROPIC_AUTH_TOKEN` (it sends `Authorization: Bearer <token>`). Stoke authenticates callers by exactly that header — so use `ANTHROPIC_AUTH_TOKEN`, not `ANTHROPIC_API_KEY` (which Claude Code would send as `x-api-key`, a header Stoke's auth ignores, giving you a 401). In the shell where you run Claude Code:
+The launcher sets Claude Code's base URL and Bearer token for the child process, and removes the real upstream key from that child. In the shell where you run Claude Code:
 
 ```bash
-export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
-export ANTHROPIC_AUTH_TOKEN="cc-cap-key"
-unset ANTHROPIC_API_KEY
-claude
+STOKE_API_KEY="cc-cap-key" stoke run claude
 ```
 
-`unset ANTHROPIC_API_KEY` keeps the client shell free of the real key — Stoke holds it. Claude Code now sends every request to `http://127.0.0.1:8787/v1/messages` with `Authorization: Bearer cc-cap-key`, and Stoke enforces before forwarding to Anthropic.
+Claude Code now sends every request to `http://127.0.0.1:8787/v1/messages` with `Authorization: Bearer ***`, and Stoke enforces before forwarding to Anthropic. The separately running Stoke server keeps `ANTHROPIC_API_KEY`; `stoke run` does not expose it to Claude Code.
 
 ## Verify it worked
 

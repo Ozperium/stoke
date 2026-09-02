@@ -38,3 +38,9 @@ jobs:
       # Guards the claim on the homepage. Each assertion is a bug that shipped once.
       - name: Smoke — spend firewall (pricing gate, streamed spend, fan-out clamp, cache isolation)
         run: ./scripts/smoke_spend.sh
+
+      - name: Smoke — OpenAI Responses passthrough
+        run: ./scripts/smoke_responses.sh
+
+      - name: Smoke — Claude Code and Codex launchers
+        run: ./scripts/smoke_client_run.sh

@@ -13,7 +13,7 @@
 <meta property="og:title" content="Cap Claude Code API Spend with a Local Budget Gateway">
 <meta property="og:description" content="Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.">
 <meta property="og:url" content="https://stokegate.com/guides/cap-claude-code-api-spend/">
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Cap Claude Code API Spend with a Local Budget Gateway","description":"Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.","url":"https://stokegate.com/guides/cap-claude-code-api-spend/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-08-02"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Cap Claude Code API Spend with a Local Budget Gateway","description":"Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.","url":"https://stokegate.com/guides/cap-claude-code-api-spend/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-09-02"}</script>
 <script src="/tracking.js" defer></script>
 <style>
 :root{--bg:#0a0a0b;--bg2:#131316;--bg3:#1a1a20;--border:#2a2a32;--text:#e4e4e7;--muted:#8a8a96;--accent:#3bdb78;--red:#ff5454;
@@ -130,12 +130,9 @@ spend cannot be metered and `budget_usd` could not enforce a cap.</code></pre>
 <span class="tok-kw">stoke</span>-cli serve</code></pre>
 <p>The real key lives only in this process's environment. Anyone hitting the gateway needs the gateway key, not the Anthropic key.</p>
 <h2 id="point-claude-code-at-stoke">Point Claude Code at Stoke</h2>
-<p>Claude Code authenticates to a base URL with a Bearer token when you set <code>ANTHROPIC_AUTH_TOKEN</code> (it sends <code>Authorization: Bearer &lt;token&gt;</code>). Stoke authenticates callers by exactly that header — so use <code>ANTHROPIC_AUTH_TOKEN</code>, not <code>ANTHROPIC_API_KEY</code> (which Claude Code would send as <code>x-api-key</code>, a header Stoke's auth ignores, giving you a 401). In the shell where you run Claude Code:</p>
-<pre><code class="lang-bash"><span class="tok-kw">export</span> ANTHROPIC_BASE_URL=<span class="tok-str">"http://127.0.0.1:8787"</span>
-<span class="tok-kw">export</span> ANTHROPIC_AUTH_TOKEN=<span class="tok-str">"cc-cap-key"</span>
-<span class="tok-kw">unset</span> ANTHROPIC_API_KEY
-claude</code></pre>
-<p><code>unset ANTHROPIC_API_KEY</code> keeps the client shell free of the real key — Stoke holds it. Claude Code now sends every request to <code>http://127.0.0.1:8787/v1/messages</code> with <code>Authorization: Bearer cc-cap-key</code>, and Stoke enforces before forwarding to Anthropic.</p>
+<p>The launcher sets Claude Code's base URL and Bearer token for the child process, and removes the real upstream key from that child. In the shell where you run Claude Code:</p>
+<pre><code class="lang-bash"><span class="tok-var">STOKE_API_KEY</span>=<span class="tok-str">"cc-cap-key"</span> stoke run claude</code></pre>
+<p>Claude Code now sends every request to <code>http://127.0.0.1:8787/v1/messages</code> with <code>Authorization: Bearer ***</code>, and Stoke enforces before forwarding to Anthropic. The separately running Stoke server keeps <code>ANTHROPIC_API_KEY</code>; <code>stoke run</code> does not expose it to Claude Code.</p>
 <h2 id="verify-it-worked">Verify it worked</h2>
 <p>Health check needs no auth:</p>
 <pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -sS</span> http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/health

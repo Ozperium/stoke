@@ -24,6 +24,9 @@ pub enum Wire {
     /// Anthropic: `message_start` carries `message.usage.input_tokens`, and each
     /// `message_delta` carries a cumulative `usage.output_tokens`.
     Anthropic,
+    /// OpenAI Responses: `response.completed` carries final usage under
+    /// `response.usage` using input/output token names.
+    Responses,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -119,6 +122,7 @@ impl UsageScanner {
         match self.wire {
             Wire::OpenAi => self.on_openai(&v),
             Wire::Anthropic => self.on_anthropic(&v),
+            Wire::Responses => self.on_responses(&v),
         }
     }
 
@@ -166,6 +170,21 @@ impl UsageScanner {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn on_responses(&mut self, v: &Value) {
+        if v.get("type").and_then(Value::as_str) != Some("response.completed") {
+            return;
+        }
+        let Some(usage) = v.pointer("/response/usage") else { return };
+        let input = usage.get("input_tokens").and_then(Value::as_u64);
+        let output = usage.get("output_tokens").and_then(Value::as_u64);
+        if let (Some(input), Some(output)) = (input, output) {
+            self.prompt_tokens = input;
+            self.completion_tokens = output;
+            self.seen = true;
+            self.final_seen = true;
         }
     }
 
@@ -248,6 +267,15 @@ mod tests {
             "data: [DONE]\n\n",
         ]);
         assert_eq!(s.usage(), Some(Usage { prompt_tokens: 11, completion_tokens: 7 }));
+    }
+
+    #[test]
+    fn responses_reads_usage_from_response_completed() {
+        let s = scan(Wire::Responses, &[
+            "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n",
+            "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":13,\"output_tokens\":8,\"total_tokens\":21}}}\n\n",
+        ]);
+        assert_eq!(s.usage(), Some(Usage { prompt_tokens: 13, completion_tokens: 8 }));
     }
 
     #[test]

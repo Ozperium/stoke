@@ -154,10 +154,10 @@ pub async fn messages(
     };
 
     if stream {
-        forward_stream(&state, &api_key, provider, &model, &req, reservation).await
+        forward_stream(&state, &api_key, provider, &model, &req, &headers, reservation).await
     } else {
         let _hold = reservation; // released when this handler returns
-        forward_once(&state, &api_key, provider, &model, &req).await
+        forward_once(&state, &api_key, provider, &model, &req, &headers).await
     }
 }
 
@@ -170,10 +170,11 @@ async fn forward_once(
     provider: &ProviderConfig,
     model: &str,
     req: &Value,
+    headers: &HeaderMap,
 ) -> Response {
     let url = anthropic_url(provider);
     let started = Instant::now();
-    let resp = match anthropic_request(provider, &url, req).send().await {
+    let resp = match anthropic_request(provider, &url, req, headers).send().await {
         Ok(r) => r,
         Err(e) => {
             crate::record_decision(
@@ -324,11 +325,12 @@ async fn forward_stream(
     provider: &ProviderConfig,
     model: &str,
     req: &Value,
+    headers: &HeaderMap,
     reservation: Option<crate::budget::SpendReservation>,
 ) -> Response {
     let url = anthropic_url(provider);
     let started = Instant::now();
-    match anthropic_request(provider, &url, req).send().await {
+    match anthropic_request(provider, &url, req, headers).send().await {
         Ok(resp) if resp.status().is_success() => {
             crate::record_decision(
                 state,
@@ -406,13 +408,28 @@ fn anthropic_request(
     provider: &ProviderConfig,
     url: &str,
     body: &Value,
+    inbound: &HeaderMap,
 ) -> reqwest::RequestBuilder {
-    (&*SHARED_CLIENT)
+    let mut request = (&*SHARED_CLIENT)
         .post(url)
         .header("x-api-key", provider.resolve_api_key())
-        .header("anthropic-version", ANTHROPIC_VERSION)
         .header("content-type", "application/json")
-        .json(body)
+        .json(body);
+
+    let mut has_version = false;
+    for (name, value) in inbound {
+        let name_str = name.as_str();
+        if name_str == "anthropic-version" {
+            has_version = true;
+        }
+        if name_str.starts_with("anthropic-") || name_str.starts_with("x-claude-code-") {
+            request = request.header(name, value);
+        }
+    }
+    if !has_version {
+        request = request.header("anthropic-version", ANTHROPIC_VERSION);
+    }
+    request
 }
 
 /// Best-effort prompt text for loop detection. Anthropic content may be a
@@ -490,5 +507,38 @@ mod tests {
         assert_eq!(anthropic_url(&p), "https://api.anthropic.com/v1/messages");
         p.base_url = "https://api.anthropic.com/v1".into();
         assert_eq!(anthropic_url(&p), "https://api.anthropic.com/v1/messages");
+    }
+
+    #[test]
+    fn claude_gateway_headers_reach_anthropic_without_client_authorization() {
+        let provider = ProviderConfig {
+            name: "anthropic".into(),
+            r#type: "anthropic".into(),
+            base_url: "https://api.anthropic.com".into(),
+            api_key: "upstream-key".into(),
+            api_key_env: String::new(),
+            models: vec![],
+            tier: "cloud".into(),
+        };
+        let mut inbound = HeaderMap::new();
+        inbound.insert("authorization", "Bearer stoke-client-key".parse().unwrap());
+        inbound.insert("anthropic-version", "2024-01-01".parse().unwrap());
+        inbound.insert("anthropic-beta", "tool-search-2025-10-19".parse().unwrap());
+        inbound.insert("x-claude-code-version", "2.1.0".parse().unwrap());
+
+        let request = anthropic_request(
+            &provider,
+            "https://api.anthropic.com/v1/messages",
+            &json!({"model": "claude-test"}),
+            &inbound,
+        )
+        .build()
+        .unwrap();
+
+        assert_eq!(request.headers()["x-api-key"], "upstream-key");
+        assert_eq!(request.headers()["anthropic-version"], "2024-01-01");
+        assert_eq!(request.headers()["anthropic-beta"], "tool-search-2025-10-19");
+        assert_eq!(request.headers()["x-claude-code-version"], "2.1.0");
+        assert!(request.headers().get("authorization").is_none());
     }
 }
