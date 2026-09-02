@@ -285,46 +285,11 @@
     </section>
 
     <section>
-      <div class="eyebrow">Jak to działa</div>
-      <h2 class="section-title">Proces jest eksportowany i przenoszony. Nie budowany od nowa.</h2>
-      <p class="section-sub">
-        Zamiast konsultantów, którzy siadają z pracownikiem, analizują jego sesje i odtwarzają proces od zera —
-        lokalny workflow jest mapowany na konfigurację, którą można uruchomić zdalnie.
-      </p>
-      <div class="diagram">
-        <div class="flow">
-          <div class="node">
-            <span class="step">Krok 1</span>
-            <strong>Pracownik pracuje po swojemu</strong>
-            <span>Wypracowuje proces lokalnie: Claude Code, skille, dostęp do baz. To jego naturalne środowisko pracy — nic się nie zmienia.</span>
-          </div>
-          <div class="flow-arrow">→</div>
-          <div class="node center">
-            <span class="step">Krok 2</span>
-            <strong>Proces jest eksportowany</strong>
-            <span>Lokalny workflow zostaje zmapowany na manifest: wejścia, dostępy, kroki, wywołania modeli. Powstaje paczka gotowa do zdalnego uruchomienia.</span>
-          </div>
-          <div class="flow-arrow">→</div>
-          <div class="node">
-            <span class="step">Krok 3</span>
-            <strong>Działa niezależnie od laptopa</strong>
-            <span>Paczka trafia do środowiska organizacyjnego i odpala się cyklicznie — z logowaniem, kontrolą kosztów i wyjątkami do człowieka.</span>
-          </div>
-        </div>
-      </div>
-      <div class="note">
-        <b>To jest powtarzalna ścieżka: local → remote → kolejne procesy.</b>
-        I to właśnie ona jest produktem pilota — nie pojedyncza automatyzacja, tylko sprawdzony sposób,
-        w jaki Selsey będzie przenosić kolejne procesy samodzielnie.
-      </div>
-    </section>
-
-    <section>
-      <div class="eyebrow">Proponowany kierunek</div>
+      <div class="eyebrow">Krok 1 — Warstwa kontroli AI</div>
       <h2 class="section-title">Jedna warstwa pomiędzy pracownikiem a modelami.</h2>
       <p class="section-sub">
         Nie zmieniamy sposobu, w jaki ludzie dziś pracują. Dodajemy organizacyjny „control layer” —
-        self-hosted, pojedynczy binarny plik, który staje się punktem wejścia do skalowania AI.
+        self-hosted, pojedynczy binarny plik, który staje się punktem wejścia do skalowania AI. To pierwszy krok — sam w sobie daje kontrolę kosztów, fallback i niezależność od dostawcy, zanim cokolwiek przenosimy.
       </p>
 
       <div class="diagram">
@@ -381,6 +346,41 @@
             <li>pierwszy proces działający poza laptopem</li>
           </ul>
         </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="eyebrow">Krok 2 — Mapowanie procesów</div>
+      <h2 class="section-title">Proces jest eksportowany i przenoszony. Nie budowany od nowa.</h2>
+      <p class="section-sub">
+        Zamiast konsultantów, którzy siadają z pracownikiem, analizują jego sesje i odtwarzają proces od zera —
+        lokalny workflow jest mapowany na konfigurację, którą można uruchomić zdalnie.
+      </p>
+      <div class="diagram">
+        <div class="flow">
+          <div class="node">
+            <span class="step">Etap 1</span>
+            <strong>Pracownik pracuje po swojemu</strong>
+            <span>Wypracowuje proces lokalnie: Claude Code, skille, dostęp do baz. To jego naturalne środowisko pracy — nic się nie zmienia.</span>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="node center">
+            <span class="step">Etap 2</span>
+            <strong>Proces jest eksportowany</strong>
+            <span>Lokalny workflow zostaje zmapowany na manifest: wejścia, dostępy, kroki, wywołania modeli. Powstaje paczka gotowa do zdalnego uruchomienia.</span>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="node">
+            <span class="step">Etap 3</span>
+            <strong>Działa niezależnie od laptopa</strong>
+            <span>Paczka trafia do środowiska organizacyjnego i odpala się cyklicznie — z logowaniem, kontrolą kosztów i wyjątkami do człowieka.</span>
+          </div>
+        </div>
+      </div>
+      <div class="note">
+        <b>To jest powtarzalna ścieżka: local → remote → kolejne procesy.</b>
+        I to właśnie ona jest produktem pilota — nie pojedyncza automatyzacja, tylko sprawdzony sposób,
+        w jaki Selsey będzie przenosić kolejne procesy samodzielnie.
       </div>
     </section>
 
