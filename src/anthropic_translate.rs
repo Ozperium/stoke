@@ -182,7 +182,7 @@ pub struct StreamTranslator {
     input_tokens: u64,
     output_tokens: u64,
     stop_reason: Option<String>,
-    partial: String,
+    partial: Vec<u8>,
 }
 
 impl StreamTranslator {
@@ -200,16 +200,25 @@ impl StreamTranslator {
             input_tokens: 0,
             output_tokens: 0,
             stop_reason: None,
-            partial: String::new(),
+            partial: Vec::new(),
         }
     }
 
     /// Feed raw upstream bytes; returns complete Anthropic SSE event frames.
+    ///
+    /// Buffers raw bytes and only converts complete lines to UTF-8, so a
+    /// multi-byte character split across chunk boundaries is not corrupted
+    /// into U+FFFD replacement garbage mid-stream.
     pub fn feed_bytes(&mut self, bytes: &[u8]) -> Vec<String> {
-        self.partial.push_str(&String::from_utf8_lossy(bytes));
+        self.partial.extend_from_slice(bytes);
         let mut events = Vec::new();
-        while let Some(pos) = self.partial.find('\n') {
-            let line: String = self.partial.drain(..=pos).collect();
+        while let Some(pos) = self.partial.iter().position(|&b| b == b'\n') {
+            let line: Vec<u8> = self.partial.drain(..=pos).collect();
+            let Ok(line) = std::str::from_utf8(&line) else {
+                // A newline always terminates an SSE frame, so an invalid
+                // line cannot be part of a split character — skip it.
+                continue;
+            };
             if let Some(payload) = line.trim_end().strip_prefix("data:") {
                 let payload = payload.trim();
                 if payload == "[DONE]" {
@@ -654,6 +663,28 @@ mod tests {
         assert!(names.contains(&"content_block_delta".to_string()));
         assert_eq!(names.last().unwrap(), "message_stop");
         assert_eq!(event_data(&events[2])["delta"]["text"], "hi");
+    }
+
+    #[test]
+    fn a_multibyte_character_split_across_chunks_is_not_corrupted() {
+        // "héllo" — é is two bytes (0xC3 0xA9); split the pair across feeds.
+        let payload = "data: {\"choices\":[{\"delta\":{\"content\":\"h\u{e9}llo\"}}]}\n\n";
+        let bytes = payload.as_bytes();
+        let split = bytes.iter().position(|&b| b == 0xC3).unwrap() + 1;
+        let mut t = StreamTranslator::new("m");
+        let mut events = t.feed_bytes(&bytes[..split]);
+        events.extend(t.feed_bytes(&bytes[split..]));
+        let text = events
+            .iter()
+            .filter(|e| e.contains("content_block_delta"))
+            .find_map(|e| {
+                let line = e.lines().find(|l| l.starts_with("data:"))?;
+                let v: Value = serde_json::from_str(&line[5..]).ok()?;
+                v["delta"]["text"].as_str().map(str::to_string)
+            })
+            .unwrap_or_default();
+        assert_eq!(text, "h\u{e9}llo");
+        assert!(!text.contains('\u{FFFD}'));
     }
 
     #[test]

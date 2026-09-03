@@ -856,6 +856,10 @@ async fn forward_stream_openai(
         started.elapsed().as_millis() as u64,
     );
 
+    // The meter is None for every translation-eligible tier (local|remote are
+    // free tiers), but must exist for any future tier added to the gate — and
+    // it must then tap the TRANSLATED Anthropic events (raw upstream bytes are
+    // OpenAI-framed and carry no Anthropic "type" fields it can read).
     let mut meter = (!crate::cost::is_free_tier(&provider.tier)).then(|| AnthropicStreamMeter {
         budget: state.budget.clone(),
         api_key: api_key.to_string(),
@@ -870,8 +874,10 @@ async fn forward_stream_openai(
             Ok(bytes) => translator.feed_bytes(bytes),
             Err(_) => Vec::new(),
         };
-        if let (Ok(bytes), Some(m)) = (&chunk, meter.as_mut()) {
-            m.on_chunk(bytes);
+        if let Some(m) = meter.as_mut() {
+            for event in &events {
+                m.on_chunk(event.as_bytes());
+            }
         }
         futures_util::stream::iter(
             events
