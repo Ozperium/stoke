@@ -1,4 +1,5 @@
 mod anthropic_oauth;
+mod anthropic_translate;
 mod auto_route;
 mod budget;
 mod builtins;

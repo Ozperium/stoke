@@ -83,6 +83,14 @@ pub const CLAUDE_SUBSCRIPTION_BILLING_MODE: &str = "claude_subscription";
 /// true cost figure would be $0.00, which must never be presented as API
 /// spend — so subscription requests get no dollar-valued decision event at
 /// all.
+/// Regular providers use OpenAI-compatible chat/completions, so their tier
+/// strings come from config. An OpenAI-compatible local provider can serve
+/// /v1/messages via translation; Anthropic-type and subscription providers
+/// cannot and must not.
+fn provider_accepts_messages_translation(provider: &ProviderConfig) -> bool {
+    provider.r#type == "openai_compatible" && matches!(provider.tier.as_str(), "local" | "remote")
+}
+
 fn record_metered_decision(
     dashboard: &crate::dashboard::Dashboard,
     provider: &ProviderConfig,
@@ -279,12 +287,11 @@ pub async fn messages(
 
     // Resolve the upstream Anthropic provider. A pure config read — every
     // enforcement gate below still runs before any upstream request.
-    let provider = match state
-        .config
-        .providers
-        .iter()
-        .find(|p| p.r#type == "anthropic" || p.r#type == "claude_subscription")
-    {
+    let provider = match state.config.providers.iter().find(|p| {
+        p.r#type == "anthropic"
+            || p.r#type == "claude_subscription"
+            || provider_accepts_messages_translation(p)
+    }) {
         Some(p) => p,
         None => {
             crate::record_decision(
@@ -457,6 +464,12 @@ async fn forward_once(
 ) -> Response {
     if subscription_bypasses_spend_accounting(provider) {
         return forward_once_subscription(state, provider, model, req, headers, credential).await;
+    }
+    // OpenAI-compatible local provider: translate Anthropic -> OpenAI, dispatch
+    // to {base_url}/chat/completions, translate the response back. Unsupported
+    // features fail closed with a clear 400 before any upstream request.
+    if provider_accepts_messages_translation(provider) {
+        return forward_once_openai(state, api_key, provider, model, req).await;
     }
     let url = anthropic_url(provider);
     let started = Instant::now();
@@ -634,6 +647,252 @@ async fn forward_once_subscription(
     out
 }
 
+/// Non-streaming dispatch to an OpenAI-compatible local provider.
+///
+/// Translate Anthropic -> OpenAI, POST to `{base_url}/chat/completions` with
+/// the provider's API key (Bearer, as the shared router does), then translate
+/// the OpenAI response back into an Anthropic Messages body. Unsupported
+/// request features fail closed with a clear 400 before any upstream call.
+/// Dollar accounting runs exactly as the Anthropic path: usage-derived
+/// `record_spend`, decision event, `x-stoke-cost`.
+async fn forward_once_openai(
+    state: &AppState,
+    api_key: &str,
+    provider: &ProviderConfig,
+    model: &str,
+    req: &Value,
+) -> Response {
+    let started = Instant::now();
+    let openai_req = match crate::anthropic_translate::translate_request(req) {
+        Ok(v) => v,
+        Err(reason) => {
+            crate::record_decision(
+                state,
+                crate::dashboard::Outcome::Blocked,
+                model,
+                "anthropic",
+                &provider.name,
+                reason.clone(),
+                0.0,
+                0,
+            );
+            return (StatusCode::BAD_REQUEST, reason).into_response();
+        }
+    };
+    let url = format!(
+        "{}/chat/completions",
+        provider.base_url.trim_end_matches('/')
+    );
+    let resp = match (&*SHARED_CLIENT)
+        .post(&url)
+        .bearer_auth(provider.resolve_api_key())
+        .json(&openai_req)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            crate::record_decision(
+                state,
+                crate::dashboard::Outcome::Failed,
+                model,
+                "anthropic",
+                &provider.name,
+                format!("Provider request failed: {e}"),
+                0.0,
+                started.elapsed().as_millis() as u64,
+            );
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("Provider request failed: {}", e),
+            )
+                .into_response();
+        }
+    };
+    let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let body: Value = match resp.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            crate::record_decision(
+                state,
+                crate::dashboard::Outcome::Failed,
+                model,
+                "anthropic",
+                &provider.name,
+                format!("Invalid provider response: {e}"),
+                0.0,
+                started.elapsed().as_millis() as u64,
+            );
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("Invalid provider response: {}", e),
+            )
+                .into_response();
+        }
+    };
+    // OpenAI usage -> the shared Pricer, identical to the Anthropic path's
+    // accounting so translation never bypasses the meter.
+    let cost_usd = crate::cost::global()
+        .calculate(model, body.get("usage"))
+        .cost_usd;
+    state.budget.record_spend(api_key, cost_usd);
+    crate::record_decision(
+        state,
+        message_outcome(status),
+        model,
+        "anthropic",
+        &provider.name,
+        if status.is_success() {
+            "Provider response"
+        } else {
+            "Provider upstream rejected the request"
+        },
+        cost_usd,
+        started.elapsed().as_millis() as u64,
+    );
+    tracing::info!(
+        "/v1/messages (openai translation): model={} provider={} cost=${:.6}",
+        model,
+        provider.name,
+        cost_usd
+    );
+
+    let out = match crate::anthropic_translate::translate_response(&body, model) {
+        translated => Json(translated).into_response(),
+    };
+    let mut out = out;
+    *out.status_mut() = status;
+    if let Ok(v) = format!("{:.6}", cost_usd).parse() {
+        out.headers_mut().insert("x-stoke-cost", v);
+    }
+    if let Ok(v) = provider.name.parse() {
+        out.headers_mut().insert("x-stoke-node", v);
+    }
+    out
+}
+
+/// Streaming dispatch to an OpenAI-compatible local provider.
+///
+/// Consumes the upstream OpenAI SSE stream, translates each chunk into
+/// Anthropic SSE events, and meters the translated stream with the regular
+/// `AnthropicStreamMeter` tap so billing is identical to the Anthropic path.
+/// Upstream errors reach the client with their original status.
+async fn forward_stream_openai(
+    state: &AppState,
+    api_key: &str,
+    provider: &ProviderConfig,
+    model: &str,
+    req: &Value,
+    reservation: Option<crate::budget::SpendReservation>,
+) -> Response {
+    let started = Instant::now();
+    let openai_req = match crate::anthropic_translate::translate_request(req) {
+        Ok(v) => v,
+        Err(reason) => {
+            crate::record_decision(
+                state,
+                crate::dashboard::Outcome::Blocked,
+                model,
+                "anthropic",
+                &provider.name,
+                reason.clone(),
+                0.0,
+                0,
+            );
+            return (StatusCode::BAD_REQUEST, reason).into_response();
+        }
+    };
+    // Local models cost nothing per token; asking for a usage frame still makes
+    // the meter exact, and the translation layer never alters a caller's own
+    // stream_options if they had one.
+    let openai_req =
+        crate::sse::request_stream_usage(&openai_req, &provider.tier, &provider.r#type);
+    let url = format!(
+        "{}/chat/completions",
+        provider.base_url.trim_end_matches('/')
+    );
+    let resp = match (&*SHARED_CLIENT)
+        .post(&url)
+        .bearer_auth(provider.resolve_api_key())
+        .json(&openai_req)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            crate::record_decision(
+                state,
+                crate::dashboard::Outcome::Failed,
+                model,
+                "anthropic",
+                &provider.name,
+                format!("Provider stream failed: {e}"),
+                0.0,
+                started.elapsed().as_millis() as u64,
+            );
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("Provider stream failed: {}", e),
+            )
+                .into_response();
+        }
+    };
+    if !resp.status().is_success() {
+        let code = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        let text = resp.text().await.unwrap_or_default();
+        crate::record_decision(
+            state,
+            crate::dashboard::Outcome::Failed,
+            model,
+            "anthropic",
+            &provider.name,
+            format!("Provider upstream returned {code}"),
+            0.0,
+            started.elapsed().as_millis() as u64,
+        );
+        return (code, text).into_response();
+    }
+    crate::record_decision(
+        state,
+        crate::dashboard::Outcome::Allowed,
+        model,
+        "anthropic",
+        &provider.name,
+        "Provider stream opened",
+        0.0,
+        started.elapsed().as_millis() as u64,
+    );
+
+    let mut meter = (!crate::cost::is_free_tier(&provider.tier)).then(|| AnthropicStreamMeter {
+        budget: state.budget.clone(),
+        api_key: api_key.to_string(),
+        model: model.to_string(),
+        usage: crate::sse::UsageScanner::new(crate::sse::Wire::Anthropic),
+        prompt_tokens_est: (extract_prompt_text(req).len() / 4) as u64,
+        _reservation: reservation,
+    });
+    let mut translator = crate::anthropic_translate::StreamTranslator::new(model);
+    let stream = resp.bytes_stream().flat_map(move |chunk| {
+        let events = match &chunk {
+            Ok(bytes) => translator.feed_bytes(bytes),
+            Err(_) => Vec::new(),
+        };
+        if let (Ok(bytes), Some(m)) = (&chunk, meter.as_mut()) {
+            m.on_chunk(bytes);
+        }
+        futures_util::stream::iter(
+            events
+                .into_iter()
+                .map(|event| Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(event))),
+        )
+    });
+    Response::builder()
+        .header("Content-Type", "text/event-stream")
+        .header("Cache-Control", "no-cache")
+        .body(Body::from_stream(stream))
+        .unwrap()
+}
+
 /// Bills an Anthropic SSE stream when it ends — or when the client walks away
 /// mid-stream, which costs the same. Anthropic reports usage without being
 /// asked: `message_start` carries the input tokens, `message_delta` the running
@@ -717,6 +976,13 @@ async fn forward_stream(
 ) -> Response {
     if subscription_bypasses_spend_accounting(provider) {
         return forward_stream_subscription(state, provider, model, req, headers, credential).await;
+    }
+    // OpenAI-compatible local provider: translate the request, dispatch to
+    // {base_url}/chat/completions, and emit Anthropic SSE events. Metering is
+    // preserved — the translated Anthropic events are tapped by the usual
+    // AnthropicStreamMeter as they flow to the client.
+    if provider_accepts_messages_translation(provider) {
+        return forward_stream_openai(state, api_key, provider, model, req, reservation).await;
     }
     let url = anthropic_url(provider);
     let started = Instant::now();
@@ -1060,6 +1326,43 @@ mod tests {
         assert!(text.contains("you are terse"));
         assert!(text.contains("hello"));
         assert!(text.contains("hi"));
+    }
+
+    #[test]
+    fn only_openai_compatible_local_providers_take_the_translation_path() {
+        fn provider(ty: &str, tier: &str) -> ProviderConfig {
+            ProviderConfig {
+                name: "p".into(),
+                r#type: ty.into(),
+                base_url: "http://127.0.0.1:11434/v1".into(),
+                api_key: String::new(),
+                api_key_env: String::new(),
+                models: vec![],
+                tier: tier.into(),
+            }
+        }
+        assert!(provider_accepts_messages_translation(&provider(
+            "openai_compatible",
+            "local"
+        )));
+        assert!(provider_accepts_messages_translation(&provider(
+            "openai_compatible",
+            "remote"
+        )));
+        // Cloud OpenAI-compatible providers are NOT translated here: this
+        // slice targets local/remote only.
+        assert!(!provider_accepts_messages_translation(&provider(
+            "openai_compatible",
+            "cloud"
+        )));
+        assert!(!provider_accepts_messages_translation(&provider(
+            "anthropic",
+            "cloud"
+        )));
+        assert!(!provider_accepts_messages_translation(&provider(
+            "claude_subscription",
+            "subscription"
+        )));
     }
 
     #[test]
