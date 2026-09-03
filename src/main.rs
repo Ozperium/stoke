@@ -482,9 +482,18 @@ async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -
             .unwrap();
     }
 
+    // Gateway identity, most-specific first: `x-stoke-key` is authoritative;
+    // `Authorization` is the legacy form; `x-api-key` is accepted as an alias
+    // so Anthropic-shape clients work without a custom header (Claude Desktop
+    // 3P gateway mode sends its credential as x-api-key). The value must still
+    // match a configured Stoke key, and `x-api-key` is stripped before any
+    // upstream dispatch (regular paths re-derive the provider credential from
+    // config; the subscription path sends only the store Bearer), so the
+    // gateway key can never leak as a provider credential.
     let stoke_key = req
         .headers()
         .get("x-stoke-key")
+        .or_else(|| req.headers().get("x-api-key"))
         .and_then(|h| h.to_str().ok());
     let auth_header = req
         .headers()
