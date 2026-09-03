@@ -354,6 +354,40 @@ impl Config {
                 }
             }
         }
+        for p in &self.providers {
+            if p.r#type != "claude_subscription" {
+                continue;
+            }
+            // A subscription provider's credential is the OAuth token store in
+            // crate::anthropic_oauth, so the pinned rules are: the exact
+            // first-party API host, a declared tier, and no static key that
+            // could silently override the OAuth flow.
+            if let Err(reason) = crate::subscription::validate_oauth_destination(
+                &p.base_url,
+                crate::anthropic_oauth::ANTHROPIC_API_HOST,
+            ) {
+                return Err(format!(
+                    "provider '{}' (type claude_subscription): base_url must be exactly \
+                     https://api.anthropic.com — {reason}",
+                    p.name
+                ));
+            }
+            if p.tier.trim().is_empty() {
+                return Err(format!(
+                    "provider '{}' (type claude_subscription) has no `tier`. \
+                     Set tier = \"subscription\" so Stoke knows this traffic is subscription-metered.",
+                    p.name
+                ));
+            }
+            if !p.api_key.is_empty() || !p.api_key_env.is_empty() {
+                return Err(format!(
+                    "provider '{}' (type claude_subscription) must not declare api_key or \
+                     api_key_env — its credential is the Anthropic OAuth token store \
+                     (see `stoke` OAuth login), not a static key",
+                    p.name
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -645,5 +679,89 @@ port = 8787
         }
         assert!(!is_fanout_routing("single"));
         assert!(!is_fanout_routing("auto"));
+    }
+
+    const CLAUDE_SUB: &str = r#"
+[[providers]]
+name = "claude-sub"
+type = "claude_subscription"
+base_url = "https://api.anthropic.com"
+tier = "subscription"
+"#;
+
+    #[test]
+    fn claude_subscription_provider_with_exact_host_passes_boot() {
+        let c = cfg(&format!("{BASE}{CLAUDE_SUB}"));
+        assert!(c.validate().is_ok());
+        // The provider must exist as configured (slice B will consume it).
+        let p = c.providers.first().expect("provider present");
+        assert_eq!(p.r#type, "claude_subscription");
+        assert_eq!(p.tier, "subscription");
+        assert_eq!(p.base_url, "https://api.anthropic.com");
+    }
+
+    #[test]
+    fn claude_subscription_base_url_must_be_exactly_api_anthropic_com() {
+        for hostile in [
+            "https://api.anthropic.com.evil.test",
+            "https://api.anthropic.com.evil.test/v1",
+            "https://anthropic.com",
+            "http://api.anthropic.com",
+            "https://api.anthropic.com:444",
+            "https://user@api.anthropic.com",
+            "https://example.com",
+        ] {
+            let c = cfg(&format!(
+                "{BASE}\n[[providers]]\nname = \"claude-sub\"\ntype = \"claude_subscription\"\n\
+                 base_url = \"{hostile}\"\ntier = \"subscription\"\n"
+            ));
+            let err = c.validate().unwrap_err();
+            assert!(err.contains("claude-sub"), "error must name the provider: {err}");
+            assert!(
+                err.contains("api.anthropic.com"),
+                "error must name the required base_url: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn claude_subscription_tier_is_required() {
+        // tier_rank() treats "" as local, which would exempt api.anthropic.com
+        // from pricing metering — the exact failure this type must not allow.
+        let c = cfg(&format!(
+            "{BASE}\n[[providers]]\nname = \"claude-sub\"\ntype = \"claude_subscription\"\n\
+             base_url = \"https://api.anthropic.com\"\n"
+        ));
+        let err = c.validate().unwrap_err();
+        assert!(err.contains("claude-sub"));
+        assert!(err.contains("tier"));
+    }
+
+    #[test]
+    fn claude_subscription_must_not_declare_an_api_key() {
+        // A subscription provider's credential is the OAuth token store; a
+        // static api_key beside it would silently override the OAuth flow.
+        for key_field in ["api_key = \"sk-ant-x\"", "api_key_env = \"ANTHROPIC_API_KEY\""] {
+            let c = cfg(&format!(
+                "{BASE}\n[[providers]]\nname = \"claude-sub\"\ntype = \"claude_subscription\"\n\
+                 base_url = \"https://api.anthropic.com\"\ntier = \"subscription\"\n{key_field}\n"
+            ));
+            let err = c.validate().unwrap_err();
+            assert!(err.contains("claude-sub"), "error must name the provider: {err}");
+            assert!(
+                err.contains("api_key"),
+                "error must explain that subscription providers take no api_key: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn other_provider_types_are_not_subject_to_claude_subscription_rules() {
+        // The anthropic type with an explicit api_key must keep working.
+        let c = cfg(&format!(
+            "{BASE}\n[[providers]]\nname = \"anthropic-key\"\ntype = \"anthropic\"\n\
+             base_url = \"https://api.anthropic.com\"\ntier = \"cloud\"\napi_key_env = \"ANTHROPIC_API_KEY\"\n"
+        ));
+        assert!(c.validate().is_ok());
     }
 }
