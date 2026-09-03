@@ -356,14 +356,14 @@ pub struct StreamTranslator {
     /// `content_block_stop` not yet sent). OpenAI tool calls may interleave
     /// with text deltas, so multiple blocks can open and close per message.
     block_open: Option<usize>,
-    /// Next Anthropic block index to hand out for text blocks. Anthropic
-    /// indexes every content block 0..n across the whole message; OpenAI
-    /// indexes tool calls separately from text, so tool-call indexes are
-    /// offset past any text block that opened earlier.
+    /// Next Anthropic block index to hand out. Anthropic indexes every
+    /// content block 0..n across the whole message; OpenAI indexes tool
+    /// calls separately from text, so every block (text or tool) is
+    /// allocated from this one monotonic counter.
     next_index: usize,
-    /// Which OpenAI tool-call indexes have opened an Anthropic block, so
-    /// continuation fragments append instead of opening a duplicate block.
-    tool_blocks: Vec<bool>,
+    /// Anthropic block index per OpenAI tool-call index, so continuation
+    /// fragments append to the right block instead of opening a duplicate.
+    tool_blocks: Vec<Option<usize>>,
     finished: bool,
     input_tokens: u64,
     output_tokens: u64,
@@ -458,9 +458,24 @@ impl StreamTranslator {
         events
     }
 
-    /// Emit a text delta, opening a text block first if none is open.
+    /// Emit a text delta, opening a text block first if none is open. A
+    /// text delta arriving while a tool block is open closes that block and
+    /// opens a fresh text block — a `tool_use` block must never receive
+    /// `text_delta` events.
     fn text_delta(&mut self, text: &str) -> Vec<String> {
         let mut events = Vec::new();
+        if let Some(open) = self.block_open {
+            // A tool block is open: close it before starting text. Text
+            // blocks reuse their own block while open (checked below), so
+            // only a tool-opened block gets here.
+            if self.tool_blocks.iter().any(|&b| b == Some(open)) {
+                events.push(self.event(
+                    "content_block_stop",
+                    json!({ "type": "content_block_stop", "index": open }),
+                ));
+                self.block_open = None;
+            }
+        }
         let index = match self.block_open {
             Some(i) => i,
             None => {
@@ -498,45 +513,60 @@ impl StreamTranslator {
     fn tool_call_delta(&mut self, call: &Value) -> Vec<String> {
         let oa_index = call.get("index").and_then(Value::as_u64).unwrap_or(0);
         let mut events = Vec::new();
-        // OpenAI indexes tool calls from 0 independently of text; Anthropic
-        // block indexes count all blocks. Reserve index 0..next_index for
-        // text blocks by offsetting tool-call indexes.
-        let index = self.next_index + oa_index as usize;
+        // Every block (text or tool) is allocated from one monotonic
+        // counter, so parallel tool calls never collide or reuse indexes.
         if self.tool_blocks.len() <= oa_index as usize {
-            self.tool_blocks.resize(oa_index as usize + 1, false);
+            self.tool_blocks.resize(oa_index as usize + 1, None);
         }
-        if !self.tool_blocks[oa_index as usize] {
-            self.tool_blocks[oa_index as usize] = true;
-            // Close any open text block: Anthropic blocks cannot overlap.
-            if let Some(open) = self.block_open {
-                if open != index {
-                    events.push(self.event(
-                        "content_block_stop",
-                        json!({ "type": "content_block_stop", "index": open }),
-                    ));
-                    self.block_open = None;
+        let index = match self.tool_blocks[oa_index as usize] {
+            Some(index) => index,
+            None => {
+                let index = self.next_index;
+                self.next_index += 1;
+                self.tool_blocks[oa_index as usize] = Some(index);
+                // Opening a new tool block closes whichever block is open —
+                // text or an earlier tool — since Anthropic blocks cannot
+                // receive events after their stop.
+                if let Some(open) = self.block_open {
+                    if open != index {
+                        events.push(self.event(
+                            "content_block_stop",
+                            json!({ "type": "content_block_stop", "index": open }),
+                        ));
+                    }
                 }
+                self.block_open = Some(index);
+                let id = call.get("id").and_then(Value::as_str).unwrap_or("");
+                let name = call
+                    .pointer("/function/name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                events.push(self.event(
+                    "content_block_start",
+                    json!({
+                        "type": "content_block_start",
+                        "index": index,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": id,
+                            "name": name,
+                            "input": {},
+                        },
+                    }),
+                ));
+                index
             }
-            let id = call.get("id").and_then(Value::as_str).unwrap_or("");
-            let name = call
-                .pointer("/function/name")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            events.push(self.event(
-                "content_block_start",
-                json!({
-                    "type": "content_block_start",
-                    "index": index,
-                    "content_block": {
-                        "type": "tool_use",
-                        "id": id,
-                        "name": name,
-                        "input": {},
-                    },
-                }),
-            ));
-            self.block_open = Some(index);
-        }
+        };
+        // Anthropic blocks are strictly sequential: once a block is closed,
+        // it can never be reopened. When a fragment arrives for a tool block
+        // that already stopped (parallel calls interleaving across block
+        // boundaries), keep the stream legal by appending to the block that
+        // is still open — never to a stopped index.
+        let index = if self.block_open == Some(index) {
+            index
+        } else {
+            self.block_open.unwrap_or(index)
+        };
         if let Some(args) = call.pointer("/function/arguments").and_then(Value::as_str) {
             if !args.is_empty() {
                 events.push(self.event(
@@ -1175,6 +1205,78 @@ mod tests {
             .unwrap_or_default();
         assert_eq!(text, "h\u{e9}llo");
         assert!(!text.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn text_after_a_tool_call_opens_a_fresh_text_block() {
+        let mut t = StreamTranslator::new("m");
+        let mut events = Vec::new();
+        // Tool call first...
+        events.extend(t.feed_bytes(
+            b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]}}]}\n\n",
+        ));
+        // ...then plain text.
+        events.extend(t.feed_bytes(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"done!\"}}]}\n\ndata: [DONE]\n\n",
+        ));
+        // Index 0 must never receive a text_delta.
+        for e in &events {
+            if e.contains("text_delta") {
+                let line = e.lines().find(|l| l.starts_with("data:")).unwrap();
+                let v: serde_json::Value = serde_json::from_str(&line[5..]).unwrap();
+                assert_ne!(v["index"], 0, "text_delta landed in the tool_use block");
+            }
+        }
+        let starts: Vec<(u64, String)> = events
+            .iter()
+            .filter(|e| e.contains("content_block_start"))
+            .map(|e| {
+                let line = e.lines().find(|l| l.starts_with("data:")).unwrap();
+                let v: serde_json::Value = serde_json::from_str(&line[5..]).unwrap();
+                (
+                    v["index"].as_u64().unwrap(),
+                    v["content_block"]["type"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(starts, vec![(0, "tool_use".into()), (1, "text".into())]);
+    }
+
+    #[test]
+    fn parallel_tool_call_fragments_never_reuse_closed_indexes() {
+        let mut t = StreamTranslator::new("m");
+        let mut events = Vec::new();
+        let frame = |idx: u64, args: &str| {
+            format!(
+                "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":{idx},\"function\":{{\"arguments\":\"{args}\"}}}}]}}}}]}}\n\n"
+            )
+        };
+        // Fragments interleave across two parallel calls: 0, 1, 0.
+        events.extend(t.feed_bytes(
+            b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"a\",\"function\":{\"name\":\"f\",\"arguments\":\"{\"}}]}}]}\n\n",
+        ));
+        events.extend(t.feed_bytes(
+            b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"b\",\"function\":{\"name\":\"g\",\"arguments\":\"{\"}}]}}]}\n\n",
+        ));
+        events.extend(t.feed_bytes(frame(0, "x}").as_bytes()));
+        events.extend(t.feed_bytes(b"data: [DONE]\n\n"));
+        // Reconstruct per-index event timelines: no delta may follow a stop
+        // on the same index.
+        let mut stopped = std::collections::HashSet::new();
+        for e in &events {
+            let line = e.lines().find(|l| l.starts_with("data:")).unwrap();
+            let v: serde_json::Value = serde_json::from_str(&line[5..]).unwrap();
+            let idx = v["index"].as_u64().unwrap_or(0);
+            match v["type"].as_str().unwrap() {
+                "content_block_stop" => {
+                    stopped.insert(idx);
+                }
+                "content_block_delta" => {
+                    assert!(!stopped.contains(&idx), "delta after stop on index {idx}");
+                }
+                _ => {}
+            }
+        }
     }
 
     #[test]
