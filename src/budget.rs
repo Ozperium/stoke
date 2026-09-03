@@ -561,6 +561,21 @@ impl Auth {
         }
     }
 
+    /// Validate Stoke separately from an upstream credential carried in
+    /// `Authorization`. If `x-stoke-key` is present it is authoritative: an
+    /// invalid gateway key must never fall back to treating the upstream token
+    /// as a Stoke key.
+    pub fn validate_gateway(
+        &self,
+        stoke_key: Option<&str>,
+        authorization: Option<&str>,
+    ) -> Option<String> {
+        match stoke_key {
+            Some(key) => self.validate(Some(&format!("Bearer {}", key.trim()))),
+            None => self.validate(authorization),
+        }
+    }
+
     pub fn is_auth_enabled(&self) -> bool {
         !self.keys.read().unwrap().is_empty()
             || std::env::var("STOKE_DEV").unwrap_or_default() != "1"
@@ -643,6 +658,32 @@ mod tests {
         let auth = Auth::new();
         assert_eq!(auth.validate(None), None);
         assert_eq!(auth.validate(Some("Bearer anything")), None);
+    }
+
+    #[test]
+    fn gateway_header_keeps_upstream_authorization_separate() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("STOKE_DEV");
+        std::env::set_var("STOKE_API_KEYS", "gateway-key");
+        let auth = Auth::new();
+
+        assert_eq!(
+            auth.validate_gateway(
+                Some("gateway-key"),
+                Some("Bearer upstream-subscription-token")
+            ),
+            Some("gateway-key".to_string())
+        );
+        assert_eq!(
+            auth.validate_gateway(
+                Some("wrong-gateway-key"),
+                Some("Bearer gateway-key")
+            ),
+            None,
+            "an explicit but invalid x-stoke-key must not fall back to Authorization"
+        );
+
+        std::env::remove_var("STOKE_API_KEYS");
     }
 
     #[tokio::test]

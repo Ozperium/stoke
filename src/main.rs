@@ -14,6 +14,7 @@ mod responses;
 mod router;
 mod sse;
 mod stream_fusion;
+mod subscription;
 mod ttft;
 
 #[cfg(feature = "js-plugins")]
@@ -425,7 +426,9 @@ fn record_decision(
 
 /// Auth gate for every endpoint except /health (liveness probes stay open).
 /// Mirrors the fail-closed rules of `Auth::validate`: no keys + no STOKE_DEV
-/// rejects everything; configured keys require a matching Bearer token.
+/// rejects everything; configured keys require `x-stoke-key` or a matching
+/// legacy Bearer token. Keeping the gateway key separate leaves Authorization
+/// available for subscription credentials on the native provider endpoints.
 async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let path = req.uri().path().to_string();
     if path == "/health" {
@@ -451,8 +454,15 @@ async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -
             .unwrap();
     }
 
-    let auth_header = req.headers().get("authorization").and_then(|h| h.to_str().ok());
-    match state.auth.validate(auth_header) {
+    let stoke_key = req
+        .headers()
+        .get("x-stoke-key")
+        .and_then(|h| h.to_str().ok());
+    let auth_header = req
+        .headers()
+        .get("authorization")
+        .and_then(|h| h.to_str().ok());
+    match state.auth.validate_gateway(stoke_key, auth_header) {
         Some(key) => {
             let mut req = req;
             req.extensions_mut().insert(key);
