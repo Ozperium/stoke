@@ -127,8 +127,7 @@ fn message_outcome(status: StatusCode) -> crate::dashboard::Outcome {
 
 /// The credential a `claude_subscription` dispatch carries upstream.
 ///
-/// Slice A (the Claude OAuth token store) will mint these; until it lands, the
-/// handler passes the client's own `Authorization` through opaquely, and tests
+/// Resolved from the Stoke-held Anthropic OAuth store before dispatch; tests
 /// construct the struct directly to inject a token. The token is never logged,
 /// hashed, persisted, or echoed.
 pub struct SubscriptionCredential {
@@ -156,13 +155,7 @@ impl SubscriptionCredential {
 /// How the subscription path obtains its upstream Bearer token.
 ///
 /// Default is the Stoke-held Anthropic OAuth store (`~/.stoke/anthropic_oauth.json`,
-/// refreshed by slice A); tests inject a closure returning a canned token so
-/// the handler can be exercised without token material on disk. The resolved
-/// token is never logged, hashed, persisted, or echoed.
-/// How the subscription path obtains its upstream Bearer token.
-///
-/// Default is the Stoke-held Anthropic OAuth store (`~/.stoke/anthropic_oauth.json`,
-/// refreshed by slice A); tests inject a closure returning a canned token so
+/// refreshed silently); tests inject a closure returning a canned token so
 /// the handler can be exercised without token material on disk. The resolved
 /// token is never logged, hashed, persisted, or echoed.
 pub type SubscriptionTokenResolver = std::sync::Arc<

@@ -965,23 +965,37 @@ fn cli_login_claude(args: &[String]) -> ExitCode {
     }
 
     eprintln!("Opening your browser to authorize with claude.ai…");
-    eprintln!("If it does not open, copy the URL below into a browser.");
-    match tokio::runtime::Builder::new_current_thread()
+    let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
     {
-        Ok(runtime) => match runtime.block_on(store.login()) {
-            Ok(()) => {
-                println!("✓ Logged in. Stoke can now serve Claude models on your subscription.");
-                ExitCode::SUCCESS
-            }
-            Err(error) => {
-                eprintln!("Login failed: {}", error);
-                ExitCode::FAILURE
-            }
-        },
+        Ok(runtime) => runtime,
         Err(error) => {
             eprintln!("Error: could not start async runtime: {}", error);
+            return ExitCode::FAILURE;
+        }
+    };
+    // Bind the callback listener first so the authorize URL (which embeds the
+    // redirect port) can be printed before the browser is opened — if the
+    // browser fails to open, the operator can paste the URL manually.
+    let (listener, verifier, url) = match runtime.block_on(async { store.begin_login() }) {
+        Ok(login) => login,
+        Err(error) => {
+            eprintln!("Login failed: {}", error);
+            return ExitCode::FAILURE;
+        }
+    };
+    println!("{}", url);
+    if let Err(error) = stoke::anthropic_oauth::open_browser(&url) {
+        eprintln!("Could not open a browser automatically ({}); open the URL above.", error);
+    }
+    match runtime.block_on(store.finish_login(listener, &verifier)) {
+        Ok(()) => {
+            println!("✓ Logged in. Stoke can now serve Claude models on your subscription.");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("Login failed: {}", error);
             ExitCode::FAILURE
         }
     }
