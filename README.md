@@ -249,6 +249,28 @@ STOKE_API_KEY=stk-mykey stoke run codex -- exec "Review this repository"
 
 The launcher injects a temporary Codex custom provider with `wire_api = "responses"`, points it at Stoke, disables the WebSocket transport, and keeps the client key in `STOKE_API_KEY` rather than argv. Stoke forwards `POST /v1/responses` without translating its request, response, tool-call, or SSE event shapes. This path uses the API credential held by the Stoke server; it does not proxy ChatGPT subscription/OAuth billing.
 
+**Native ChatGPT/Codex desktop app (macOS).** The desktop app (`ChatGPT.app`, bundle `com.openai.codex`) reads the same `~/.codex/config.toml` as the Codex CLI, so one config serves both — the workflow below is app-first. In `stoke.toml`, add the commented `codex_subscription` provider shown in [`stoke.example.toml`](stoke.example.toml), then put this in `~/.codex/config.toml`:
+
+```toml
+model_provider = "stoke"
+
+[model_providers.stoke]
+name = "Stoke"
+base_url = "http://127.0.0.1:8787/v1"
+wire_api = "responses"
+requires_openai_auth = true
+supports_websockets = false
+env_http_headers = { "x-stoke-key" = "STOKE_API_KEY" }
+```
+
+Fully quit and reopen the app so it picks up the config, then start a **new** task — a running task keeps its old provider. The app keeps its normal ChatGPT subscription login; Stoke consumes the `x-stoke-key` header for its own enforcement. If the app cannot see `STOKE_API_KEY` in its environment, the desktop app may load it from an owner-only `~/.codex/.env` — create that file with only the variable, readable by your user alone.
+
+What Stoke does with the subscription credential: ChatGPT OAuth/account identity is forwarded **only** for the `codex_subscription` provider, and only to the exact first-party ChatGPT endpoint (`https://chatgpt.com/backend-api/codex`, HTTPS, redirects disabled). That identity is stripped from requests to Ollama and every other provider. Subscription traffic has no per-request price, so it is **not** reported as API-dollar spend in `stoke_cost` or the budget ledger; rate limiting and loop detection still apply to it.
+
+To swap the desktop app onto a local model instead, set top-level `model = "<your-local-model>"` in the same `~/.codex/config.toml` and configure that model under a regular local Ollama provider in `stoke.toml`; no protocol translation is needed when Ollama supports `/v1/responses`.
+
+Note: native Claude Desktop cannot forward claude.ai subscription OAuth to third-party inference, so there is no equivalent desktop path for Claude.
+
 ## Multi-machine setup
 
 Two machines, direct: point Stoke at both Ollamas. The remote Ollama must listen on the LAN for this variant.

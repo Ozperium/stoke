@@ -57,6 +57,20 @@ tier = "local"
 # api_key_env = "ANTHROPIC_API_KEY"
 # tier = "cloud"
 
+# ChatGPT/Codex subscription passthrough (native Codex desktop app or CLI
+# signed in with ChatGPT). Forwarding of ChatGPT OAuth/account identity is
+# enabled ONLY for this provider type, and ONLY to the exact first-party
+# HTTPS endpoint below — redirects are refused, and the identity is stripped
+# from requests to every other provider. No api_key / api_key_env here: auth
+# comes from the client's own ChatGPT login, not a metered key. Subscription
+# traffic has no per-request price, so it is not reported as API-dollar spend.
+# [[providers]]
+# name = "codex-subscription"
+# type = "codex_subscription"
+# base_url = "https://chatgpt.com/backend-api/codex"
+# tier = "subscription"
+# models = ["<your-chatgpt-plan-model>"]  # placeholder — Stoke ships no model names
+
 # ─── Auto-routing roles (for routing = "auto") ───────────────────
 # Explicit role → model choices. Anything not set is resolved from models
 # DISCOVERED on your own nodes (Stoke ships with no model names). For agent
