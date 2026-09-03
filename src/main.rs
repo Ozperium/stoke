@@ -798,21 +798,35 @@ async fn list_pricing() -> Json<Value> {
 }
 
 async fn list_models(State(state): State<AppState>) -> Json<Value> {
-    // Config lists the operator's static models. For the claude_subscription
-    // provider, live discovery from Anthropic's /v1/models (using the same
-    // OAuth credential the /v1/messages subscription path forwards) replaces
-    // the static list, so the picker shows what the plan actually offers —
-    // including models newer than this Stoke build. On any failure (not
-    // logged in, upstream error) fall back to the configured list: the
-    // endpoint stays a pure read, never a hard dependency on login state.
+    // Config lists the operator's static models. Subscription providers use
+    // live discovery with the same first-party OAuth identities as their
+    // request paths, so pickers show what each plan currently offers —
+    // including models newer than this Stoke build. On any discovery failure
+    // (not logged in, stale token, upstream error), fall back to that
+    // provider's configured list: model listing never depends on login state.
     let mut models: Vec<Value> = Vec::new();
-    let mut subscription_models: Option<Vec<String>> = None;
+    let mut claude_models: Option<Vec<String>> = None;
+    let mut codex_models: Option<Vec<String>> = None;
     for provider in state.config.providers.iter() {
         if provider.r#type == "claude_subscription" {
-            if subscription_models.is_none() {
-                subscription_models = Some(fetch_subscription_models().await);
+            if claude_models.is_none() {
+                claude_models = Some(fetch_claude_subscription_models().await);
             }
-            let discovered = subscription_models.as_ref().unwrap();
+            let discovered = claude_models.as_ref().unwrap();
+            if discovered.is_empty() {
+                for m in &provider.models {
+                    models.push(json!({ "id": m, "provider": provider.name }));
+                }
+            } else {
+                for m in discovered {
+                    models.push(json!({ "id": m, "provider": provider.name }));
+                }
+            }
+        } else if provider.r#type == "codex_subscription" {
+            if codex_models.is_none() {
+                codex_models = Some(fetch_codex_subscription_models().await);
+            }
+            let discovered = codex_models.as_ref().unwrap();
             if discovered.is_empty() {
                 for m in &provider.models {
                     models.push(json!({ "id": m, "provider": provider.name }));
@@ -838,7 +852,7 @@ async fn list_models(State(state): State<AppState>) -> Json<Value> {
 /// /v1/models with the store's OAuth token (the same token the subscription
 /// path forwards). Empty on any failure — callers then use the config list.
 /// Token material never leaves this function and nothing is logged.
-async fn fetch_subscription_models() -> Vec<String> {
+async fn fetch_claude_subscription_models() -> Vec<String> {
     let resolver = crate::messages::default_subscription_token_resolver();
     let Ok(token) = resolver().await else {
         return Vec::new();
@@ -867,6 +881,106 @@ async fn fetch_subscription_models() -> Vec<String> {
     match resp.json::<ModelsResponse>().await {
         Ok(parsed) => parsed.data.into_iter().map(|m| m.id).collect(),
         Err(_) => Vec::new(),
+    }
+}
+
+/// Live Codex catalog from the user's native Codex/ChatGPT app login.
+/// Credentials are read owner-locally from ~/.codex/auth.json, sent only to
+/// the exact chatgpt.com host with redirects disabled, and never logged.
+/// Empty on stale/missing login or any upstream failure; callers then use the
+/// operator's configured fallback list.
+async fn fetch_codex_subscription_models() -> Vec<String> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
+    let path = std::path::PathBuf::from(home).join(".codex/auth.json");
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(auth) = serde_json::from_str::<Value>(&raw) else {
+        return Vec::new();
+    };
+    let Some((token, account_id)) = codex_auth_parts(&auth) else {
+        return Vec::new();
+    };
+
+    let url = format!(
+        "{}/models?client_version=1.0.0",
+        crate::subscription::CHATGPT_CODEX_BASE
+    );
+    if crate::subscription::validate_oauth_destination(&url, "chatgpt.com").is_err() {
+        return Vec::new();
+    }
+    let Ok(resp) = (&*crate::subscription::OAUTH_CLIENT)
+        .get(url)
+        .bearer_auth(token)
+        .header("chatgpt-account-id", account_id)
+        .header("originator", "codex_cli_rs")
+        .send()
+        .await
+    else {
+        return Vec::new();
+    };
+    if !resp.status().is_success() {
+        return Vec::new();
+    }
+    let Ok(body) = resp.json::<Value>().await else {
+        return Vec::new();
+    };
+    codex_model_ids(&body)
+}
+
+fn codex_auth_parts(auth: &Value) -> Option<(&str, &str)> {
+    let tokens = auth.get("tokens")?;
+    let token = tokens.get("access_token")?.as_str()?.trim();
+    let account_id = tokens.get("account_id")?.as_str()?.trim();
+    if token.is_empty() || account_id.is_empty() {
+        return None;
+    }
+    Some((token, account_id))
+}
+
+fn codex_model_ids(body: &Value) -> Vec<String> {
+    body.get("models")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|model| model.get("slug").and_then(Value::as_str))
+        .filter(|slug| !slug.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+#[cfg(test)]
+mod subscription_model_discovery_tests {
+    use super::{codex_auth_parts, codex_model_ids};
+    use serde_json::json;
+
+    #[test]
+    fn codex_catalog_uses_live_slugs_in_upstream_order() {
+        let body = json!({
+            "models": [
+                {"slug": "future-primary", "display_name": "Future Primary"},
+                {"slug": "future-fast"},
+                {"id": "missing-slug"},
+                {"slug": ""}
+            ]
+        });
+        assert_eq!(
+            codex_model_ids(&body),
+            vec!["future-primary".to_string(), "future-fast".to_string()]
+        );
+    }
+
+    #[test]
+    fn codex_auth_requires_both_nonempty_parts() {
+        let auth = json!({"tokens": {"access_token": " secret ", "account_id": " acct "}});
+        assert_eq!(codex_auth_parts(&auth), Some(("secret", "acct")));
+        assert!(codex_auth_parts(&json!({"tokens": {"access_token": "secret"}})).is_none());
+        assert!(
+            codex_auth_parts(&json!({"tokens": {"access_token": "", "account_id": "acct"}}))
+                .is_none()
+        );
     }
 }
 

@@ -138,9 +138,9 @@ pub async fn responses(
         return (StatusCode::TOO_MANY_REQUESTS, reason).into_response();
     }
 
-    let provider = match state.config.provider_for_model(&model) {
-        Some(provider) if provider.r#type != "anthropic" => provider,
-        _ => {
+    let provider = match responses_provider_for_model(&state.config.providers, &model) {
+        Some(provider) => provider,
+        None => {
             return (
                 StatusCode::BAD_REQUEST,
                 "No OpenAI-compatible provider configured for model",
@@ -511,8 +511,28 @@ fn subscription_request(
     request
 }
 
-/// The upstream URL for a `/v1/responses` dispatch.
-///
+/// Select a Responses provider without pinning Stoke to a model catalog.
+/// Explicit model declarations always win. A live-discovered Codex model may
+/// be newer than the static config, so unclaimed GPT/Codex namespace IDs route
+/// to codex_subscription. Everything else keeps the existing first-provider
+/// fallback, excluding Anthropic-only providers.
+fn responses_provider_for_model<'a>(
+    providers: &'a [ProviderConfig],
+    model: &str,
+) -> Option<&'a ProviderConfig> {
+    providers
+        .iter()
+        .find(|p| p.r#type != "anthropic" && p.models.iter().any(|m| m == model))
+        .or_else(|| {
+            if model.starts_with("gpt-") || model.starts_with("codex-") {
+                providers.iter().find(|p| p.r#type == "codex_subscription")
+            } else {
+                None
+            }
+        })
+        .or_else(|| providers.iter().find(|p| p.r#type != "anthropic"))
+}
+
 /// A `codex_subscription` provider may only target the exact ChatGPT Codex
 /// backend; anything else is refused. Regular providers keep the generic
 /// base-url logic.
@@ -640,6 +660,32 @@ mod tests {
             models: vec!["gpt-test".into()],
             tier: "subscription".into(),
         }
+    }
+
+    #[test]
+    fn live_codex_models_route_to_subscription_but_explicit_models_win() {
+        let local = provider("http://127.0.0.1:11434/v1");
+        let subscription = subscription_provider();
+        let providers = vec![local, subscription];
+
+        assert_eq!(
+            responses_provider_for_model(&providers, "gpt-future")
+                .unwrap()
+                .r#type,
+            "codex_subscription"
+        );
+        assert_eq!(
+            responses_provider_for_model(&providers, "codex-auto-review")
+                .unwrap()
+                .r#type,
+            "codex_subscription"
+        );
+        assert_eq!(
+            responses_provider_for_model(&providers, "gpt-test")
+                .unwrap()
+                .name,
+            "openai"
+        );
     }
 
     #[test]
