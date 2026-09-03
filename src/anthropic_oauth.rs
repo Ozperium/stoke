@@ -22,9 +22,15 @@ pub const AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
 pub const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 /// The exact upstream host a claude_subscription provider may talk to.
 pub const ANTHROPIC_API_HOST: &str = "api.anthropic.com";
-/// The scopes the official Claude Code client requests — exactly, no more.
+/// The scopes Claude Code's interactive login requests. The OAuth server
+/// rejects unknown scopes with "Invalid OAuth Request", so this tracks the
+/// set actually issued to current Claude Code clients (anthropics/
+/// claude-code#54502: granted scopes are these five user:* scopes;
+/// org:create_api_key is requested by the CLI but silently dropped for
+/// subscription accounts, so requesting it is optional — and the older
+/// org:custom_attributes / claude_code scopes now 400 as unknown).
 pub const OAUTH_SCOPES: &str =
-    "org:create_api_key org:custom_attributes claude_code claude_code:offline_access";
+    "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
 
 /// Refresh when the access token is within this window of expiring.
 pub const EXPIRY_SKEW_SECS: i64 = 60;
@@ -668,11 +674,11 @@ mod tests {
         assert!(url.contains("response_type=code"));
         assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A51777%2Fcallback"));
         assert!(url.contains(
-            "scope=org%3Acreate_api_key%20org%3Acustom_attributes%20claude_code%20claude_code%3Aoffline_access"
+            "scope=user%3Aprofile%20user%3Ainference%20user%3Asessions%3Aclaude_code%20user%3Amcp_servers%20user%3Afile_upload"
         ));
         assert_eq!(
             OAUTH_SCOPES,
-            "org:create_api_key org:custom_attributes claude_code claude_code:offline_access"
+            "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
         );
         assert!(url.contains(&format!("code_challenge={challenge}")));
         assert!(url.contains("code_challenge_method=S256"));
