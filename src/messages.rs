@@ -30,6 +30,10 @@ use crate::AppState;
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
+/// The beta header Anthropic requires on OAuth subscription requests. Always
+/// present upstream; the client's own betas are preserved alongside it.
+const SUBSCRIPTION_OAUTH_BETA: &str = "oauth-2025-04-20";
+
 /// Stoke gateway auth for this endpoint, split from the upstream credential.
 ///
 /// The inbound `x-stoke-key` header is the gateway identity and is
@@ -141,6 +145,105 @@ impl SubscriptionCredential {
     }
 }
 
+/// How the subscription path obtains its upstream Bearer token.
+///
+/// Default is the Stoke-held Anthropic OAuth store (`~/.stoke/anthropic_oauth.json`,
+/// refreshed by slice A); tests inject a closure returning a canned token so
+/// the handler can be exercised without token material on disk. The resolved
+/// token is never logged, hashed, persisted, or echoed.
+/// How the subscription path obtains its upstream Bearer token.
+///
+/// Default is the Stoke-held Anthropic OAuth store (`~/.stoke/anthropic_oauth.json`,
+/// refreshed by slice A); tests inject a closure returning a canned token so
+/// the handler can be exercised without token material on disk. The resolved
+/// token is never logged, hashed, persisted, or echoed.
+pub type SubscriptionTokenResolver = std::sync::Arc<
+    dyn Fn() -> futures_util::future::BoxFuture<'static, Result<String, String>> + Send + Sync,
+>;
+
+/// The production resolver: a shared, store-backed `TokenStore`. The store
+/// caches tokens in memory and refreshes under one lock, so concurrent
+/// requests produce one refresh, not a stampede against Anthropic.
+pub fn default_subscription_token_resolver() -> SubscriptionTokenResolver {
+    static STORE: once_cell::sync::Lazy<crate::anthropic_oauth::TokenStore> =
+        once_cell::sync::Lazy::new(crate::anthropic_oauth::TokenStore::new);
+    std::sync::Arc::new(
+        || -> futures_util::future::BoxFuture<'static, Result<String, String>> {
+            Box::pin(async { STORE.get_valid_access_token().await })
+        },
+    )
+}
+
+/// The credential a subscription dispatch resolves before forwarding.
+///
+/// `None` means "the store is not usable" (not logged in, malformed, or a
+/// failed refresh) — the handler must fail closed with a clear error and
+/// without forwarding anything.
+struct SubscriptionCredentialResult(Result<SubscriptionCredential, String>);
+
+async fn resolve_subscription_credential(
+    resolver: &SubscriptionTokenResolver,
+) -> SubscriptionCredentialResult {
+    match resolver().await {
+        Ok(access_token) if !access_token.is_empty() => {
+            SubscriptionCredentialResult(Ok(SubscriptionCredential { access_token }))
+        }
+        Ok(_) => SubscriptionCredentialResult(Err(
+            "claude_subscription credential is unavailable: the Anthropic OAuth store returned \
+             an empty token"
+                .to_string(),
+        )),
+        Err(reason) => SubscriptionCredentialResult(Err(format!(
+            "claude_subscription credential is unavailable: {reason}"
+        ))),
+    }
+}
+
+/// Build the client-facing error for an unusable subscription credential:
+/// fail-closed, no token material, no panic.
+fn subscription_credential_error(reason: &str) -> Response {
+    tracing::error!(
+        "claude_subscription credential refused: {}",
+        reason
+            .split("token store returned")
+            .next()
+            .unwrap_or(reason)
+            .trim()
+    );
+    let status = if reason.contains("not logged in") {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::BAD_GATEWAY
+    };
+    (status, reason.to_string()).into_response()
+}
+
+/// Union the client's `anthropic-beta` with the OAuth beta the official
+/// subscription client must send, comma-separated, no duplicates (Anthropic's
+/// documented joining rule). Client betas are preserved verbatim in order.
+fn merge_subscription_beta(inbound: &HeaderMap) -> Option<String> {
+    let client_beta = inbound
+        .get("anthropic-beta")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    match client_beta {
+        None => Some(SUBSCRIPTION_OAUTH_BETA.to_string()),
+        Some(client) => {
+            let mut parts: Vec<String> = client
+                .split(',')
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .collect();
+            if !parts.iter().any(|p| p == SUBSCRIPTION_OAUTH_BETA) {
+                parts.push(SUBSCRIPTION_OAUTH_BETA.to_string());
+            }
+            Some(parts.join(","))
+        }
+    }
+}
+
 /// The upstream URL for a `/v1/messages` dispatch.
 ///
 /// A `claude_subscription` provider may only target the exact Anthropic API
@@ -204,15 +307,25 @@ pub async fn messages(
         }
     };
     let subscription = subscription_bypasses_spend_accounting(provider);
+    // The upstream credential for a subscription dispatch comes from the
+    // Stoke-held OAuth store, NOT the client: the client authenticated to the
+    // gateway with its Stoke key, and the operator's flat-plan token rides
+    // only on the upstream request. Resolve once, before enforcement, so a
+    // dead credential fails closed without spending anything downstream.
     let credential = if subscription {
-        match SubscriptionCredential::from_headers(&headers) {
-            Some(credential) => Some(credential),
-            None => {
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    "claude_subscription requires the client's own Authorization credential",
-                )
-                    .into_response()
+        match resolve_subscription_credential(&state.subscription_token_resolver).await {
+            SubscriptionCredentialResult(Ok(credential)) => Some(credential),
+            SubscriptionCredentialResult(Err(reason)) => {
+                record_metered_decision(
+                    &state.dashboard,
+                    provider,
+                    crate::dashboard::Outcome::Blocked,
+                    &model,
+                    reason.clone(),
+                    0.0,
+                    0,
+                );
+                return subscription_credential_error(&reason);
             }
         }
     } else {
@@ -450,12 +563,14 @@ async fn forward_once_subscription(
     credential: Option<&SubscriptionCredential>,
 ) -> Response {
     let started = Instant::now();
+    // The credential was resolved (or failed closed) in the handler before
+    // dispatch; an absent one here is a wiring bug, not a client problem.
     let credential = match credential {
         Some(credential) => credential,
         None => {
             return (
-                StatusCode::UNAUTHORIZED,
-                "claude_subscription requires the client's own Authorization credential",
+                StatusCode::BAD_GATEWAY,
+                "claude_subscription credential was not resolved for this request",
             )
                 .into_response()
         }
@@ -689,12 +804,14 @@ async fn forward_stream_subscription(
     credential: Option<&SubscriptionCredential>,
 ) -> Response {
     let started = Instant::now();
+    // The credential was resolved (or failed closed) in the handler before
+    // dispatch; an absent one here is a wiring bug, not a client error.
     let credential = match credential {
         Some(credential) => credential,
         None => {
             return (
-                StatusCode::UNAUTHORIZED,
-                "claude_subscription requires the client's own Authorization credential",
+                StatusCode::BAD_GATEWAY,
+                "claude_subscription credential was not resolved for this request",
             )
                 .into_response()
         }
@@ -833,10 +950,12 @@ fn anthropic_request(
 /// Build the upstream request for a `claude_subscription` provider.
 ///
 /// Dispatched on `subscription::OAUTH_CLIENT` (redirects disabled) with the
-/// client's own OAuth `Authorization` passed through unchanged as
-/// `Bearer <access_token>`, alongside the Anthropic protocol headers
-/// (`anthropic-version`, `anthropic-beta`, …) preserved verbatim. The Stoke
-/// gateway key (`x-stoke-key`) never leaves the building, and the access token
+/// Stoke-held OAuth store's access token as `Bearer <access_token>`, alongside
+/// the Anthropic protocol headers (`anthropic-version`, `anthropic-beta`, …)
+/// preserved verbatim — plus `oauth-2025-04-20`, which the official
+/// subscription client must send and which is unioned with any client betas.
+/// The Stoke gateway key (`x-stoke-key`) and the client's own Authorization
+/// never leave the building, no `x-api-key` is ever set, and the access token
 /// is never logged, persisted, hashed, or echoed.
 fn subscription_request(
     url: &str,
@@ -855,14 +974,19 @@ fn subscription_request(
         let name_str = name.as_str();
         match name_str {
             // The client's raw Authorization and the gateway key never travel:
-            // the credential rides only in the bearer_auth set above.
-            "authorization" | "x-stoke-key" | "host" | "content-length" => continue,
+            // the credential rides only in the bearer_auth set above. No
+            // x-api-key is ever sent on this path.
+            "authorization" | "x-stoke-key" | "x-api-key" | "host" | "content-length" => continue,
             "anthropic-version" => has_version = true,
+            "anthropic-beta" => continue, // merged below with the OAuth beta
             _ => {}
         }
         if name_str.starts_with("anthropic-") || name_str.starts_with("x-claude-code-") {
             request = request.header(name, value);
         }
+    }
+    if let Some(beta) = merge_subscription_beta(inbound) {
+        request = request.header("anthropic-beta", beta);
     }
     if !has_version {
         request = request.header("anthropic-version", ANTHROPIC_VERSION);
@@ -1110,10 +1234,14 @@ mod tests {
 
         let headers = request.headers();
         assert_eq!(headers["authorization"], "Bearer injected-access-token");
-        // anthropic-version and anthropic-beta must survive verbatim — never
-        // stripped, rewritten, or reordered into a different value.
+        // anthropic-version must survive verbatim; anthropic-beta is the
+        // union of the client's betas and the OAuth beta the official
+        // subscription client must send (client betas keep their order).
         assert_eq!(headers["anthropic-version"], "2023-06-01");
-        assert_eq!(headers["anthropic-beta"], "tool-search-2025-10-19");
+        assert_eq!(
+            headers["anthropic-beta"],
+            "tool-search-2025-10-19,oauth-2025-04-20"
+        );
         assert_eq!(headers["x-claude-code-version"], "2.1.0");
         assert!(
             headers.get("x-stoke-key").is_none(),

@@ -66,6 +66,14 @@ pub struct TokenStore {
     state: tokio::sync::Mutex<Option<TokenSet>>,
 }
 
+/// Login state for `stoke login-claude --status`. Carries no token material —
+/// only whether the operator is logged in and when the access token expires.
+pub struct LoginStatus {
+    pub logged_in: bool,
+    /// Unix seconds at which the stored access token expires, when logged in.
+    pub expires_at: Option<i64>,
+}
+
 impl Default for TokenStore {
     fn default() -> Self {
         Self::new()
@@ -91,7 +99,7 @@ impl TokenStore {
     }
 
     #[cfg(test)]
-    fn with_token_url(path: PathBuf, token_url: &'static str) -> Self {
+    pub(crate) fn with_token_url(path: PathBuf, token_url: &'static str) -> Self {
         Self {
             path,
             token_url,
@@ -202,6 +210,15 @@ impl TokenStore {
     /// Interactive login: open the operator's browser at the authorize URL,
     /// catch the redirect on a loopback listener, exchange the code.
     pub async fn login(&self) -> Result<(), String> {
+        let (listener, verifier, url) = self.begin_login()?;
+        open_browser(&url)?;
+        self.finish_login(listener, &verifier).await
+    }
+
+    /// Bind the loopback callback listener and build the authorize URL without
+    /// opening a browser. The `stoke login-claude` CLI pairs this with
+    /// `finish_login` so it can print the URL before a browser is launched.
+    pub fn begin_login(&self) -> Result<(std::net::TcpListener, String, String), String> {
         let (verifier, challenge) = pkce_pair();
         let listener = std::net::TcpListener::bind("127.0.0.1:0")
             .map_err(|e| format!("could not bind local OAuth callback listener: {e}"))?;
@@ -211,11 +228,25 @@ impl TokenStore {
             .port();
         let redirect_uri = format!("http://localhost:{port}/callback");
         let url = authorization_url(&verifier, &challenge, &redirect_uri);
-        open_browser(&url)?;
+        Ok((listener, verifier, url))
+    }
+
+    /// Complete a login whose callback listener is already bound: wait for the
+    /// browser redirect, verify the state against the PKCE verifier, exchange
+    /// the code, and persist the tokens. `verifier` doubles as the OAuth
+    /// `state` — a mismatch is a cross-site forgery attempt or a stale tab.
+    pub async fn finish_login(
+        &self,
+        listener: std::net::TcpListener,
+        verifier: &str,
+    ) -> Result<(), String> {
+        let port = listener
+            .local_addr()
+            .map_err(|e| format!("could not read callback port: {e}"))?
+            .port();
+        let redirect_uri = format!("http://localhost:{port}/callback");
         let (code, state) = wait_for_callback(listener)?;
         if state != verifier {
-            // state is bound to the verifier like the official client; a
-            // mismatch is a cross-site forgery attempt or a stale tab.
             return Err("OAuth state mismatch — refusing to exchange the code".to_string());
         }
         let payload = json!({
@@ -228,6 +259,30 @@ impl TokenStore {
         });
         let tokens = post_token(&payload, self.token_url).await?;
         self.store(tokens).await
+    }
+
+    /// Operator-facing login status (`stoke login-claude --status`): whether
+    /// the store holds usable tokens and when the access token expires. A
+    /// missing, malformed, or wrongly-permissioned store reads as "not logged
+    /// in" — status never fails hard and never surfaces token material.
+    pub async fn status(&self) -> LoginStatus {
+        if self.ensure_loaded().await.is_err() {
+            return LoginStatus {
+                logged_in: false,
+                expires_at: None,
+            };
+        }
+        let state = self.state.lock().await;
+        match state.as_ref() {
+            Some(tokens) => LoginStatus {
+                logged_in: true,
+                expires_at: Some(tokens.expires_at),
+            },
+            None => LoginStatus {
+                logged_in: false,
+                expires_at: None,
+            },
+        }
     }
 }
 
@@ -391,7 +446,9 @@ fn read_request_target(stream: &mut std::net::TcpStream) -> Result<String, Strin
     Ok(target.to_string())
 }
 
-fn open_browser(url: &str) -> Result<(), String> {
+/// Open the operator's browser at `url`. Public so the login CLI can reuse it
+/// after printing the authorize URL.
+pub fn open_browser(url: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let program = "open";
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]

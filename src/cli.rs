@@ -16,6 +16,7 @@ fn main() -> ExitCode {
         "route" => cli_route(&args[2..]),
         "bench" => cli_bench(&args[2..]),
         "models" => cli_models(&args[2..]),
+        "login-claude" => cli_login_claude(&args[2..]),
         "pricing" => cli_pricing(&args[2..]),
         "routes" => cli_routes(&args[2..]),
         "version" | "--version" | "-V" => {
@@ -46,6 +47,7 @@ fn print_usage() {
            route    Send a chat request through Stoke\n  \
            routes   List configured route profiles\n  \
            models   List available models\n  \
+          login-claude  Sign in with your Claude subscription (or --status)\n  \
            pricing  Show model pricing\n  \
            version  Show version\n\n\
          Quick start:\n  \
@@ -79,15 +81,57 @@ fn cli_route(args: &[String]) -> ExitCode {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--model" | "-m" => { i += 1; if i < args.len() { model = args[i].clone(); } }
-            "--prompt" | "-p" => { i += 1; if i < args.len() { prompt = args[i].clone(); } }
-            "--routing" | "-r" => { i += 1; if i < args.len() { routing = args[i].clone(); } }
-            "--vote-models" => { i += 1; if i < args.len() { vote_models = args[i].clone(); } }
-            "--test-code" => { i += 1; if i < args.len() { test_code = args[i].clone(); } }
-            "--entry-point" => { i += 1; if i < args.len() { entry_point = args[i].clone(); } }
-            "--temperature" | "-t" => { i += 1; if i < args.len() { temperature = args[i].parse().unwrap_or(0.0); } }
-            "--max-tokens" => { i += 1; if i < args.len() { max_tokens = args[i].parse().unwrap_or(8192); } }
-            "--stream" | "-s" => { stream = true; }
+            "--model" | "-m" => {
+                i += 1;
+                if i < args.len() {
+                    model = args[i].clone();
+                }
+            }
+            "--prompt" | "-p" => {
+                i += 1;
+                if i < args.len() {
+                    prompt = args[i].clone();
+                }
+            }
+            "--routing" | "-r" => {
+                i += 1;
+                if i < args.len() {
+                    routing = args[i].clone();
+                }
+            }
+            "--vote-models" => {
+                i += 1;
+                if i < args.len() {
+                    vote_models = args[i].clone();
+                }
+            }
+            "--test-code" => {
+                i += 1;
+                if i < args.len() {
+                    test_code = args[i].clone();
+                }
+            }
+            "--entry-point" => {
+                i += 1;
+                if i < args.len() {
+                    entry_point = args[i].clone();
+                }
+            }
+            "--temperature" | "-t" => {
+                i += 1;
+                if i < args.len() {
+                    temperature = args[i].parse().unwrap_or(0.0);
+                }
+            }
+            "--max-tokens" => {
+                i += 1;
+                if i < args.len() {
+                    max_tokens = args[i].parse().unwrap_or(8192);
+                }
+            }
+            "--stream" | "-s" => {
+                stream = true;
+            }
             "--help" | "-h" => {
                 eprintln!(
                     "stoke route — send a chat request through Stoke\n\n\
@@ -132,7 +176,10 @@ fn cli_route(args: &[String]) -> ExitCode {
     }
     if !vote_models.is_empty() {
         payload["vote_models"] = serde_json::Value::Array(
-            vote_models.split(',').map(|s| serde_json::Value::String(s.trim().to_string())).collect()
+            vote_models
+                .split(',')
+                .map(|s| serde_json::Value::String(s.trim().to_string()))
+                .collect(),
         );
     }
     if !test_code.is_empty() {
@@ -161,10 +208,16 @@ fn cli_route(args: &[String]) -> ExitCode {
                 if let Some(content) = body["choices"][0]["message"]["content"].as_str() {
                     println!("{}", content);
                 } else {
-                    println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default());
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&body).unwrap_or_default()
+                    );
                 }
                 if let Some(cost) = body.get("stoke_cost") {
-                    eprintln!("\n[Stoke] cost: ${:.6}", cost["cost_usd"].as_f64().unwrap_or(0.0));
+                    eprintln!(
+                        "\n[Stoke] cost: ${:.6}",
+                        cost["cost_usd"].as_f64().unwrap_or(0.0)
+                    );
                 }
             }
             Err(e) => {
@@ -188,9 +241,16 @@ fn cli_bench(args: &[String]) -> ExitCode {
             format!("{}/../../benchmarks/run_benchmark.py", dir.display())
         });
 
-    let py_args: Vec<String> = args.iter().filter(|a| a.as_str() != "--help" && a.as_str() != "-h").cloned().collect();
+    let py_args: Vec<String> = args
+        .iter()
+        .filter(|a| a.as_str() != "--help" && a.as_str() != "-h")
+        .cloned()
+        .collect();
 
-    if args.iter().any(|a| a.as_str() == "--help" || a.as_str() == "-h") {
+    if args
+        .iter()
+        .any(|a| a.as_str() == "--help" || a.as_str() == "-h")
+    {
         eprintln!(
             "stoke bench — run HumanEval benchmark\n\n\
              Delegates to benchmarks/run_benchmark.py. All arguments are forwarded.\n\n\
@@ -231,7 +291,11 @@ fn cli_models(_args: &[String]) -> ExitCode {
             let body: serde_json::Value = resp.into_json().unwrap_or_default();
             if let Some(data) = body["data"].as_array() {
                 for m in data {
-                    println!("{}  ({})", m["id"].as_str().unwrap_or("?"), m["provider"].as_str().unwrap_or("?"));
+                    println!(
+                        "{}  ({})",
+                        m["id"].as_str().unwrap_or("?"),
+                        m["provider"].as_str().unwrap_or("?")
+                    );
                 }
             }
             ExitCode::SUCCESS
@@ -249,7 +313,10 @@ fn cli_pricing(_args: &[String]) -> ExitCode {
         Ok(resp) => {
             let body: serde_json::Value = resp.into_json().unwrap_or_default();
             if let Some(prices) = body["pricing"].as_array() {
-                println!("{:<30} {:>12} {:>12} {}", "MODEL", "IN/1M", "OUT/1M", "LOCAL");
+                println!(
+                    "{:<30} {:>12} {:>12} {}",
+                    "MODEL", "IN/1M", "OUT/1M", "LOCAL"
+                );
                 println!("{}", "-".repeat(65));
                 for p in prices {
                     let local = p["local"].as_bool().unwrap_or(false);
@@ -282,11 +349,20 @@ fn cli_routes(_args: &[String]) -> ExitCode {
                     println!("Default endpoint: /v1/chat/completions (auto-route)");
                     return ExitCode::SUCCESS;
                 }
-                println!("{:<15} {:<30} {:<12} {:<20} {}", "NAME", "PATH", "ROUTING", "MODEL", "BUILTINS");
+                println!(
+                    "{:<15} {:<30} {:<12} {:<20} {}",
+                    "NAME", "PATH", "ROUTING", "MODEL", "BUILTINS"
+                );
                 println!("{}", "-".repeat(90));
                 for r in routes {
-                    let builtins = r["builtins"].as_array()
-                        .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(","))
+                    let builtins = r["builtins"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str())
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        })
                         .unwrap_or_default();
                     println!(
                         "{:<15} {:<30} {:<12} {:<20} {}",
@@ -343,7 +419,11 @@ fn prompt_line(label: &str, default: &str) -> String {
         return default.to_string();
     }
     let value = value.trim();
-    if value.is_empty() { default.to_string() } else { value.to_string() }
+    if value.is_empty() {
+        default.to_string()
+    } else {
+        value.to_string()
+    }
 }
 
 fn render_setup_config(model: &str, ollama_url: &str, bind_all: bool) -> String {
@@ -390,7 +470,8 @@ fn generate_api_key() -> Result<String, String> {
 }
 
 fn write_owner_file(path: &std::path::Path, content: &str) -> Result<(), String> {
-    std::fs::write(path, content).map_err(|error| format!("could not write {}: {}", path.display(), error))?;
+    std::fs::write(path, content)
+        .map_err(|error| format!("could not write {}: {}", path.display(), error))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -411,12 +492,36 @@ fn cli_setup(args: &[String]) -> ExitCode {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--ollama-url" => { i += 1; if i < args.len() { ollama_url = args[i].clone(); } }
-            "--model" | "-m" => { i += 1; if i < args.len() { model = args[i].clone(); } }
-            "--output" | "-o" => { i += 1; if i < args.len() { output = args[i].clone(); } }
-            "--env-output" => { i += 1; if i < args.len() { env_output = args[i].clone(); } }
-            "--bind-all" | "-b" => { bind_all = true; }
-            "--force" => { force = true; }
+            "--ollama-url" => {
+                i += 1;
+                if i < args.len() {
+                    ollama_url = args[i].clone();
+                }
+            }
+            "--model" | "-m" => {
+                i += 1;
+                if i < args.len() {
+                    model = args[i].clone();
+                }
+            }
+            "--output" | "-o" => {
+                i += 1;
+                if i < args.len() {
+                    output = args[i].clone();
+                }
+            }
+            "--env-output" => {
+                i += 1;
+                if i < args.len() {
+                    env_output = args[i].clone();
+                }
+            }
+            "--bind-all" | "-b" => {
+                bind_all = true;
+            }
+            "--force" => {
+                force = true;
+            }
             "--help" | "-h" => {
                 eprintln!(
                     "stoke setup — guided local setup\n\n\
@@ -452,20 +557,29 @@ fn cli_setup(args: &[String]) -> ExitCode {
         }
     }
     if model.is_empty() {
-        eprintln!("Error: no model selected and no model was discovered from {}", ollama_url);
+        eprintln!(
+            "Error: no model selected and no model was discovered from {}",
+            ollama_url
+        );
         return ExitCode::FAILURE;
     }
 
     let config_path = std::path::Path::new(&output);
     let env_path = std::path::Path::new(&env_output);
     if !force && (config_path.exists() || env_path.exists()) {
-        eprintln!("Error: {} or {} already exists; use --force to overwrite", output, env_output);
+        eprintln!(
+            "Error: {} or {} already exists; use --force to overwrite",
+            output, env_output
+        );
         return ExitCode::FAILURE;
     }
 
     let api_key = match generate_api_key() {
         Ok(key) => key,
-        Err(error) => { eprintln!("Error: {}", error); return ExitCode::FAILURE; }
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return ExitCode::FAILURE;
+        }
     };
     let config = render_setup_config(&model, &ollama_url, bind_all);
     if let Err(error) = write_owner_file(config_path, &config) {
@@ -498,12 +612,39 @@ fn cli_init(args: &[String]) -> ExitCode {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--host" => { i += 1; if i < args.len() { host = args[i].clone(); } }
-            "--port" => { i += 1; if i < args.len() { port = args[i].clone(); } }
-            "--ollama-url" => { i += 1; if i < args.len() { ollama_url = args[i].clone(); } }
-            "--model" | "-m" => { i += 1; if i < args.len() { default_model = args[i].clone(); } }
-            "--output" | "-o" => { i += 1; if i < args.len() { output = args[i].clone(); } }
-            "--bind-all" | "-b" => { bind_all = true; }
+            "--host" => {
+                i += 1;
+                if i < args.len() {
+                    host = args[i].clone();
+                }
+            }
+            "--port" => {
+                i += 1;
+                if i < args.len() {
+                    port = args[i].clone();
+                }
+            }
+            "--ollama-url" => {
+                i += 1;
+                if i < args.len() {
+                    ollama_url = args[i].clone();
+                }
+            }
+            "--model" | "-m" => {
+                i += 1;
+                if i < args.len() {
+                    default_model = args[i].clone();
+                }
+            }
+            "--output" | "-o" => {
+                i += 1;
+                if i < args.len() {
+                    output = args[i].clone();
+                }
+            }
+            "--bind-all" | "-b" => {
+                bind_all = true;
+            }
             "--help" | "-h" => {
                 eprintln!(
                     "stoke init — generate stoke.toml config\n\n\
@@ -533,7 +674,10 @@ fn cli_init(args: &[String]) -> ExitCode {
 
     // Discover a default model from the user's own Ollama when not given.
     if default_model.is_empty() {
-        let native = ollama_url.trim_end_matches('/').trim_end_matches("/v1").to_string();
+        let native = ollama_url
+            .trim_end_matches('/')
+            .trim_end_matches("/v1")
+            .to_string();
         default_model = ureq::get(&format!("{}/api/tags", native))
             .timeout(std::time::Duration::from_secs(2))
             .call()
@@ -556,7 +700,10 @@ fn cli_init(args: &[String]) -> ExitCode {
             );
             default_model = "<set-your-model>".to_string();
         } else {
-            eprintln!("✓ Discovered default model from your Ollama: {}", default_model);
+            eprintln!(
+                "✓ Discovered default model from your Ollama: {}",
+                default_model
+            );
         }
     }
 
@@ -657,12 +804,17 @@ tier = "local"
                 use std::os::unix::fs::PermissionsExt;
                 let _ = std::fs::set_permissions(&output, std::fs::Permissions::from_mode(0o600));
             }
-            println!("Generated {} — edit it to add cloud providers, plugins, or routes.", output);
+            println!(
+                "Generated {} — edit it to add cloud providers, plugins, or routes.",
+                output
+            );
             println!("\nNext steps:");
             println!("  stoke serve     # start the proxy");
             println!("  stoke models     # list available models");
             println!("  stoke route -m {} -p 'Hello!'", default_model);
-            println!("\nSecurity: set STOKE_API_KEYS env var for auth, or STOKE_DEV=1 for local dev.");
+            println!(
+                "\nSecurity: set STOKE_API_KEYS env var for auth, or STOKE_DEV=1 for local dev."
+            );
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -674,7 +826,10 @@ tier = "local"
 
 fn cli_serve(args: &[String]) -> ExitCode {
     // Check for --help
-    if args.iter().any(|a| a.as_str() == "--help" || a.as_str() == "-h") {
+    if args
+        .iter()
+        .any(|a| a.as_str() == "--help" || a.as_str() == "-h")
+    {
         eprintln!(
             "stoke serve — start the Stoke proxy server\n\n\
              Options:\n  \
@@ -697,7 +852,10 @@ fn cli_serve(args: &[String]) -> ExitCode {
     let server_path = dir.join("stoke");
 
     if !server_path.exists() {
-        eprintln!("Error: server binary 'stoke' not found next to CLI at {}", dir.display());
+        eprintln!(
+            "Error: server binary 'stoke' not found next to CLI at {}",
+            dir.display()
+        );
         eprintln!("Make sure both binaries are installed (cargo install --path . --bins)");
         return ExitCode::FAILURE;
     }
@@ -737,7 +895,10 @@ mod tests {
     fn discovers_first_ollama_model_name() {
         let body = r#"{"models":[{"name":"qwen2.5-coder:7b"},{"name":"llama3.2:3b"}]}"#;
 
-        assert_eq!(discover_model_name(body), Some("qwen2.5-coder:7b".to_string()));
+        assert_eq!(
+            discover_model_name(body),
+            Some("qwen2.5-coder:7b".to_string())
+        );
     }
 
     #[test]
@@ -747,5 +908,81 @@ mod tests {
         assert!(config.contains("default_model = \"qwen2.5-coder:7b\""));
         assert!(config.contains("host = \"127.0.0.1\""));
         assert!(config.contains("tier = \"local\""));
+    }
+}
+/// `stoke login-claude` — interactive Anthropic OAuth login for the
+/// claude_subscription upstream, and `--status` for a token-free check.
+///
+/// Never prints token material: only the authorize URL (safe, it contains no
+/// secrets), success/failure, and, for --status, expiry time only.
+fn cli_login_claude(args: &[String]) -> ExitCode {
+    let store = stoke::anthropic_oauth::TokenStore::new();
+
+    if args.iter().any(|a| a.as_str() == "--status") {
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                eprintln!("Error: could not start async runtime: {}", error);
+                return ExitCode::FAILURE;
+            }
+        };
+        let status = runtime.block_on(store.status());
+        if status.logged_in {
+            match status.expires_at {
+                Some(expires_at) => {
+                    let secs = expires_at - chrono::Utc::now().timestamp();
+                    if secs > 0 {
+                        println!("logged in (access token expires in {} minutes)", secs / 60);
+                    } else {
+                        println!("logged in (access token expired; it will refresh on next use)");
+                    }
+                }
+                None => println!("logged in"),
+            }
+        } else {
+            println!("not logged in — run `stoke login-claude` to sign in");
+            return ExitCode::FAILURE;
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    if args
+        .iter()
+        .any(|a| a.as_str() == "--help" || a.as_str() == "-h")
+    {
+        eprintln!(
+            "stoke login-claude — sign in to Anthropic with your Claude subscription\n\n\
+             Usage: stoke login-claude [--status]\n\n\
+             Opens your browser at claude.ai to authorize Stoke as a Claude Code\n\
+             client, then stores the token owner-only at ~/.stoke/anthropic_oauth.json.\n\
+             The token is used only for claude_subscription providers and is never\n\
+             logged, displayed, or sent anywhere but api.anthropic.com."
+        );
+        return ExitCode::SUCCESS;
+    }
+
+    eprintln!("Opening your browser to authorize with claude.ai…");
+    eprintln!("If it does not open, copy the URL below into a browser.");
+    match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => match runtime.block_on(store.login()) {
+            Ok(()) => {
+                println!("✓ Logged in. Stoke can now serve Claude models on your subscription.");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("Login failed: {}", error);
+                ExitCode::FAILURE
+            }
+        },
+        Err(error) => {
+            eprintln!("Error: could not start async runtime: {}", error);
+            ExitCode::FAILURE
+        }
     }
 }

@@ -1,10 +1,11 @@
+mod anthropic_oauth;
 mod auto_route;
 mod budget;
 mod builtins;
+mod cache;
 mod client_run;
 mod config;
 mod cost;
-mod cache;
 mod dashboard;
 mod failover;
 mod messages;
@@ -15,7 +16,6 @@ mod router;
 mod sse;
 mod stream_fusion;
 mod subscription;
-mod anthropic_oauth;
 mod ttft;
 
 #[cfg(feature = "js-plugins")]
@@ -31,7 +31,7 @@ use axum::{
     middleware::{self, Next},
     response::{
         sse::{Event, KeepAlive, Sse},
-        Html, Json, IntoResponse, Response,
+        Html, IntoResponse, Json, Response,
     },
     routing::{get, post},
     Router,
@@ -42,13 +42,13 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing_subscriber;
 
+use budget::{Auth, BudgetGuard};
+use cache::ResponseCache;
 use futures_util::StreamExt;
 use router::{
-    call_provider_hop, cascade, cascade_test_models,
-    self_consistency, test_vote_models, ProviderResult, SHARED_CLIENT,
+    call_provider_hop, cascade, cascade_test_models, self_consistency, test_vote_models,
+    ProviderResult, SHARED_CLIENT,
 };
-use cache::ResponseCache;
-use budget::{Auth, BudgetGuard};
 use ttft::TtftTracker;
 
 #[derive(Clone)]
@@ -63,6 +63,10 @@ pub struct AppState {
     nodes: Arc<nodes::NodeRegistry>,
     plugins: Arc<plugins::Plugins>,
     builtins: Arc<builtins::Builtins>,
+    /// Where `/v1/messages` gets its claude_subscription Bearer token. The
+    /// production default reads `~/.stoke/anthropic_oauth.json`; tests swap in
+    /// a canned resolver so no token material is ever needed on disk.
+    subscription_token_resolver: crate::messages::SubscriptionTokenResolver,
     #[cfg(feature = "js-plugins")]
     js_plugins: Arc<js_plugins::JsPlugins>,
 }
@@ -125,7 +129,10 @@ async fn main() {
     cost::init(config.pricer());
     if config.pricing.models.is_empty()
         && cost::Unpriced::parse(&config.pricing.unpriced) == cost::Unpriced::Refuse
-        && config.providers.iter().any(|p| !cost::is_free_tier(&p.tier))
+        && config
+            .providers
+            .iter()
+            .any(|p| !cost::is_free_tier(&p.tier))
     {
         tracing::warn!(
             "no [pricing.models] configured, so metered providers will refuse every model. \
@@ -188,17 +195,20 @@ async fn main() {
 
     let state = AppState {
         config: Arc::new(config),
-        cache: Arc::new(ResponseCache::new(3600, 0.92, std::env::var("STOKE_SEMANTIC_CACHE").is_ok())),
+        cache: Arc::new(ResponseCache::new(
+            3600,
+            0.92,
+            std::env::var("STOKE_SEMANTIC_CACHE").is_ok(),
+        )),
         ttft: Arc::new(TtftTracker::new()),
         auth: Arc::new(Auth::new()),
         budget: Arc::new(budget),
         dashboard: Arc::new(dashboard::Dashboard::new(100)),
         demo_gate: Arc::new(tokio::sync::Mutex::new(())),
         nodes: node_registry,
-        plugins: Arc::new(plugins::Plugins::new(
-            plugins_config,
-        )),
+        plugins: Arc::new(plugins::Plugins::new(plugins_config)),
         builtins: Arc::new(builtins::Builtins::new(builtins_config)),
+        subscription_token_resolver: crate::messages::default_subscription_token_resolver(),
         #[cfg(feature = "js-plugins")]
         js_plugins,
     };
@@ -229,10 +239,19 @@ async fn main() {
 
         // Register dynamic route profiles
         // Each profile with path="/v1/xxx/completions" gets its own endpoint
-        let router = state.config.routes.iter().fold(base_router, |acc, profile| {
-            tracing::info!("Route profile: {} -> {} ({})", profile.name, profile.path, profile.routing);
-            acc.route(&profile.path, post(chat_completions))
-        });
+        let router = state
+            .config
+            .routes
+            .iter()
+            .fold(base_router, |acc, profile| {
+                tracing::info!(
+                    "Route profile: {} -> {} ({})",
+                    profile.name,
+                    profile.path,
+                    profile.routing
+                );
+                acc.route(&profile.path, post(chat_completions))
+            });
 
         // Fail-closed everywhere: every endpoint except /health requires auth
         // when keys are configured. Status endpoints leak model inventory and
@@ -256,7 +275,8 @@ async fn ui_page(State(state): State<AppState>) -> Response {
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Dashboard rendering failed: {error}"),
-        ).into_response(),
+        )
+            .into_response(),
     }
 }
 
@@ -264,7 +284,11 @@ fn dashboard_snapshot(state: &AppState) -> dashboard::Snapshot {
     let (spend_usd, limit_usd, reserved_usd) = state.budget.stats().iter().fold(
         (0.0, 0.0, 0.0),
         |(spend, limit, reserved), (_, key_spend, key_limit, _, _, key_reserved)| {
-            (spend + key_spend, limit + key_limit.max(0.0), reserved + key_reserved)
+            (
+                spend + key_spend,
+                limit + key_limit.max(0.0),
+                reserved + key_reserved,
+            )
         },
     );
     let node_snapshot = state.nodes.snapshot();
@@ -286,7 +310,8 @@ async fn ui_summary(State(state): State<AppState>) -> Response {
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Dashboard rendering failed: {error}"),
-        ).into_response(),
+        )
+            .into_response(),
     }
 }
 
@@ -309,31 +334,26 @@ async fn ui_events(
         }
     });
     Sse::new(stream).keep_alive(
-        KeepAlive::new().interval(Duration::from_secs(15)).text("keepalive"),
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keepalive"),
     )
 }
 
-async fn ui_demo(
-    State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-) -> Response {
-    let model = state
-        .config
-        .default_model
-        .clone()
-        .or_else(|| {
-            state
-                .nodes
-                .snapshot()
-                .get("nodes")
-                .and_then(Value::as_array)
-                .and_then(|nodes| nodes.first())
-                .and_then(|node| node.get("models"))
-                .and_then(Value::as_array)
-                .and_then(|models| models.first())
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        });
+async fn ui_demo(State(state): State<AppState>, headers: axum::http::HeaderMap) -> Response {
+    let model = state.config.default_model.clone().or_else(|| {
+        state
+            .nodes
+            .snapshot()
+            .get("nodes")
+            .and_then(Value::as_array)
+            .and_then(|nodes| nodes.first())
+            .and_then(|node| node.get("models"))
+            .and_then(Value::as_array)
+            .and_then(|models| models.first())
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    });
     let Some(model) = model.filter(|model| !model.is_empty()) else {
         return (
             StatusCode::BAD_REQUEST,
@@ -358,10 +378,7 @@ async fn ui_demo(
         .and_then(|header| header.to_str().ok())
         .and_then(dashboard::api_key_from_basic)
     {
-        demo_headers.insert(
-            "authorization",
-            format!("Bearer {key}").parse().unwrap(),
-        );
+        demo_headers.insert("authorization", format!("Bearer {key}").parse().unwrap());
     }
 
     tokio::spawn(async move {
@@ -393,15 +410,24 @@ async fn ui_demo(
 }
 
 async fn ui_css() -> impl IntoResponse {
-    ([("content-type", "text/css; charset=utf-8")], include_str!("../assets/dashboard.css"))
+    (
+        [("content-type", "text/css; charset=utf-8")],
+        include_str!("../assets/dashboard.css"),
+    )
 }
 
 async fn ui_htmx() -> impl IntoResponse {
-    ([("content-type", "text/javascript; charset=utf-8")], include_str!("../assets/htmx.min.js"))
+    (
+        [("content-type", "text/javascript; charset=utf-8")],
+        include_str!("../assets/htmx.min.js"),
+    )
 }
 
 async fn ui_sse_js() -> impl IntoResponse {
-    ([("content-type", "text/javascript; charset=utf-8")], include_str!("../assets/sse.js"))
+    (
+        [("content-type", "text/javascript; charset=utf-8")],
+        include_str!("../assets/sse.js"),
+    )
 }
 
 fn record_decision(
@@ -491,20 +517,23 @@ async fn ttft_stats(State(state): State<AppState>) -> Json<Value> {
 
 async fn budget_stats(State(state): State<AppState>) -> Json<Value> {
     let stats = state.budget.stats();
-    let keys: Vec<Value> = stats.iter().map(|(key, spend, limit, recent_rpm, estimated, reserved)| {
-        json!({
-            "key": &key[..8.min(key.len())],
-            "spend_usd": spend,
-            "limit_usd": limit,
-            "recent_requests": recent_rpm,
-            // The part of spend_usd that Stoke had to estimate because a metered
-            // provider streamed without reporting usage. Counted against the cap.
-            "estimated_usd": estimated,
-            // Money held for requests still in flight. Not yet spent, but the cap
-            // treats it as though it were — otherwise concurrent requests all pass.
-            "reserved_usd": reserved,
+    let keys: Vec<Value> = stats
+        .iter()
+        .map(|(key, spend, limit, recent_rpm, estimated, reserved)| {
+            json!({
+                "key": &key[..8.min(key.len())],
+                "spend_usd": spend,
+                "limit_usd": limit,
+                "recent_requests": recent_rpm,
+                // The part of spend_usd that Stoke had to estimate because a metered
+                // provider streamed without reporting usage. Counted against the cap.
+                "estimated_usd": estimated,
+                // Money held for requests still in flight. Not yet spent, but the cap
+                // treats it as though it were — otherwise concurrent requests all pass.
+                "reserved_usd": reserved,
+            })
         })
-    }).collect();
+        .collect();
     let auth_enabled = state.auth.is_auth_enabled();
     let (requests, zero_marginal, avoided) = state.budget.receipts();
     Json(json!({
@@ -677,7 +706,9 @@ impl Drop for StreamMeter {
                 .record_stream_stats(&self.node, &self.model, ttft_ms, tokens, gen_ms);
         }
 
-        let Some(billing) = self.billing.take() else { return };
+        let Some(billing) = self.billing.take() else {
+            return;
+        };
 
         let (usage, measured) = match self.usage.usage() {
             Some(u) => (u, true),
@@ -711,15 +742,29 @@ impl Drop for StreamMeter {
             billing.budget.record_spend(&billing.api_key, cost);
             tracing::info!(
                 "stream billed: model={} node={} tokens={}+{} cost=${:.6}",
-                self.model, self.node, usage.prompt_tokens, usage.completion_tokens, cost
+                self.model,
+                self.node,
+                usage.prompt_tokens,
+                usage.completion_tokens,
+                cost
             );
         } else {
-            billing.budget.record_spend_estimated(&billing.api_key, cost);
+            billing
+                .budget
+                .record_spend_estimated(&billing.api_key, cost);
             tracing::warn!(
                 "stream billed from an ESTIMATE: model={} node={} reported no usage; \
                  charged ${:.6} for ~{}+{} tokens{}. The cap is working from a guess for this key.",
-                self.model, self.node, cost, usage.prompt_tokens, usage.completion_tokens,
-                if self.usage.lost_data() { "; a stream line exceeded the buffer" } else { "" }
+                self.model,
+                self.node,
+                cost,
+                usage.prompt_tokens,
+                usage.completion_tokens,
+                if self.usage.lost_data() {
+                    "; a stream line exceeded the buffer"
+                } else {
+                    ""
+                }
             );
         }
     }
@@ -764,20 +809,25 @@ async fn list_models(State(state): State<AppState>) -> Json<Value> {
 }
 
 async fn list_routes(State(state): State<AppState>) -> Json<Value> {
-    let routes: Vec<Value> = state.config.routes.iter().map(|r| {
-        json!({
-            "name": r.name,
-            "path": r.path,
-            "routing": r.routing,
-            "model": r.model,
-            "vote_models": r.vote_models,
-            "builtins": r.builtins,
-            "allowed_tiers": r.allowed_tiers,
-            "stream": r.stream,
-            "budget_usd": r.budget_usd,
-            "rate_limit": r.rate_limit,
+    let routes: Vec<Value> = state
+        .config
+        .routes
+        .iter()
+        .map(|r| {
+            json!({
+                "name": r.name,
+                "path": r.path,
+                "routing": r.routing,
+                "model": r.model,
+                "vote_models": r.vote_models,
+                "builtins": r.builtins,
+                "allowed_tiers": r.allowed_tiers,
+                "stream": r.stream,
+                "budget_usd": r.budget_usd,
+                "rate_limit": r.rate_limit,
+            })
         })
-    }).collect();
+        .collect();
     Json(json!({ "routes": routes }))
 }
 
@@ -800,12 +850,14 @@ async fn chat_completions(
     };
 
     // Compute prompt hash for loop detection (model + messages + temp)
-    let prompt_text: String = req.messages.iter()
+    let prompt_text: String = req
+        .messages
+        .iter()
         .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
         .collect::<Vec<_>>()
         .join("\n");
     let prompt_hash = {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(req.model.as_bytes());
         hasher.update(prompt_text.as_bytes());
@@ -814,7 +866,11 @@ async fn chat_completions(
     };
 
     // Budget + rate limit check + loop detection (exact + semantic)
-    if let Err(reason) = state.budget.check_with_prompt(&api_key, &prompt_hash, &prompt_text).await {
+    if let Err(reason) = state
+        .budget
+        .check_with_prompt(&api_key, &prompt_hash, &prompt_text)
+        .await
+    {
         record_decision(
             &state,
             dashboard::Outcome::Blocked,
@@ -862,7 +918,11 @@ async fn chat_completions(
                 routing_from_caller = true;
                 asked.to_string()
             }
-            None => state.config.routing.clone().unwrap_or_else(|| "single".to_string()),
+            None => state
+                .config
+                .routing
+                .clone()
+                .unwrap_or_else(|| "single".to_string()),
         }
     };
 
@@ -870,9 +930,14 @@ async fn chat_completions(
     let mut vote_models: Vec<String> = if let Some(profile) = route_profile {
         profile.vote_models.clone()
     } else {
-        req.extra.get("vote_models")
+        req.extra
+            .get("vote_models")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default()
     };
 
@@ -964,7 +1029,11 @@ async fn chat_completions(
     // Built-in: pre_request (prompt harness) — inject system prompts
     if let Some(ref profile) = route_profile {
         if profile.builtins.contains(&"prompt_harness".to_string()) {
-            if let Ok(Some(msgs)) = state.builtins.pre_request(&model, &routing, &req.messages, &api_key).await {
+            if let Ok(Some(msgs)) = state
+                .builtins
+                .pre_request(&model, &routing, &req.messages, &api_key)
+                .await
+            {
                 if let Some(arr) = msgs.as_array() {
                     req.messages = arr.clone();
                 }
@@ -991,7 +1060,11 @@ async fn chat_completions(
     // Built-in: prompt_filter (PII redaction) — strip secrets from messages
     if let Some(ref profile) = route_profile {
         if profile.builtins.contains(&"pii_redact".to_string()) {
-            if let Ok(Some(filtered)) = state.builtins.prompt_filter(&req.messages, &model, &api_key).await {
+            if let Ok(Some(filtered)) = state
+                .builtins
+                .prompt_filter(&req.messages, &model, &api_key)
+                .await
+            {
                 req.messages = filtered;
                 tracing::info!("pii_redact: redacted sensitive data from prompt");
             }
@@ -1029,11 +1102,15 @@ async fn chat_completions(
     }
 
     // For test_vote: the test harness code and entry point function name
-    let mut test_code = req.extra.get("test_code")
+    let mut test_code = req
+        .extra
+        .get("test_code")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let mut entry_point = req.extra.get("entry_point")
+    let mut entry_point = req
+        .extra
+        .get("entry_point")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
@@ -1041,11 +1118,15 @@ async fn chat_completions(
     // For self_consistency: number of samples and temperature. The caller names a
     // number; the operator sets the ceiling. Unclamped, `n_samples` is a direct
     // multiplier on the bill (router.rs loops over it, one provider call each).
-    let n_samples = (req.extra.get("n_samples")
+    let n_samples = (req
+        .extra
+        .get("n_samples")
         .and_then(|v| v.as_u64())
         .unwrap_or(5) as usize)
         .clamp(1, state.config.limits.max_n_samples);
-    let sc_temperature = req.extra.get("temperature")
+    let sc_temperature = req
+        .extra
+        .get("temperature")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.7) as f32;
 
@@ -1091,7 +1172,10 @@ async fn chat_completions(
         );
         tracing::info!(
             "auto-route: class={:?} -> pattern={}, model={}, reason={}",
-            decision.class, decision.pattern, decision.model, decision.reason
+            decision.class,
+            decision.pattern,
+            decision.model,
+            decision.reason
         );
         if decision.model.is_empty() {
             return (
@@ -1178,7 +1262,12 @@ async fn chat_completions(
         vote_models.truncate(state.config.limits.max_vote_models);
     }
 
-    tracing::info!("Request: model={}, routing={}, vote_models={:?}", model, routing, vote_models);
+    tracing::info!(
+        "Request: model={}, routing={}, vote_models={:?}",
+        model,
+        routing,
+        vote_models
+    );
 
     // A cache hit costs nothing and contacts no provider, so look it up before
     // holding money against the cap. Reserving first would refuse a free answer
@@ -1190,7 +1279,13 @@ async fn chat_completions(
     // already authorised to receive, and nobody else.
     let cache_scope = ResponseCache::scope_of(&api_key, path);
     let cache_key = if routing == "single" && !req.stream.unwrap_or(false) {
-        ResponseCache::cache_key(&cache_scope, &model, &req.messages, req.temperature, req.max_tokens)
+        ResponseCache::cache_key(
+            &cache_scope,
+            &model,
+            &req.messages,
+            req.temperature,
+            req.max_tokens,
+        )
     } else {
         None
     };
@@ -1198,7 +1293,11 @@ async fn chat_completions(
     let cache_prompt = ResponseCache::extract_prompt(&req.messages);
 
     if let Some(ref key) = cache_key {
-        if let Some((_matched_key, cached)) = state.cache.get_smart(key, &cache_scope, &cache_prompt).await {
+        if let Some((_matched_key, cached)) = state
+            .cache
+            .get_smart(key, &cache_scope, &cache_prompt)
+            .await
+        {
             tracing::info!("cache hit: key={}", &key[..8]);
             record_decision(
                 &state,
@@ -1217,7 +1316,6 @@ async fn chat_completions(
             return Json(response_json).into_response();
         }
     }
-
 
     // ─── Hold the money this request could cost ──────────────────────────────
     // `check_with_prompt` admitted this request against what has already been
@@ -1264,14 +1362,28 @@ async fn chat_completions(
         // model that actually served). The served model is not always the one the
         // caller named: a vote race rewrites it per leg, and the bill must be
         // priced against what ran, not against what was asked for.
-        let race_result: Result<(Option<nodes::InflightGuard>, String, u64, reqwest::Response, String), (StatusCode, String)> =
-        if routing == "stream_race" {
+        let race_result: Result<
+            (
+                Option<nodes::InflightGuard>,
+                String,
+                u64,
+                reqwest::Response,
+                String,
+            ),
+            (StatusCode, String),
+        > = if routing == "stream_race" {
             // Race multiple models on the same provider (or across providers if vote_models given)
             if !vote_models.is_empty() {
                 // always exclude federated gateways from races: stream_fusion
                 // doesn't propagate x-stoke-hop, and racing a gateway amplifies load
-                let provider = provider_for_model_filtered(&state.config, &model, true, allowed_tiers)
-                    .ok_or_else(|| (StatusCode::NOT_FOUND, format!("No provider for model: {}", model)));
+                let provider =
+                    provider_for_model_filtered(&state.config, &model, true, allowed_tiers)
+                        .ok_or_else(|| {
+                            (
+                                StatusCode::NOT_FOUND,
+                                format!("No provider for model: {}", model),
+                            )
+                        });
                 match provider {
                     Ok(p) => stream_fusion::stream_race_models(p, &vote_models, &body)
                         .await
@@ -1296,14 +1408,27 @@ async fn chat_completions(
         } else {
             // Single routing with failover — candidates ordered by node placement
             // (warm > cold > unknown; ties by tier, in-flight, latency EWMA)
-            let (ranked, explain) = state.nodes.rank_with_tiers(&model, &state.config.providers, exclude_stoke, allowed_tiers);
+            let (ranked, explain) = state.nodes.rank_with_tiers(
+                &model,
+                &state.config.providers,
+                exclude_stoke,
+                allowed_tiers,
+            );
             tracing::info!("stream placement: {}", explain.join("; "));
             if ranked.is_empty() {
-                let code = if allowed_tiers.is_empty() { StatusCode::NOT_FOUND } else { StatusCode::FORBIDDEN };
+                let code = if allowed_tiers.is_empty() {
+                    StatusCode::NOT_FOUND
+                } else {
+                    StatusCode::FORBIDDEN
+                };
                 let message = if allowed_tiers.is_empty() {
                     format!("No provider for model: {} ({})", model, explain.join("; "))
                 } else {
-                    format!("Route policy forbids every provider for model: {} ({})", model, explain.join("; "))
+                    format!(
+                        "Route policy forbids every provider for model: {} ({})",
+                        model,
+                        explain.join("; ")
+                    )
                 };
                 return (code, message).into_response();
             }
@@ -1316,7 +1441,11 @@ async fn chat_completions(
                 && ranked[..2].iter().all(|p| p.tier != "cloud")
             {
                 let discovered = state.nodes.discovered();
-                let holds = |node: &str| discovered.iter().any(|d| d.node == node && d.matches(&model));
+                let holds = |node: &str| {
+                    discovered
+                        .iter()
+                        .any(|d| d.node == node && d.matches(&model))
+                };
                 (holds(&ranked[0].name) && holds(&ranked[1].name)).then(|| (ranked[0], ranked[1]))
             } else {
                 None
@@ -1327,8 +1456,16 @@ async fn chat_completions(
             } else {
                 failover::stream_with_failover(ranked, &body, &state.nodes, hop).await
             };
-            win.map(|w| (w.guard, w.provider_name, w.connect_ms, w.response, model.clone()))
-                .map_err(|e| (StatusCode::BAD_GATEWAY, e))
+            win.map(|w| {
+                (
+                    w.guard,
+                    w.provider_name,
+                    w.connect_ms,
+                    w.response,
+                    model.clone(),
+                )
+            })
+            .map_err(|e| (StatusCode::BAD_GATEWAY, e))
         };
 
         match race_result {
@@ -1344,7 +1481,11 @@ async fn chat_completions(
                     .unwrap_or(false);
                 state.budget.record_receipt(
                     zero_marginal,
-                    if auto_routed && zero_marginal { auto_counterfactual_usd } else { 0.0 },
+                    if auto_routed && zero_marginal {
+                        auto_counterfactual_usd
+                    } else {
+                        0.0
+                    },
                 );
                 if let Some(note) = &auto_note {
                     tracing::info!("stoke_auto (stream): {}", note);
@@ -1405,7 +1546,11 @@ async fn chat_completions(
             }
             Err((code, msg)) => {
                 // Same policy-vs-upstream distinction as the non-streaming path.
-                let code = if cost::is_unpriced_error(&msg) { StatusCode::FORBIDDEN } else { code };
+                let code = if cost::is_unpriced_error(&msg) {
+                    StatusCode::FORBIDDEN
+                } else {
+                    code
+                };
                 record_decision(
                     &state,
                     if code == StatusCode::FORBIDDEN {
@@ -1429,94 +1574,154 @@ async fn chat_completions(
     let mut route_note: Option<Value> = None;
 
     let result: Result<ProviderResult, (StatusCode, String)> = async {
-    match routing.as_str() {
-        "test_vote" => {
-            if vote_models.is_empty() {
-                return Err((StatusCode::BAD_REQUEST, "test_vote requires 'vote_models' field".to_string()));
+        match routing.as_str() {
+            "test_vote" => {
+                if vote_models.is_empty() {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        "test_vote requires 'vote_models' field".to_string(),
+                    ));
+                }
+                if test_code.is_empty() || entry_point.is_empty() {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        "test_vote requires 'test_code' and 'entry_point' fields".to_string(),
+                    ));
+                }
+                let provider = provider_for_model_filtered(
+                    &state.config,
+                    &model,
+                    exclude_stoke,
+                    allowed_tiers,
+                )
+                .ok_or_else(|| {
+                    (
+                        StatusCode::NOT_FOUND,
+                        format!("No provider for model: {}", model),
+                    )
+                })?;
+                test_vote_models(provider, &vote_models, &req, &test_code, &entry_point)
+                    .await
+                    .map_err(|e| (StatusCode::BAD_GATEWAY, e))
             }
-            if test_code.is_empty() || entry_point.is_empty() {
-                return Err((StatusCode::BAD_REQUEST, "test_vote requires 'test_code' and 'entry_point' fields".to_string()));
+            "cascade" => {
+                let providers: Vec<_> =
+                    eligible_providers(&state.config, exclude_stoke, allowed_tiers);
+                cascade(providers, &req)
+                    .await
+                    .map_err(|e| (StatusCode::BAD_GATEWAY, e))
             }
-            let provider = provider_for_model_filtered(&state.config, &model, exclude_stoke, allowed_tiers)
-                .ok_or_else(|| (StatusCode::NOT_FOUND, format!("No provider for model: {}", model)))?;
-            test_vote_models(provider, &vote_models, &req, &test_code, &entry_point)
-                .await
-                .map_err(|e| (StatusCode::BAD_GATEWAY, e))
-        }
-        "cascade" => {
-            let providers: Vec<_> = eligible_providers(&state.config, exclude_stoke, allowed_tiers);
-            cascade(providers, &req)
-                .await
-                .map_err(|e| (StatusCode::BAD_GATEWAY, e))
-        }
-        "cascade_test" => {
-            if vote_models.is_empty() {
-                return Err((StatusCode::BAD_REQUEST, "cascade_test requires 'vote_models' field".to_string()));
+            "cascade_test" => {
+                if vote_models.is_empty() {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        "cascade_test requires 'vote_models' field".to_string(),
+                    ));
+                }
+                if test_code.is_empty() || entry_point.is_empty() {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        "cascade_test requires 'test_code' and 'entry_point' fields".to_string(),
+                    ));
+                }
+                let provider = provider_for_model_filtered(
+                    &state.config,
+                    &model,
+                    exclude_stoke,
+                    allowed_tiers,
+                )
+                .ok_or_else(|| {
+                    (
+                        StatusCode::NOT_FOUND,
+                        format!("No provider for model: {}", model),
+                    )
+                })?;
+                cascade_test_models(provider, &vote_models, &req, &test_code, &entry_point)
+                    .await
+                    .map_err(|e| (StatusCode::BAD_GATEWAY, e))
             }
-            if test_code.is_empty() || entry_point.is_empty() {
-                return Err((StatusCode::BAD_REQUEST, "cascade_test requires 'test_code' and 'entry_point' fields".to_string()));
+            "self_consistency" => {
+                let provider = provider_for_model_filtered(
+                    &state.config,
+                    &model,
+                    exclude_stoke,
+                    allowed_tiers,
+                )
+                .ok_or_else(|| {
+                    (
+                        StatusCode::NOT_FOUND,
+                        format!("No provider for model: {}", model),
+                    )
+                })?;
+                self_consistency(provider, &model, &req, n_samples, sc_temperature)
+                    .await
+                    .map_err(|e| (StatusCode::BAD_GATEWAY, e))
             }
-            let provider = provider_for_model_filtered(&state.config, &model, exclude_stoke, allowed_tiers)
-                .ok_or_else(|| (StatusCode::NOT_FOUND, format!("No provider for model: {}", model)))?;
-            cascade_test_models(provider, &vote_models, &req, &test_code, &entry_point)
-                .await
-                .map_err(|e| (StatusCode::BAD_GATEWAY, e))
-        }
-        "self_consistency" => {
-            let provider = provider_for_model_filtered(&state.config, &model, exclude_stoke, allowed_tiers)
-                .ok_or_else(|| (StatusCode::NOT_FOUND, format!("No provider for model: {}", model)))?;
-            self_consistency(provider, &model, &req, n_samples, sc_temperature)
-                .await
-                .map_err(|e| (StatusCode::BAD_GATEWAY, e))
-        }
-        _ => {
-            // Node-aware placement: rank candidates (warm > cold > unknown;
-            // ties by tier, in-flight count, latency EWMA), try best-first.
-            let (ranked, explain) = state.nodes.rank_with_tiers(&model, &state.config.providers, exclude_stoke, allowed_tiers);
-            if ranked.is_empty() {
-                let code = if allowed_tiers.is_empty() { StatusCode::NOT_FOUND } else { StatusCode::FORBIDDEN };
-                let message = if allowed_tiers.is_empty() {
-                    format!("No provider for model: {} ({})", model, explain.join("; "))
-                } else {
-                    format!("Route policy forbids every provider for model: {} ({})", model, explain.join("; "))
-                };
-                return Err((code, message));
-            }
-            let mut last_err = (StatusCode::BAD_GATEWAY, "no candidate attempted".to_string());
-            let mut outcome = None;
-            for provider in ranked.iter().take(3) {
-                let _inflight = state.nodes.begin(&provider.name);
-                match call_provider_hop(provider, &req, hop).await {
-                    Ok(r) => {
-                        state.nodes.record_success(&provider.name, r.elapsed_ms);
-                        route_note = Some(json!({
-                            "node": provider.name,
-                            "candidates": explain,
-                        }));
-                        outcome = Some(r);
-                        break;
-                    }
-                    Err(e) => {
-                        let client_error = e.contains(" returned 4");
-                        // A pricing refusal says nothing about the node's health —
-                        // it was never contacted. Counting it as an error would
-                        // demote a perfectly good node for a config omission.
-                        let policy_refusal = cost::is_unpriced_error(&e);
-                        if !client_error && !policy_refusal {
-                            state.nodes.record_error(&provider.name);
+            _ => {
+                // Node-aware placement: rank candidates (warm > cold > unknown;
+                // ties by tier, in-flight count, latency EWMA), try best-first.
+                let (ranked, explain) = state.nodes.rank_with_tiers(
+                    &model,
+                    &state.config.providers,
+                    exclude_stoke,
+                    allowed_tiers,
+                );
+                if ranked.is_empty() {
+                    let code = if allowed_tiers.is_empty() {
+                        StatusCode::NOT_FOUND
+                    } else {
+                        StatusCode::FORBIDDEN
+                    };
+                    let message = if allowed_tiers.is_empty() {
+                        format!("No provider for model: {} ({})", model, explain.join("; "))
+                    } else {
+                        format!(
+                            "Route policy forbids every provider for model: {} ({})",
+                            model,
+                            explain.join("; ")
+                        )
+                    };
+                    return Err((code, message));
+                }
+                let mut last_err = (
+                    StatusCode::BAD_GATEWAY,
+                    "no candidate attempted".to_string(),
+                );
+                let mut outcome = None;
+                for provider in ranked.iter().take(3) {
+                    let _inflight = state.nodes.begin(&provider.name);
+                    match call_provider_hop(provider, &req, hop).await {
+                        Ok(r) => {
+                            state.nodes.record_success(&provider.name, r.elapsed_ms);
+                            route_note = Some(json!({
+                                "node": provider.name,
+                                "candidates": explain,
+                            }));
+                            outcome = Some(r);
+                            break;
                         }
-                        tracing::warn!("placement: {} failed: {}", provider.name, e);
-                        last_err = (StatusCode::BAD_GATEWAY, e);
-                        if client_error {
-                            break; // deterministic client error — retrying elsewhere just replays it
+                        Err(e) => {
+                            let client_error = e.contains(" returned 4");
+                            // A pricing refusal says nothing about the node's health —
+                            // it was never contacted. Counting it as an error would
+                            // demote a perfectly good node for a config omission.
+                            let policy_refusal = cost::is_unpriced_error(&e);
+                            if !client_error && !policy_refusal {
+                                state.nodes.record_error(&provider.name);
+                            }
+                            tracing::warn!("placement: {} failed: {}", provider.name, e);
+                            last_err = (StatusCode::BAD_GATEWAY, e);
+                            if client_error {
+                                break; // deterministic client error — retrying elsewhere just replays it
+                            }
                         }
                     }
                 }
+                outcome.ok_or(last_err)
             }
-            outcome.ok_or(last_err)
         }
     }
-    }.await;
+    .await;
 
     let result = match result {
         Ok(r) => r,
@@ -1524,7 +1729,11 @@ async fn chat_completions(
             // The pricing gate refuses inside the router, where every failure
             // reads as a provider failure. It is not one — nothing upstream was
             // contacted. Answer 403 so an operator sees a policy refusal.
-            let code = if cost::is_unpriced_error(&msg) { StatusCode::FORBIDDEN } else { code };
+            let code = if cost::is_unpriced_error(&msg) {
+                StatusCode::FORBIDDEN
+            } else {
+                code
+            };
             record_decision(
                 &state,
                 if code == StatusCode::FORBIDDEN {
@@ -1580,10 +1789,7 @@ async fn chat_completions(
             "stoke_cost".into(),
             serde_json::to_value(&result.cost).unwrap(),
         );
-        obj.insert(
-            "stoke_elapsed_ms".into(),
-            json!(result.elapsed_ms),
-        );
+        obj.insert("stoke_elapsed_ms".into(), json!(result.elapsed_ms));
         obj.insert("stoke_cache".into(), json!("miss"));
         if let Some(mut note) = route_note.take() {
             if let Some(auto) = auto_note.take() {
@@ -1616,7 +1822,13 @@ async fn chat_completions(
         {
             if let Some(transformed) = state
                 .builtins
-                .post_response(&model, &response_json, result.cost.cost_usd, result.elapsed_ms, &api_key)
+                .post_response(
+                    &model,
+                    &response_json,
+                    result.cost.cost_usd,
+                    result.elapsed_ms,
+                    &api_key,
+                )
                 .await
             {
                 response_json = transformed;
@@ -1660,13 +1872,20 @@ async fn chat_completions(
         .unwrap_or(false);
     state.budget.record_receipt(
         zero_marginal,
-        if auto_routed && zero_marginal { auto_counterfactual_usd } else { 0.0 },
+        if auto_routed && zero_marginal {
+            auto_counterfactual_usd
+        } else {
+            0.0
+        },
     );
 
     // Store in cache if we have a key (single routing, temp=0)
     // Uses put_with_embedding to generate embedding for semantic cache
     if let Some(ref key) = cache_key {
-        state.cache.put_with_embedding(key, &cache_scope, response_json.clone(), &cache_prompt).await;
+        state
+            .cache
+            .put_with_embedding(key, &cache_scope, response_json.clone(), &cache_prompt)
+            .await;
     }
 
     Json(response_json).into_response()
@@ -1680,8 +1899,20 @@ mod hold_sizing_tests {
     /// cheap: $1/1M in, $1/1M out.  dear: $10/1M in, $10/1M out.  "router": unpriced.
     fn pricer() -> Pricer {
         let mut m = HashMap::new();
-        m.insert("cheap".to_string(), ModelPricing { input_per_1m: 1.0, output_per_1m: 1.0 });
-        m.insert("dear".to_string(), ModelPricing { input_per_1m: 10.0, output_per_1m: 10.0 });
+        m.insert(
+            "cheap".to_string(),
+            ModelPricing {
+                input_per_1m: 1.0,
+                output_per_1m: 1.0,
+            },
+        );
+        m.insert(
+            "dear".to_string(),
+            ModelPricing {
+                input_per_1m: 10.0,
+                output_per_1m: 10.0,
+            },
+        );
         Pricer::new(m, Unpriced::Refuse)
     }
 
@@ -1718,7 +1949,11 @@ mod hold_sizing_tests {
         // Regression: the base model often exists only to pick a provider. Pricing
         // the hold against it yielded $0 — no hold at all — while the legs spent.
         assert!((hold("test_vote", "router", &["dear", "dear"], 1) - 40.0).abs() < 1e-9);
-        assert_eq!(hold("single", "router", &[], 1), 0.0, "an unpriced single call is refused at dispatch, not held");
+        assert_eq!(
+            hold("single", "router", &[], 1),
+            0.0,
+            "an unpriced single call is refused at dispatch, not held"
+        );
     }
 
     #[test]
