@@ -798,24 +798,76 @@ async fn list_pricing() -> Json<Value> {
 }
 
 async fn list_models(State(state): State<AppState>) -> Json<Value> {
-    // For now, list models from config. TODO: live discovery from providers.
-    let models: Vec<Value> = state
-        .config
-        .providers
-        .iter()
-        .flat_map(|p| {
-            if p.models.is_empty() {
-                vec![json!({ "id": format!("{}:*", p.name), "provider": p.name })]
-            } else {
-                p.models
-                    .iter()
-                    .map(|m| json!({ "id": m, "provider": p.name }))
-                    .collect()
+    // Config lists the operator's static models. For the claude_subscription
+    // provider, live discovery from Anthropic's /v1/models (using the same
+    // OAuth credential the /v1/messages subscription path forwards) replaces
+    // the static list, so the picker shows what the plan actually offers —
+    // including models newer than this Stoke build. On any failure (not
+    // logged in, upstream error) fall back to the configured list: the
+    // endpoint stays a pure read, never a hard dependency on login state.
+    let mut models: Vec<Value> = Vec::new();
+    let mut subscription_models: Option<Vec<String>> = None;
+    for provider in state.config.providers.iter() {
+        if provider.r#type == "claude_subscription" {
+            if subscription_models.is_none() {
+                subscription_models = Some(fetch_subscription_models().await);
             }
-        })
-        .collect();
+            let discovered = subscription_models.as_ref().unwrap();
+            if discovered.is_empty() {
+                for m in &provider.models {
+                    models.push(json!({ "id": m, "provider": provider.name }));
+                }
+            } else {
+                for m in discovered {
+                    models.push(json!({ "id": m, "provider": provider.name }));
+                }
+            }
+        } else if provider.models.is_empty() {
+            models.push(json!({ "id": format!("{}:*", provider.name), "provider": provider.name }));
+        } else {
+            for m in &provider.models {
+                models.push(json!({ "id": m, "provider": provider.name }));
+            }
+        }
+    }
 
     Json(json!({ "object": "list", "data": models }))
+}
+
+/// Live model discovery for the Claude subscription: GET api.anthropic.com
+/// /v1/models with the store's OAuth token (the same token the subscription
+/// path forwards). Empty on any failure — callers then use the config list.
+/// Token material never leaves this function and nothing is logged.
+async fn fetch_subscription_models() -> Vec<String> {
+    let resolver = crate::messages::default_subscription_token_resolver();
+    let Ok(token) = resolver().await else {
+        return Vec::new();
+    };
+    let Ok(resp) = (&*router::SHARED_CLIENT)
+        .get("https://api.anthropic.com/v1/models?limit=100")
+        .bearer_auth(&token)
+        .header("anthropic-version", "2023-06-01")
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .send()
+        .await
+    else {
+        return Vec::new();
+    };
+    if !resp.status().is_success() {
+        return Vec::new();
+    }
+    #[derive(serde::Deserialize)]
+    struct ModelEntry {
+        id: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct ModelsResponse {
+        data: Vec<ModelEntry>,
+    }
+    match resp.json::<ModelsResponse>().await {
+        Ok(parsed) => parsed.data.into_iter().map(|m| m.id).collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 async fn list_routes(State(state): State<AppState>) -> Json<Value> {

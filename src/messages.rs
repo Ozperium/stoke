@@ -287,6 +287,13 @@ pub async fn messages(
     // local providers list theirs); providers without a model list stay
     // generic candidates. Without this, provider order — not intent — would
     // decide which upstream serves a Claude model.
+    //
+    // Live-discovery exception: /v1/models advertises the claude_subscription
+    // provider's upstream-discovered models, which can include IDs newer than
+    // this Stoke build and therefore absent from the static config list. A
+    // `claude-*` model that no provider claims explicitly routes to
+    // claude_subscription — it is the only upstream that can serve that
+    // namespace. Any non-Claude ID still falls through to translation.
     let provider = match state
         .config
         .providers
@@ -297,6 +304,16 @@ pub async fn messages(
                 || provider_accepts_messages_translation(p)
         })
         .find(|p| !p.models.is_empty() && p.models.iter().any(|m| m == &model))
+        .or_else(|| {
+            // Unlisted claude-* ID: subscription wins only if no other
+            // provider claims it — the same "explicit list beats wildcard"
+            // precedence as /v1/responses.
+            state.config.providers.iter().find(|p| {
+                p.r#type == "claude_subscription"
+                    && p.models.iter().all(|m| m != &model)
+                    && model.starts_with("claude-")
+            })
+        })
         .or_else(|| {
             state.config.providers.iter().find(|p| {
                 (p.r#type == "anthropic"
