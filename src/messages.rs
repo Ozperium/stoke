@@ -280,11 +280,37 @@ pub async fn messages(
 
     // Resolve the upstream Anthropic provider. A pure config read — every
     // enforcement gate below still runs before any upstream request.
-    let provider = match state.config.providers.iter().find(|p| {
-        p.r#type == "anthropic"
-            || p.r#type == "claude_subscription"
-            || provider_accepts_messages_translation(p)
-    }) {
+    //
+    // Model-aware like /v1/responses: a provider that explicitly lists the
+    // requested model wins (claude_subscription lists its Claude models,
+    // local providers list theirs); providers without a model list stay
+    // generic candidates. Without this, provider order — not intent — would
+    // decide which upstream serves a Claude model.
+    let provider = match state
+        .config
+        .providers
+        .iter()
+        .filter(|p| {
+            p.r#type == "anthropic"
+                || p.r#type == "claude_subscription"
+                || provider_accepts_messages_translation(p)
+        })
+        .find(|p| !p.models.is_empty() && p.models.iter().any(|m| m == &model))
+        .or_else(|| {
+            state.config.providers.iter().find(|p| {
+                (p.r#type == "anthropic"
+                    || p.r#type == "claude_subscription"
+                    || provider_accepts_messages_translation(p))
+                    && p.models.is_empty()
+            })
+        })
+        .or_else(|| {
+            state.config.providers.iter().find(|p| {
+                p.r#type == "anthropic"
+                    || p.r#type == "claude_subscription"
+                    || provider_accepts_messages_translation(p)
+            })
+        }) {
         Some(p) => p,
         None => {
             crate::record_decision(
