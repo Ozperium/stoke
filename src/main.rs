@@ -15,6 +15,7 @@ mod router;
 mod sse;
 mod stream_fusion;
 mod subscription;
+mod anthropic_oauth;
 mod ttft;
 
 #[cfg(feature = "js-plugins")]

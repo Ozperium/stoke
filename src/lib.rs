@@ -1,3 +1,4 @@
+pub mod anthropic_oauth;
 pub mod config;
 pub mod cost;
 pub mod plugins;
