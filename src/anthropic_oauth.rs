@@ -413,9 +413,17 @@ fn wait_for_callback(listener: std::net::TcpListener) -> Result<(String, String)
         .map_err(|e| format!("callback listener setup failed: {e}"))?;
     let target = read_request_target(&mut stream)?;
     let result = parse_callback(&target);
-    let body = "<html><body><h1>Stoke</h1><p>Login received — you can close this window.</p></body></html>";
+    let body = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Stoke</title>\
+<style>body{font-family:-apple-system,system-ui,sans-serif;display:grid;place-items:center;\
+min-height:100vh;margin:0;background:#fafafa;color:#111}\
+.card{text-align:center;padding:2.5rem 3rem;border:1px solid #e5e5e5;border-radius:12px;\
+background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.06)}\
+.dot{width:10px;height:10px;border-radius:50%;background:#22c55e;display:inline-block;margin-bottom:.75rem}\
+h1{font-size:1.1rem;margin:.25rem 0}p{color:#555;margin:.25rem 0 0;font-size:.95rem}</style>\
+</head><body><div class=\"card\"><span class=\"dot\"></span><h1>Stoke</h1>\
+<p>Login received &mdash; you can close this window.</p></div></body></html>";
     let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
         body
     );
