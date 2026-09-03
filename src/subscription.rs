@@ -38,6 +38,23 @@ pub fn subscription_responses_endpoint(base_url: &str) -> Result<String, String>
     Ok(format!("{CHATGPT_CODEX_BASE}/responses"))
 }
 
+/// The exact Anthropic API root Claude subscription OAuth credentials serve.
+pub const CLAUDE_API_BASE: &str = "https://api.anthropic.com";
+
+/// The host a `claude_subscription` credential may be sent to.
+pub const CLAUDE_API_HOST: &str = "api.anthropic.com";
+
+/// The single endpoint a `claude_subscription` provider may dispatch to.
+pub fn claude_subscription_messages_endpoint(base_url: &str) -> Result<String, String> {
+    let base = base_url.trim_end_matches('/');
+    if base != CLAUDE_API_BASE {
+        return Err(format!(
+            "claude_subscription base_url must be exactly {CLAUDE_API_BASE}"
+        ));
+    }
+    Ok(format!("{CLAUDE_API_BASE}/v1/messages"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,5 +126,35 @@ mod tests {
                 "must refuse {hostile}"
             );
         }
+    }
+
+    #[test]
+    fn claude_subscription_endpoint_is_exact_or_refused() {
+        assert_eq!(
+            claude_subscription_messages_endpoint("https://api.anthropic.com").unwrap(),
+            "https://api.anthropic.com/v1/messages"
+        );
+        assert_eq!(
+            claude_subscription_messages_endpoint("https://api.anthropic.com/").unwrap(),
+            "https://api.anthropic.com/v1/messages"
+        );
+        for hostile in [
+            "https://api.openai.com/v1",
+            "https://api.anthropic.com.evil.test",
+            "https://anthropic.evil.test/api.anthropic.com",
+            "http://api.anthropic.com",
+            "https://api.anthropic.com/v1/messages",
+        ] {
+            assert!(
+                claude_subscription_messages_endpoint(hostile).is_err(),
+                "must refuse {hostile}"
+            );
+        }
+    }
+
+    #[test]
+    fn claude_subscription_base_survives_oauth_destination_validation() {
+        let url = claude_subscription_messages_endpoint("https://api.anthropic.com").unwrap();
+        assert!(validate_oauth_destination(&url, CLAUDE_API_HOST).is_ok());
     }
 }
