@@ -163,11 +163,21 @@ pub struct AutoRouteConfig {
 }
 
 impl AutoRouteConfig {
-    pub fn fast_vec(&self) -> Vec<String> { role_vec(&self.fast) }
-    pub fn coder_vec(&self) -> Vec<String> { role_vec(&self.coder) }
-    pub fn reasoner_vec(&self) -> Vec<String> { role_vec(&self.reasoner) }
-    pub fn long_context_vec(&self) -> Vec<String> { role_vec(&self.long_context) }
-    pub fn quality_vec(&self) -> Vec<String> { role_vec(&self.quality) }
+    pub fn fast_vec(&self) -> Vec<String> {
+        role_vec(&self.fast)
+    }
+    pub fn coder_vec(&self) -> Vec<String> {
+        role_vec(&self.coder)
+    }
+    pub fn reasoner_vec(&self) -> Vec<String> {
+        role_vec(&self.reasoner)
+    }
+    pub fn long_context_vec(&self) -> Vec<String> {
+        role_vec(&self.long_context)
+    }
+    pub fn quality_vec(&self) -> Vec<String> {
+        role_vec(&self.quality)
+    }
 }
 
 /// Per-API-key enforcement policy.
@@ -221,6 +231,13 @@ fn openai_compatible() -> String {
 }
 
 impl ProviderConfig {
+    /// A ChatGPT/Codex subscription passthrough provider. Its credential is
+    /// the client's own ChatGPT OAuth token carried in `Authorization` — never
+    /// a configured API key — so the whole api_key machinery is inapplicable.
+    pub fn is_subscription(&self) -> bool {
+        self.r#type == "codex_subscription"
+    }
+
     /// Resolve the API key — direct value or from env var.
     pub fn resolve_api_key(&self) -> String {
         if !self.api_key.is_empty() {
@@ -244,7 +261,7 @@ impl Config {
 
         // Warn about plaintext API keys in config
         for p in &config.providers {
-            if !p.api_key.is_empty() && p.api_key != "ollama-local" {
+            if !p.api_key.is_empty() && p.api_key != "ollama-local" && !p.is_subscription() {
                 eprintln!(
                     "⚠ Security: provider '{}' has plaintext api_key in {}. \
                      Use api_key_env instead (e.g. api_key_env = \"OPENAI_API_KEY\").",
@@ -265,6 +282,49 @@ impl Config {
     /// let it serve unmetered traffic under a `budget_usd` cap that never trips.
     /// Fail at boot rather than at spend time.
     pub fn validate(&self) -> Result<(), String> {
+        for p in &self.providers {
+            if !p.is_subscription() {
+                continue;
+            }
+            // The subscription credential is the client's own ChatGPT OAuth
+            // token; a configured key here would be a second secret Stoke has
+            // to guard, and a wrong one would silently break auth upstream.
+            if !p.api_key.is_empty() || !p.api_key_env.is_empty() {
+                return Err(format!(
+                    "provider '{}' is a codex_subscription passthrough: it must not set \
+                     api_key or api_key_env — the client's own ChatGPT OAuth token is the credential",
+                    p.name
+                ));
+            }
+            if p.tier != "subscription" {
+                return Err(format!(
+                    "provider '{}' is a codex_subscription passthrough and must declare \
+                     tier = \"subscription\" (found \"{}\") so it is never metered as API dollar spend",
+                    p.name, p.tier
+                ));
+            }
+            // Exact-base check first: only the exact ChatGPT Codex backend is
+            // a legal subscription target, so a lookalike path or host is
+            // refused at boot.
+            if let Err(reason) = crate::subscription::subscription_responses_endpoint(&p.base_url) {
+                return Err(format!(
+                    "provider '{}' (codex_subscription) base_url \"{}\" is refused — {reason}",
+                    p.name, p.base_url
+                ));
+            }
+            if let Err(reason) = crate::subscription::validate_oauth_destination(
+                &format!("{}/responses", p.base_url.trim_end_matches('/')),
+                "chatgpt.com",
+            ) {
+                return Err(format!(
+                    "provider '{}' (codex_subscription) base_url \"{}\" may only target the \
+                     exact ChatGPT backend {} — {reason}",
+                    p.name,
+                    p.base_url,
+                    crate::subscription::CHATGPT_CODEX_BASE
+                ));
+            }
+        }
         if crate::cost::Unpriced::parse(&self.pricing.unpriced) == crate::cost::Unpriced::Refuse {
             let untiered: Vec<&str> = self
                 .providers
@@ -309,7 +369,9 @@ impl Config {
         // Search order: CLI arg (TODO), ./stoke.toml, ~/.config/stoke/stoke.toml
         let candidates = [
             PathBuf::from("stoke.toml"),
-            dirs::config_dir().unwrap_or_default().join("stoke/stoke.toml"),
+            dirs::config_dir()
+                .unwrap_or_default()
+                .join("stoke/stoke.toml"),
         ];
         for c in &candidates {
             if c.exists() {
@@ -355,7 +417,12 @@ impl Config {
             } else {
                 req
             };
-            if req.send().await.map(|r| r.status().is_success()).unwrap_or(false) {
+            if req
+                .send()
+                .await
+                .map(|r| r.status().is_success())
+                .unwrap_or(false)
+            {
                 return true;
             }
         }
@@ -383,7 +450,11 @@ mod dirs {
         std::env::var("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .ok()
-            .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".config")))
+            .or_else(|| {
+                std::env::var("HOME")
+                    .ok()
+                    .map(|h| PathBuf::from(h).join(".config"))
+            })
     }
 }
 #[cfg(test)]
@@ -408,7 +479,10 @@ port = 8787
             "{BASE}\n[[providers]]\nname = \"mystery\"\nbase_url = \"https://example.com/v1\"\n"
         ));
         let err = c.validate().unwrap_err();
-        assert!(err.contains("mystery"), "the error must name the provider: {err}");
+        assert!(
+            err.contains("mystery"),
+            "the error must name the provider: {err}"
+        );
         assert!(err.contains("tier"));
     }
 
@@ -426,7 +500,10 @@ port = 8787
             "{BASE}\n[pricing]\nunpriced = \"free\"\n\
              [[providers]]\nname = \"mystery\"\nbase_url = \"https://example.com/v1\"\n"
         ));
-        assert!(c.validate().is_ok(), "unpriced=free means tiers no longer gate spend");
+        assert!(
+            c.validate().is_ok(),
+            "unpriced=free means tiers no longer gate spend"
+        );
     }
 
     #[test]
@@ -444,13 +521,87 @@ port = 8787
         let c = cfg(BASE);
         assert_eq!(c.limits.max_n_samples, 5);
         assert_eq!(c.limits.max_vote_models, 5);
-        assert!(!c.limits.allow_caller_routing, "callers must not pick fan-out by default");
+        assert!(
+            !c.limits.allow_caller_routing,
+            "callers must not pick fan-out by default"
+        );
     }
 
     #[test]
     fn a_zero_limit_is_rejected() {
         let c = cfg(&format!("{BASE}\n[limits]\nmax_n_samples = 0\n"));
         assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn a_codex_subscription_provider_is_valid_without_an_api_key() {
+        let c = cfg(&format!(
+            "{BASE}\n[[providers]]\nname = \"chatgpt\"\ntype = \"codex_subscription\"\n\
+             base_url = \"https://chatgpt.com/backend-api/codex\"\ntier = \"subscription\"\n"
+        ));
+        assert!(
+            c.validate().is_ok(),
+            "no api_key is required for a subscription"
+        );
+        let p = &c.providers[0];
+        assert!(p.is_subscription());
+        assert!(p.resolve_api_key().is_empty());
+    }
+
+    #[test]
+    fn a_codex_subscription_provider_must_target_the_exact_chatgpt_backend() {
+        for base in [
+            "https://api.openai.com/v1",
+            "https://chatgpt.com/backend-api/codex.evil.test",
+            "https://chatgpt.com.evil.test/backend-api/codex",
+            "http://chatgpt.com/backend-api/codex",
+        ] {
+            let c = cfg(&format!(
+                "{BASE}\n[[providers]]\nname = \"chatgpt\"\ntype = \"codex_subscription\"\n\
+                 base_url = \"{base}\"\ntier = \"subscription\"\n"
+            ));
+            let err = c.validate().unwrap_err();
+            assert!(err.contains(base), "must refuse {base}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_codex_subscription_provider_must_declare_the_subscription_tier() {
+        let c = cfg(&format!(
+            "{BASE}\n[[providers]]\nname = \"chatgpt\"\ntype = \"codex_subscription\"\n\
+             base_url = \"https://chatgpt.com/backend-api/codex\"\ntier = \"cloud\"\n"
+        ));
+        let err = c.validate().unwrap_err();
+        assert!(
+            err.contains("subscription"),
+            "must demand tier=subscription: {err}"
+        );
+    }
+
+    #[test]
+    fn a_codex_subscription_provider_must_not_ship_a_plaintext_api_key() {
+        let c = cfg(&format!(
+            "{BASE}\n[[providers]]\nname = \"chatgpt\"\ntype = \"codex_subscription\"\n\
+             base_url = \"https://chatgpt.com/backend-api/codex\"\ntier = \"subscription\"\n\
+             api_key = \"some-secret\"\n"
+        ));
+        let err = c.validate().unwrap_err();
+        assert!(
+            err.contains("api_key"),
+            "subscription auth is the user's own ChatGPT OAuth, not a config key: {err}"
+        );
+    }
+
+    #[test]
+    fn a_regular_provider_is_never_treated_as_subscription() {
+        let c = cfg(&format!(
+            "{BASE}\n[[providers]]\nname = \"ollama\"\nbase_url = \"http://127.0.0.1:11434/v1\"\n\
+             tier = \"local\"\n[[providers]]\nname = \"openai\"\ntype = \"openai\"\n\
+             base_url = \"https://api.openai.com/v1\"\ntier = \"cloud\"\n"
+        ));
+        for p in &c.providers {
+            assert!(!p.is_subscription(), "{} must not be subscription", p.name);
+        }
     }
 
     #[test]
@@ -471,15 +622,25 @@ port = 8787
         // That is why enforcement must run on the routing the auto-router returns
         // (auto_route::decide can answer "cascade_test"), not on what was asked for.
         assert!(!is_fanout_routing("auto"));
-        assert!(is_fanout_routing("cascade_test"), "the pattern auto can resolve into");
+        assert!(
+            is_fanout_routing("cascade_test"),
+            "the pattern auto can resolve into"
+        );
     }
 
     #[test]
     fn every_fan_out_pattern_is_recognised() {
         // If a pattern dispatches multiple provider calls but is missing here, a
         // caller can select it in the request body and multiply their own budget.
-        for p in ["parallel_vote", "self_consistency", "deliberation", "test_vote",
-                  "cascade", "cascade_test", "stream_race"] {
+        for p in [
+            "parallel_vote",
+            "self_consistency",
+            "deliberation",
+            "test_vote",
+            "cascade",
+            "cascade_test",
+            "stream_race",
+        ] {
             assert!(is_fanout_routing(p), "{p} fans out but is not gated");
         }
         assert!(!is_fanout_routing("single"));

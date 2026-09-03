@@ -1,7 +1,7 @@
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
-use serde_json::{json, Value};
 
 /// Budget caps: track spend per API key, reject requests when over limit.
 /// Also handles rate limiting (requests per minute per key).
@@ -120,7 +120,9 @@ impl BudgetGuard {
             // ships no model names. Enabled without one → disabled + warning.
             semantic_enabled: {
                 let wanted = std::env::var("STOKE_SEMANTIC_CACHE").is_ok();
-                let has_model = std::env::var("STOKE_EMBED_MODEL").map(|m| !m.is_empty()).unwrap_or(false);
+                let has_model = std::env::var("STOKE_EMBED_MODEL")
+                    .map(|m| !m.is_empty())
+                    .unwrap_or(false);
                 if wanted && !has_model {
                     tracing::warn!(
                         "semantic loop detection disabled: STOKE_SEMANTIC_CACHE is set but \
@@ -258,7 +260,9 @@ impl BudgetGuard {
             // Generate embedding FIRST (before acquiring any locks) — the await
             // would make !Send RwLock guards cross an await point otherwise.
             let embedding = if self.semantic_enabled && !prompt_text.is_empty() {
-                self.generate_embedding(prompt_text).await.unwrap_or_default()
+                self.generate_embedding(prompt_text)
+                    .await
+                    .unwrap_or_default()
             } else {
                 Vec::new()
             };
@@ -276,7 +280,8 @@ impl BudgetGuard {
             for e in entries.iter() {
                 if e.hash == prompt_hash {
                     similar_count += 1;
-                } else if self.semantic_enabled && !embedding.is_empty() && !e.embedding.is_empty() {
+                } else if self.semantic_enabled && !embedding.is_empty() && !e.embedding.is_empty()
+                {
                     let sim = cosine_similarity(&embedding, &e.embedding);
                     if sim > self.semantic_threshold {
                         similar_count += 1;
@@ -425,7 +430,12 @@ impl BudgetGuard {
 
     /// Money currently committed to this key's in-flight requests.
     pub fn reserved_spend(&self, key: &str) -> f64 {
-        self.reserved.read().unwrap().get(key).copied().unwrap_or(0.0)
+        self.reserved
+            .read()
+            .unwrap()
+            .get(key)
+            .copied()
+            .unwrap_or(0.0)
     }
 
     /// Record spend Stoke had to estimate: a metered provider streamed a
@@ -439,7 +449,12 @@ impl BudgetGuard {
 
     /// Of a key's cumulative spend, how much was estimated rather than reported.
     pub fn estimated_spend(&self, key: &str) -> f64 {
-        self.estimated.read().unwrap().get(key).copied().unwrap_or(0.0)
+        self.estimated
+            .read()
+            .unwrap()
+            .get(key)
+            .copied()
+            .unwrap_or(0.0)
     }
 
     /// Get current spend for a key.
@@ -482,12 +497,19 @@ impl BudgetGuard {
     /// Check if a key is currently loop-blocked.
     pub fn is_loop_blocked(&self, key: &str) -> bool {
         let blocked = self.loop_blocked.read().unwrap();
-        blocked.get(key).map(|until| Instant::now() < *until).unwrap_or(false)
+        blocked
+            .get(key)
+            .map(|until| Instant::now() < *until)
+            .unwrap_or(false)
     }
 
     /// Get loop detection config for introspection.
     pub fn loop_config(&self) -> (usize, u64, u64) {
-        (self.loop_threshold, self.loop_window.as_secs(), self.loop_block_duration.as_secs())
+        (
+            self.loop_threshold,
+            self.loop_window.as_secs(),
+            self.loop_block_duration.as_secs(),
+        )
     }
 }
 
@@ -580,6 +602,20 @@ impl Auth {
         !self.keys.read().unwrap().is_empty()
             || std::env::var("STOKE_DEV").unwrap_or_default() != "1"
     }
+
+    /// Test-only constructor that seeds the key store directly.
+    ///
+    /// `STOKE_API_KEYS` is process-global state, so tests that build an `Auth`
+    /// from the environment (via `Auth::new`) must serialize on the budget
+    /// test env lock — a lock other modules' tests cannot share. Seeding the
+    /// private key lock instead needs no env mutation and cannot race any
+    /// concurrently running test.
+    #[cfg(test)]
+    pub(crate) fn with_keys(keys: &[&str]) -> Self {
+        Self {
+            keys: RwLock::new(keys.iter().map(|s| s.to_string()).collect()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -622,6 +658,33 @@ mod tests {
     }
 
     #[test]
+    fn with_keys_seeds_the_key_store_without_env_mutation() {
+        // Deliberately runs WITHOUT holding ENV_LOCK: this constructor must
+        // not read or write STOKE_API_KEYS / STOKE_DEV, so it is safe to run
+        // concurrently with the env-dependent auth tests.
+        let auth = Auth::with_keys(&["gateway-key", "spare-key"]);
+        assert_eq!(
+            auth.validate(Some("Bearer gateway-key")),
+            Some("gateway-key".to_string())
+        );
+        assert_eq!(auth.validate(Some("Bearer nope")), None);
+        assert_eq!(
+            auth.validate_gateway(Some("spare-key"), Some("Bearer gateway-key")),
+            Some("spare-key".to_string()),
+            "x-stoke-key stays authoritative"
+        );
+        assert_eq!(
+            auth.validate_gateway(None, Some("Bearer gateway-key")),
+            Some("gateway-key".to_string())
+        );
+        assert_eq!(auth.validate_gateway(None, None), None);
+        assert!(
+            auth.is_auth_enabled(),
+            "keys are present even though the process env has none"
+        );
+    }
+
+    #[test]
     fn test_auth_dev_mode() {
         // STOKE_DEV=1 + no keys → anonymous access allowed
         let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -641,7 +704,7 @@ mod tests {
         let g = BudgetGuard::new();
         g.set_budget("k", 0.01);
         g.record_spend("k", 0.02); // over the cap
-        // check() must now refuse this key
+                                   // check() must now refuse this key
         let refused = tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(g.check("k"))
@@ -675,10 +738,7 @@ mod tests {
             Some("gateway-key".to_string())
         );
         assert_eq!(
-            auth.validate_gateway(
-                Some("wrong-gateway-key"),
-                Some("Bearer gateway-key")
-            ),
+            auth.validate_gateway(Some("wrong-gateway-key"), Some("Bearer gateway-key")),
             None,
             "an explicit but invalid x-stoke-key must not fall back to Authorization"
         );
@@ -713,7 +773,10 @@ mod tests {
 
         // Subsequent requests: blocked
         assert!(guard.check_with_prompt(key, prompt, "").await.is_err());
-        assert!(guard.check_with_prompt(key, "different-hash", "").await.is_err());
+        assert!(guard
+            .check_with_prompt(key, "different-hash", "")
+            .await
+            .is_err());
         assert!(guard.is_loop_blocked(key));
     }
 
@@ -779,8 +842,15 @@ mod reservation_tests {
         let _first = g.try_reserve("k", 0.06).unwrap().expect("fits");
         // 0.06 held + 0.06 more = 0.12 > 0.10
         let err = g.try_reserve("k", 0.06).unwrap_err();
-        assert!(err.contains("in flight"), "the refusal must explain what is held: {err}");
-        assert_eq!(g.reserved_spend("k"), 0.06, "a refused hold must not be taken");
+        assert!(
+            err.contains("in flight"),
+            "the refusal must explain what is held: {err}"
+        );
+        assert_eq!(
+            g.reserved_spend("k"),
+            0.06,
+            "a refused hold must not be taken"
+        );
     }
 
     #[test]
@@ -811,8 +881,14 @@ mod reservation_tests {
     fn spend_and_holds_are_counted_together() {
         let g = guard_with_cap("k", 0.10);
         g.record_spend("k", 0.06);
-        assert!(g.try_reserve("k", 0.05).is_err(), "0.06 spent + 0.05 held > 0.10");
-        assert!(g.try_reserve("k", 0.04).is_ok(), "0.06 + 0.04 == 0.10 exactly");
+        assert!(
+            g.try_reserve("k", 0.05).is_err(),
+            "0.06 spent + 0.05 held > 0.10"
+        );
+        assert!(
+            g.try_reserve("k", 0.04).is_ok(),
+            "0.06 + 0.04 == 0.10 exactly"
+        );
     }
 
     #[test]

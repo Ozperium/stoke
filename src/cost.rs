@@ -41,11 +41,20 @@ impl Unpriced {
 }
 
 /// Tiers that run on hardware the operator owns. Compute there is not billed
-/// per token, so an absent price is the truth rather than a gap.
+/// per token, so an absent price is the truth rather than a gap. This is ONLY
+/// about owned hardware: `local` (same machine) and `remote` (operator's other
+/// machines). Nothing else belongs here.
 ///
-/// Note the omission: an empty tier is NOT free. A provider with no declared
-/// tier could be anything, and defaulting the ambiguous case to "free" is how a
-/// cloud endpoint ends up serving unmetered traffic. Config load rejects it.
+/// Note what is deliberately absent: `subscription` is a flat-plan *billing*
+/// arrangement with a cloud provider, not owned hardware. It is handled by an
+/// explicit admission bypass at the handlers, not by pretending it is free —
+/// folding it in here would let stream_fusion treat subscription traffic as
+/// local and race it down the free-tier fast path.
+///
+/// Note the other omission: an empty tier is NOT free. A provider with no
+/// declared tier could be anything, and defaulting the ambiguous case to
+/// "free" is how a cloud endpoint ends up serving unmetered traffic. Config
+/// load rejects it.
 pub fn is_free_tier(tier: &str) -> bool {
     matches!(tier, "local" | "remote")
 }
@@ -89,7 +98,10 @@ impl Default for Pricer {
     /// Empty and fail-closed. A Pricer nobody configured must not quietly
     /// authorise metered traffic.
     fn default() -> Self {
-        Self { prices: HashMap::new(), unpriced: Unpriced::Refuse }
+        Self {
+            prices: HashMap::new(),
+            unpriced: Unpriced::Refuse,
+        }
     }
 }
 
@@ -141,7 +153,9 @@ impl Pricer {
             .map(|u| {
                 (
                     u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                    u.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                    u.get("completion_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0),
                 )
             })
             .unwrap_or((0, 0));
@@ -212,7 +226,13 @@ mod tests {
 
     fn pricer(unpriced: Unpriced) -> Pricer {
         let mut m = HashMap::new();
-        m.insert("known".to_string(), ModelPricing { input_per_1m: 1.0, output_per_1m: 2.0 });
+        m.insert(
+            "known".to_string(),
+            ModelPricing {
+                input_per_1m: 1.0,
+                output_per_1m: 2.0,
+            },
+        );
         Pricer::new(m, unpriced)
     }
 
@@ -224,11 +244,34 @@ mod tests {
     }
 
     #[test]
+    fn subscription_is_not_a_free_tier_and_refuses_without_pricing() {
+        assert!(
+            !crate::cost::is_free_tier("subscription"),
+            "a flat-plan subscription is not owned hardware — it must never be \
+             classed as a free tier or stream_fusion would race it as local"
+        );
+        assert!(crate::cost::is_free_tier("local"));
+        assert!(crate::cost::is_free_tier("remote"));
+        assert!(!crate::cost::is_free_tier("cloud"));
+        assert!(!crate::cost::is_free_tier(""));
+
+        // Subscription admission is the handlers' explicit bypass, not the
+        // free-tier shortcut: an unpriced model on a subscription tier is
+        // refused by the ordinary pricing gate exactly like `cloud`.
+        let p = pricer(Unpriced::Refuse);
+        let err = p.allows("subscription", "any-codex-model").unwrap_err();
+        assert!(err.contains("no price configured"));
+    }
+
+    #[test]
     fn metered_tier_refuses_an_unpriced_model() {
         let p = pricer(Unpriced::Refuse);
         let err = p.allows("cloud", "mystery").unwrap_err();
         assert!(err.contains("no price configured"));
-        assert!(err.contains("mystery"), "the error must name the model to be actionable");
+        assert!(
+            err.contains("mystery"),
+            "the error must name the model to be actionable"
+        );
     }
 
     #[test]
@@ -252,7 +295,11 @@ mod tests {
     fn cost_uses_the_configured_price() {
         let usage = serde_json::json!({"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000});
         let c = pricer(Unpriced::Refuse).calculate("known", Some(&usage));
-        assert!((c.cost_usd - 3.0).abs() < 1e-9, "1M in @ $1 + 1M out @ $2 = $3, got {}", c.cost_usd);
+        assert!(
+            (c.cost_usd - 3.0).abs() < 1e-9,
+            "1M in @ $1 + 1M out @ $2 = $3, got {}",
+            c.cost_usd
+        );
     }
 
     #[test]
@@ -272,8 +319,12 @@ mod tests {
     fn the_refusal_is_recognisable_so_it_maps_to_403_not_502() {
         // The handler sniffs for this to distinguish a policy refusal from an
         // upstream failure. Reword the message and the status silently regresses.
-        let err = pricer(Unpriced::Refuse).allows("cloud", "mystery").unwrap_err();
+        let err = pricer(Unpriced::Refuse)
+            .allows("cloud", "mystery")
+            .unwrap_err();
         assert!(is_unpriced_error(&err));
-        assert!(!is_unpriced_error("Provider foo returned 500: upstream exploded"));
+        assert!(!is_unpriced_error(
+            "Provider foo returned 500: upstream exploded"
+        ));
     }
 }
