@@ -7,8 +7,10 @@
 //! sees a normal Anthropic Messages payload.
 //!
 //! Fail-closed by design: anything this slice cannot represent faithfully —
-//! tool blocks, images, tool definitions — is rejected with a clear 400 naming
-//! the unsupported feature, never silently mangled.
+//! images, thinking, server tools — is rejected with a clear 400 naming
+//! the unsupported feature, never silently mangled. Tool use IS supported:
+//! Anthropic tool definitions, tool_use and tool_result blocks translate to
+//! OpenAI function calling in both directions.
 
 use serde_json::{json, Value};
 
@@ -16,11 +18,12 @@ use serde_json::{json, Value};
 /// chat/completions request body.
 ///
 /// Supported: `model` passthrough, `system` (string or text-block array),
-/// `messages` with string or text-block content, `max_tokens`, `temperature`,
-/// `top_p`, `stop_sequences` -> `stop`, `stream`. Anything else structural
-/// (tools, tool_choice, thinking, non-text blocks) is a hard error.
+/// `messages` with string or block content (text, tool_use, tool_result),
+/// `tools` and `tool_choice` (function-calling translation), `max_tokens`,
+/// `temperature`, `top_p`, `stop_sequences` -> `stop`, `stream`. Anything else
+/// structural (thinking, images, server tools) is a hard error.
 pub fn translate_request(req: &Value) -> Result<Value, String> {
-    for key in ["tools", "tool_choice", "thinking"] {
+    for key in ["thinking", "server_tool_use", "web_search"] {
         if req.get(key).map(|v| !v.is_null()).unwrap_or(false) {
             return Err(format!(
                 "unsupported request feature '{key}': the /v1/messages OpenAI translation \
@@ -41,13 +44,17 @@ pub fn translate_request(req: &Value) -> Result<Value, String> {
 
     if let Some(msgs) = req.get("messages").and_then(Value::as_array) {
         for m in msgs {
-            let role = m.get("role").and_then(Value::as_str).unwrap_or("user");
-            let text = content_text(m.get("content").unwrap_or(&Value::Null))?;
-            messages.push(json!({ "role": role, "content": text }));
+            translate_message(m, &mut messages)?;
         }
     }
 
     let mut out = json!({ "model": model, "messages": messages });
+    if let Some(tools) = req.get("tools").filter(|v| !v.is_null()) {
+        out["tools"] = translate_tools(tools)?;
+    }
+    if let Some(tc) = req.get("tool_choice").filter(|v| !v.is_null()) {
+        out["tool_choice"] = translate_tool_choice(tc)?;
+    }
     if let Some(mt) = req.get("max_tokens").and_then(Value::as_u64) {
         out["max_tokens"] = json!(mt);
     }
@@ -100,6 +107,145 @@ fn content_text(content: &Value) -> Result<String, String> {
     }
 }
 
+/// Translate one Anthropic message into zero or more OpenAI messages.
+///
+/// - text content -> a single message with flattened text
+/// - tool_use blocks (assistant) -> `tool_calls` alongside any text content
+/// - tool_result blocks (user) -> one `role:"tool"` message per result,
+///   interleaved in order with any text content
+fn translate_message(m: &Value, out: &mut Vec<Value>) -> Result<(), String> {
+    let role = m.get("role").and_then(Value::as_str).unwrap_or("user");
+    let content = m.get("content").unwrap_or(&Value::Null);
+
+    match content {
+        Value::String(_) | Value::Null => {
+            let text = content_text(content)?;
+            out.push(json!({ "role": role, "content": text }));
+        }
+        Value::Array(blocks) => {
+            // Fast path: all-text blocks keep the previous single-message shape.
+            if blocks
+                .iter()
+                .all(|b| b.get("type").and_then(Value::as_str).unwrap_or("missing") == "text")
+            {
+                let text = content_text(content)?;
+                out.push(json!({ "role": role, "content": text }));
+                return Ok(());
+            }
+            let mut pending_text: Vec<String> = Vec::new();
+            for b in blocks {
+                match b.get("type").and_then(Value::as_str).unwrap_or("missing") {
+                    "text" => pending_text.push(
+                        b.get("text")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                    ),
+                    "tool_use" => {
+                        flush_text(role, &mut pending_text, out);
+                        let id = b.get("id").and_then(Value::as_str).unwrap_or("");
+                        let name = b.get("name").and_then(Value::as_str).unwrap_or("");
+                        let input = b.get("input").cloned().unwrap_or_else(|| json!({}));
+                        out.push(json!({
+                            "role": role,
+                            "content": Value::Null,
+                            "tool_calls": [{
+                                "id": id,
+                                "type": "function",
+                                "function": {
+                                    "name": name,
+                                    "arguments": serde_json::to_string(&input)
+                                        .unwrap_or_else(|_| "{}".to_string()),
+                                },
+                            }],
+                        }));
+                    }
+                    "tool_result" => {
+                        flush_text(role, &mut pending_text, out);
+                        let tool_use_id =
+                            b.get("tool_use_id").and_then(Value::as_str).unwrap_or("");
+                        let result_text = content_text(b.get("content").unwrap_or(&Value::Null))?;
+                        out.push(json!({
+                            "role": "tool",
+                            "tool_call_id": tool_use_id,
+                            "content": result_text,
+                        }));
+                    }
+                    ty => {
+                        return Err(format!(
+                            "unsupported content block type '{ty}': the /v1/messages OpenAI \
+                             translation for local providers supports text, tool_use and \
+                             tool_result blocks"
+                        ));
+                    }
+                }
+            }
+            flush_text(role, &mut pending_text, out);
+        }
+        _ => {
+            let text = content_text(content)?;
+            out.push(json!({ "role": role, "content": text }));
+        }
+    }
+    Ok(())
+}
+
+/// Emit accumulated text as one message, keeping text and tool blocks in
+/// their original order relative to each other.
+fn flush_text(role: &str, pending: &mut Vec<String>, out: &mut Vec<Value>) {
+    if pending.is_empty() {
+        return;
+    }
+    let text = std::mem::take(pending).join("\n");
+    out.push(json!({ "role": role, "content": text }));
+}
+
+/// Translate Anthropic `tools` into OpenAI function definitions.
+fn translate_tools(tools: &Value) -> Result<Value, String> {
+    let list = tools.as_array().ok_or_else(|| {
+        "unsupported 'tools' value: expected an array of tool definitions".to_string()
+    })?;
+    let mut out = Vec::with_capacity(list.len());
+    for t in list {
+        let name = t.get("name").and_then(Value::as_str).unwrap_or("");
+        let ty = t.get("type").and_then(Value::as_str).unwrap_or("custom");
+        // Fail closed on server-side tool types (web_search, bash, etc.):
+        // they have no local function-call equivalent.
+        if ty != "custom" {
+            return Err(format!(
+                "unsupported tool type '{ty}': the /v1/messages OpenAI translation for \
+                 local providers only supports custom tools"
+            ));
+        }
+        out.push(json!({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": t.get("description").and_then(Value::as_str).unwrap_or(""),
+                "parameters": t.get("input_schema").cloned().unwrap_or_else(|| json!({ "type": "object" })),
+            },
+        }));
+    }
+    Ok(Value::Array(out))
+}
+
+/// Translate Anthropic `tool_choice` into OpenAI `tool_choice`.
+fn translate_tool_choice(tc: &Value) -> Result<Value, String> {
+    match tc.get("type").and_then(Value::as_str) {
+        Some("auto") => Ok(json!("auto")),
+        Some("any") => Ok(json!("required")),
+        Some("tool") => {
+            let name = tc.get("name").and_then(Value::as_str).unwrap_or("");
+            Ok(json!({ "type": "function", "function": { "name": name } }))
+        }
+        Some(other) => Err(format!(
+            "unsupported tool_choice type '{other}': the /v1/messages OpenAI translation \
+             for local providers supports auto, any and named tool choices"
+        )),
+        None => Err("unsupported tool_choice: expected an object with a 'type' field".to_string()),
+    }
+}
+
 /// Map an OpenAI `finish_reason` to an Anthropic `stop_reason`.
 pub fn map_stop_reason(finish_reason: &str) -> &'static str {
     match finish_reason {
@@ -107,6 +253,40 @@ pub fn map_stop_reason(finish_reason: &str) -> &'static str {
         "tool_calls" => "tool_use",
         _ => "end_turn",
     }
+}
+
+/// Build Anthropic content blocks from an OpenAI choice: one text block when
+/// the message carries content, plus one `tool_use` block per tool call with
+/// the JSON-stringified `arguments` parsed back into an input object.
+fn response_tool_blocks(choice: &Value, text: &str) -> Vec<Value> {
+    let mut blocks: Vec<Value> = Vec::new();
+    if !text.is_empty() {
+        blocks.push(json!({ "type": "text", "text": text }));
+    }
+    if let Some(calls) = choice
+        .pointer("/message/tool_calls")
+        .and_then(Value::as_array)
+    {
+        for call in calls {
+            let id = call.get("id").and_then(Value::as_str).unwrap_or("");
+            let name = call
+                .pointer("/function/name")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let arguments = call
+                .pointer("/function/arguments")
+                .and_then(Value::as_str)
+                .unwrap_or("{}");
+            let input = serde_json::from_str::<Value>(arguments).unwrap_or_else(|_| json!({}));
+            blocks.push(json!({
+                "type": "tool_use",
+                "id": id,
+                "name": name,
+                "input": input,
+            }));
+        }
+    }
+    blocks
 }
 
 /// Translate a non-streaming OpenAI chat/completions response into an
@@ -120,25 +300,20 @@ pub fn translate_response(openai: &Value, model: &str) -> Value {
         .get("choices")
         .and_then(Value::as_array)
         .and_then(|c| c.first());
-    let (text, finish) = choice
+    let (content, finish) = choice
         .map(|c| {
+            let text = c
+                .pointer("/message/content")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let blocks = response_tool_blocks(c, &text);
             (
-                c.pointer("/message/content")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
-                c.get("finish_reason")
-                    .and_then(Value::as_str)
-                    .unwrap_or("stop")
-                    .to_string(),
+                blocks,
+                c["finish_reason"].as_str().unwrap_or("stop").to_string(),
             )
         })
-        .unwrap_or_else(|| (String::new(), "stop".to_string()));
-    let content = if text.is_empty() {
-        vec![]
-    } else {
-        vec![json!({ "type": "text", "text": text })]
-    };
+        .unwrap_or_else(|| (Vec::new(), "stop".to_string()));
     let (input, output) = openai
         .get("usage")
         .map(|u| {
@@ -177,7 +352,18 @@ pub struct StreamTranslator {
     model: String,
     id: String,
     started: bool,
-    block_open: bool,
+    /// Anthropic block index currently open (`content_block_start` sent,
+    /// `content_block_stop` not yet sent). OpenAI tool calls may interleave
+    /// with text deltas, so multiple blocks can open and close per message.
+    block_open: Option<usize>,
+    /// Next Anthropic block index to hand out for text blocks. Anthropic
+    /// indexes every content block 0..n across the whole message; OpenAI
+    /// indexes tool calls separately from text, so tool-call indexes are
+    /// offset past any text block that opened earlier.
+    next_index: usize,
+    /// Which OpenAI tool-call indexes have opened an Anthropic block, so
+    /// continuation fragments append instead of opening a duplicate block.
+    tool_blocks: Vec<bool>,
     finished: bool,
     input_tokens: u64,
     output_tokens: u64,
@@ -195,7 +381,9 @@ impl StreamTranslator {
             model: model.into(),
             id: format!("msg_stoke_{nanos}"),
             started: false,
-            block_open: false,
+            block_open: None,
+            next_index: 0,
+            tool_blocks: Vec::new(),
             finished: false,
             input_tokens: 0,
             output_tokens: 0,
@@ -248,14 +436,15 @@ impl StreamTranslator {
         {
             if let Some(text) = choice.pointer("/delta/content").and_then(Value::as_str) {
                 if !text.is_empty() {
-                    events.push(self.event(
-                        "content_block_delta",
-                        json!({
-                            "type": "content_block_delta",
-                            "index": 0,
-                            "delta": { "type": "text_delta", "text": text },
-                        }),
-                    ));
+                    events.extend(self.text_delta(text));
+                }
+            }
+            if let Some(calls) = choice
+                .pointer("/delta/tool_calls")
+                .and_then(Value::as_array)
+            {
+                for call in calls {
+                    events.extend(self.tool_call_delta(call));
                 }
             }
             if let Some(fr) = choice
@@ -269,38 +458,121 @@ impl StreamTranslator {
         events
     }
 
+    /// Emit a text delta, opening a text block first if none is open.
+    fn text_delta(&mut self, text: &str) -> Vec<String> {
+        let mut events = Vec::new();
+        let index = match self.block_open {
+            Some(i) => i,
+            None => {
+                let i = self.next_index;
+                self.next_index += 1;
+                self.block_open = Some(i);
+                events.push(self.event(
+                    "content_block_start",
+                    json!({
+                        "type": "content_block_start",
+                        "index": i,
+                        "content_block": { "type": "text", "text": "" },
+                    }),
+                ));
+                i
+            }
+        };
+        events.push(self.event(
+            "content_block_delta",
+            json!({
+                "type": "content_block_delta",
+                "index": index,
+                "delta": { "type": "text_delta", "text": text },
+            }),
+        ));
+        events
+    }
+
+    /// Emit Anthropic tool_use block events from one OpenAI incremental
+    /// tool-call delta. Tool calls interleave with text deltas, so an
+    /// arriving tool fragment closes any open text block; deltas for the
+    /// same OpenAI `index` keep appending to one Anthropic block, and a new
+    /// `index` (or one we have not seen) opens a new `tool_use` block with
+    /// `input_json_delta` partial-JSON fragments.
+    fn tool_call_delta(&mut self, call: &Value) -> Vec<String> {
+        let oa_index = call.get("index").and_then(Value::as_u64).unwrap_or(0);
+        let mut events = Vec::new();
+        // OpenAI indexes tool calls from 0 independently of text; Anthropic
+        // block indexes count all blocks. Reserve index 0..next_index for
+        // text blocks by offsetting tool-call indexes.
+        let index = self.next_index + oa_index as usize;
+        if self.tool_blocks.len() <= oa_index as usize {
+            self.tool_blocks.resize(oa_index as usize + 1, false);
+        }
+        if !self.tool_blocks[oa_index as usize] {
+            self.tool_blocks[oa_index as usize] = true;
+            // Close any open text block: Anthropic blocks cannot overlap.
+            if let Some(open) = self.block_open {
+                if open != index {
+                    events.push(self.event(
+                        "content_block_stop",
+                        json!({ "type": "content_block_stop", "index": open }),
+                    ));
+                    self.block_open = None;
+                }
+            }
+            let id = call.get("id").and_then(Value::as_str).unwrap_or("");
+            let name = call
+                .pointer("/function/name")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            events.push(self.event(
+                "content_block_start",
+                json!({
+                    "type": "content_block_start",
+                    "index": index,
+                    "content_block": {
+                        "type": "tool_use",
+                        "id": id,
+                        "name": name,
+                        "input": {},
+                    },
+                }),
+            ));
+            self.block_open = Some(index);
+        }
+        if let Some(args) = call.pointer("/function/arguments").and_then(Value::as_str) {
+            if !args.is_empty() {
+                events.push(self.event(
+                    "content_block_delta",
+                    json!({
+                        "type": "content_block_delta",
+                        "index": index,
+                        "delta": { "type": "input_json_delta", "partial_json": args },
+                    }),
+                ));
+            }
+        }
+        events
+    }
+
     fn ensure_started(&mut self) -> Vec<String> {
         if self.started {
             return Vec::new();
         }
         self.started = true;
-        self.block_open = true;
-        vec![
-            self.event(
-                "message_start",
-                json!({
-                    "type": "message_start",
-                    "message": {
-                        "id": self.id,
-                        "type": "message",
-                        "role": "assistant",
-                        "model": self.model,
-                        "content": [],
-                        "stop_reason": Value::Null,
-                        "stop_sequence": Value::Null,
-                        "usage": { "input_tokens": 0, "output_tokens": 0 },
-                    },
-                }),
-            ),
-            self.event(
-                "content_block_start",
-                json!({
-                    "type": "content_block_start",
-                    "index": 0,
-                    "content_block": { "type": "text", "text": "" },
-                }),
-            ),
-        ]
+        vec![self.event(
+            "message_start",
+            json!({
+                "type": "message_start",
+                "message": {
+                    "id": self.id,
+                    "type": "message",
+                    "role": "assistant",
+                    "model": self.model,
+                    "content": [],
+                    "stop_reason": Value::Null,
+                    "stop_sequence": Value::Null,
+                    "usage": { "input_tokens": 0, "output_tokens": 0 },
+                },
+            }),
+        )]
     }
 
     fn finish(&mut self) -> Vec<String> {
@@ -309,12 +581,12 @@ impl StreamTranslator {
         }
         self.finished = true;
         let mut events = self.ensure_started();
-        if self.block_open {
+        if let Some(open) = self.block_open {
             events.push(self.event(
                 "content_block_stop",
-                json!({ "type": "content_block_stop", "index": 0 }),
+                json!({ "type": "content_block_stop", "index": open }),
             ));
-            self.block_open = false;
+            self.block_open = None;
         }
         events.push(self.event(
             "message_delta",
@@ -452,14 +724,242 @@ mod tests {
     }
 
     #[test]
-    fn tool_definition_is_rejected_with_a_clear_error() {
+    fn tool_definitions_translate_to_openai_functions() {
         let req = json!({
+            "model": "llama3",
+            "tools": [{
+                "name": "read",
+                "description": "read a file",
+                "input_schema": {
+                    "type": "object",
+                    "properties": { "path": { "type": "string" } },
+                    "required": ["path"]
+                }
+            }],
+            "messages": [{ "role": "user", "content": "x" }]
+        });
+        let out = translate_request(&req).unwrap();
+        let tools = out["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], "function");
+        assert_eq!(tools[0]["function"]["name"], "read");
+        assert_eq!(tools[0]["function"]["description"], "read a file");
+        assert_eq!(tools[0]["function"]["parameters"]["type"], "object");
+        assert_eq!(tools[0]["function"]["parameters"]["required"][0], "path");
+        assert!(out.get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn server_side_tool_types_are_rejected_with_a_clear_error() {
+        let req = json!({
+            "model": "llama3",
+            "tools": [{ "type": "web_search_20250305", "name": "web_search" }],
+            "messages": [{ "role": "user", "content": "x" }]
+        });
+        let err = translate_request(&req).unwrap_err();
+        assert!(
+            err.contains("web_search_20250305"),
+            "error names the type: {err}"
+        );
+    }
+
+    #[test]
+    fn tool_choice_variants_map_to_openai_tool_choice() {
+        let base = json!({
             "model": "llama3",
             "tools": [{ "name": "read", "input_schema": {} }],
             "messages": [{ "role": "user", "content": "x" }]
         });
-        let err = translate_request(&req).unwrap_err();
-        assert!(err.contains("tools"), "error names the feature: {err}");
+        let mut auto = base.clone();
+        auto["tool_choice"] = json!({ "type": "auto" });
+        assert_eq!(translate_request(&auto).unwrap()["tool_choice"], "auto");
+
+        let mut any = base.clone();
+        any["tool_choice"] = json!({ "type": "any" });
+        assert_eq!(translate_request(&any).unwrap()["tool_choice"], "required");
+
+        let mut named = base.clone();
+        named["tool_choice"] = json!({ "type": "tool", "name": "read" });
+        let out = translate_request(&named).unwrap();
+        assert_eq!(out["tool_choice"]["type"], "function");
+        assert_eq!(out["tool_choice"]["function"]["name"], "read");
+    }
+
+    #[test]
+    fn assistant_tool_use_block_becomes_a_tool_calls_message() {
+        let req = json!({
+            "model": "llama3",
+            "messages": [
+                { "role": "user", "content": "read the file" },
+                { "role": "assistant", "content": [
+                    { "type": "text", "text": "reading now" },
+                    { "type": "tool_use", "id": "toolu_1", "name": "read",
+                      "input": { "path": "/tmp/x" } }
+                ]}
+            ]
+        });
+        let out = translate_request(&req).unwrap();
+        let msgs = out["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[1]["role"], "assistant");
+        assert_eq!(msgs[1]["content"], "reading now");
+        let calls = msgs[2]["tool_calls"].as_array().unwrap();
+        assert_eq!(msgs[2]["role"], "assistant");
+        assert_eq!(calls[0]["id"], "toolu_1");
+        assert_eq!(calls[0]["type"], "function");
+        assert_eq!(calls[0]["function"]["name"], "read");
+        // input object -> JSON-stringified arguments
+        let args: Value =
+            serde_json::from_str(calls[0]["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args, json!({ "path": "/tmp/x" }));
+    }
+
+    #[test]
+    fn user_tool_result_block_becomes_a_role_tool_message() {
+        let req = json!({
+            "model": "llama3",
+            "messages": [
+                { "role": "user", "content": "read the file" },
+                { "role": "assistant", "content": [
+                    { "type": "tool_use", "id": "toolu_1", "name": "read", "input": {} }
+                ]},
+                { "role": "user", "content": [
+                    { "type": "tool_result", "tool_use_id": "toolu_1",
+                      "content": "file contents here" }
+                ]}
+            ]
+        });
+        let out = translate_request(&req).unwrap();
+        let msgs = out["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[2]["role"], "tool");
+        assert_eq!(msgs[2]["tool_call_id"], "toolu_1");
+        assert_eq!(msgs[2]["content"], "file contents here");
+    }
+
+    #[test]
+    fn tool_use_arguments_round_trip_through_the_response() {
+        let openai = json!({
+            "id": "c4",
+            "choices": [{
+                "message": {
+                    "content": "let me check",
+                    "tool_calls": [{
+                        "id": "call_9",
+                        "type": "function",
+                        "function": { "name": "read",
+                                      "arguments": "{\"path\":\"/tmp/x\"}" }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": { "prompt_tokens": 5, "completion_tokens": 9 }
+        });
+        let out = translate_response(&openai, "llama3");
+        assert_eq!(out["stop_reason"], "tool_use");
+        let content = out["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "let me check");
+        assert_eq!(content[1]["type"], "tool_use");
+        assert_eq!(content[1]["id"], "call_9");
+        assert_eq!(content[1]["name"], "read");
+        // JSON-stringified arguments -> parsed input object
+        assert_eq!(content[1]["input"], json!({ "path": "/tmp/x" }));
+
+        // Round-trip: feed the tool_use block back through request translation.
+        let req = json!({
+            "model": "llama3",
+            "messages": [
+                { "role": "assistant", "content": [content[1].clone()] }
+            ]
+        });
+        let rt = translate_request(&req).unwrap();
+        let call = &rt["messages"][0]["tool_calls"][0];
+        assert_eq!(call["function"]["name"], "read");
+        let args: Value =
+            serde_json::from_str(call["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args, json!({ "path": "/tmp/x" }));
+    }
+
+    #[test]
+    fn stream_text_then_tool_call_produces_the_correct_block_sequence() {
+        let mut t = StreamTranslator::new("llama3");
+        let mut events = Vec::new();
+        events.extend(
+            t.feed_bytes(b"data: {\"choices\":[{\"delta\":{\"content\":\"Let me look.\"}}]}\n\n"),
+        );
+        // Open a tool call: first delta carries id + name, then argument
+        // fragments arrive incrementally.
+        events.extend(t.feed_bytes(
+            b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"read\",\"arguments\":\"\"}}]}}]}\n\n",
+        ));
+        events.extend(t.feed_bytes(
+            b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"pa\"}}]}}]}\n\n",
+        ));
+        events.extend(t.feed_bytes(
+            b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"th\\\":\\\"/tmp/x\\\"}\"}}]}}]}\n\n",
+        ));
+        events.extend(t.feed_bytes(
+            b"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":12}}\n\n",
+        ));
+        events.extend(t.feed_bytes(b"data: [DONE]\n\n"));
+
+        let names = events_names(&events);
+        assert_eq!(
+            names,
+            vec![
+                "message_start",
+                "content_block_start", // text
+                "content_block_delta", // text
+                "content_block_stop",  // text closed when tool starts
+                "content_block_start", // tool_use
+                "content_block_delta", // input_json_delta partial
+                "content_block_delta", // input_json_delta rest
+                "content_block_stop",
+                "message_delta",
+                "message_stop",
+            ]
+        );
+
+        let tool_start = event_data(&events[4]);
+        assert_eq!(tool_start["index"], 1);
+        assert_eq!(tool_start["content_block"]["type"], "tool_use");
+        assert_eq!(tool_start["content_block"]["id"], "call_1");
+        assert_eq!(tool_start["content_block"]["name"], "read");
+        assert_eq!(tool_start["content_block"]["input"], json!({}));
+
+        // Partial JSON fragments concatenate to the full arguments string.
+        let mut partials = String::new();
+        for e in &events[5..7] {
+            let d = event_data(e);
+            assert_eq!(d["delta"]["type"], "input_json_delta");
+            partials.push_str(d["delta"]["partial_json"].as_str().unwrap_or(""));
+        }
+        let args: Value = serde_json::from_str(&partials).expect("fragments form valid JSON");
+        assert_eq!(args, json!({ "path": "/tmp/x" }));
+
+        let delta_msg = event_data(&events[8]);
+        assert_eq!(delta_msg["delta"]["stop_reason"], "tool_use");
+        assert_eq!(delta_msg["usage"]["output_tokens"], 12);
+    }
+
+    #[test]
+    fn stream_tool_only_message_skips_the_text_block() {
+        let mut t = StreamTranslator::new("m");
+        let mut events = Vec::new();
+        events.extend(t.feed_bytes(
+            b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"ls\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        ));
+        events.extend(t.feed_bytes(b"data: [DONE]\n\n"));
+        let names = events_names(&events);
+        assert_eq!(names[0], "message_start");
+        let start = event_data(&events[1]);
+        assert_eq!(start["content_block"]["type"], "tool_use");
+        assert_eq!(start["index"], 0);
+        assert_eq!(*names.last().unwrap(), "message_stop");
+        let delta_msg = event_data(&events[events.len() - 2]);
+        assert_eq!(delta_msg["delta"]["stop_reason"], "tool_use");
     }
 
     #[test]
@@ -475,26 +975,16 @@ mod tests {
         });
         let err = translate_request(&req).unwrap_err();
         assert!(err.contains("image"), "error names the block type: {err}");
-        let req2 = json!({
+    }
+
+    #[test]
+    fn thinking_stays_rejected_with_a_named_error() {
+        let req = json!({
             "model": "llama3",
-            "messages": [
-                { "role": "assistant", "content": [
-                    { "type": "tool_use", "id": "t1", "name": "read", "input": {} }
-                ]}
-            ]
+            "thinking": { "type": "enabled", "budget_tokens": 1024 },
+            "messages": [{ "role": "user", "content": "x" }]
         });
-        assert!(translate_request(&req2).unwrap_err().contains("tool_use"));
-        let req3 = json!({
-            "model": "llama3",
-            "messages": [
-                { "role": "user", "content": [
-                    { "type": "tool_result", "tool_use_id": "t1", "content": "ok" }
-                ]}
-            ]
-        });
-        assert!(translate_request(&req3)
-            .unwrap_err()
-            .contains("tool_result"));
+        assert!(translate_request(&req).unwrap_err().contains("thinking"));
     }
 
     #[test]
