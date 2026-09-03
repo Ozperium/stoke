@@ -27,6 +27,7 @@ use crate::AppState;
 pub fn validate_gateway_headers(auth: &crate::budget::Auth, headers: &HeaderMap) -> Option<String> {
     let stoke_key = headers
         .get("x-stoke-key")
+        .or_else(|| headers.get("x-api-key"))
         .and_then(|header| header.to_str().ok());
     let authorization = headers
         .get("authorization")

@@ -847,11 +847,18 @@ async fn chat_completions(
     uri: axum::http::Uri,
     Json(mut req): Json<ChatCompletionRequest>,
 ) -> Response {
-    // Auth check: if STOKE_API_KEYS is set, validate the Bearer token
+    // Auth check: gateway identity via x-stoke-key / x-api-key alias, or the
+    // legacy Bearer form — matching the global middleware gate above.
+    let stoke_key = headers
+        .get("x-stoke-key")
+        .or_else(|| headers.get("x-api-key"))
+        .and_then(|h| h.to_str().ok());
+    let bearer_from_stoke_header = stoke_key.map(|k| format!("Bearer {}", k.trim()));
     let auth_header = headers
         .get("authorization")
         .and_then(|h| h.to_str().ok())
-        .map(|s| s.to_string());
+        .map(|s| s.to_string())
+        .or(bearer_from_stoke_header);
     let api_key = match state.auth.validate(auth_header.as_deref()) {
         Some(k) => k,
         None => {
