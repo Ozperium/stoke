@@ -15,7 +15,7 @@
 use axum::{
     body::Body,
     extract::State,
-    http::{header::CONTENT_TYPE, HeaderMap, StatusCode},
+    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -90,6 +90,69 @@ pub const CLAUDE_SUBSCRIPTION_BILLING_MODE: &str = "claude_subscription";
 /// cannot and must not.
 fn provider_accepts_messages_translation(provider: &ProviderConfig) -> bool {
     provider.r#type == "openai_compatible" && matches!(provider.tier.as_str(), "local" | "remote")
+}
+
+fn provider_for_alias<'a>(
+    providers: &'a [ProviderConfig],
+    alias: &crate::model_alias::AliasTarget,
+) -> Option<&'a ProviderConfig> {
+    match alias {
+        crate::model_alias::AliasTarget::Codex { .. } => providers
+            .iter()
+            .find(|provider| provider.r#type == "codex_subscription"),
+        crate::model_alias::AliasTarget::Local { provider, .. } => {
+            providers.iter().find(|candidate| {
+                candidate.name == *provider && provider_accepts_messages_translation(candidate)
+            })
+        }
+    }
+}
+
+fn canonical_alias_model(provider: &ProviderConfig, requested: &str) -> String {
+    provider
+        .models
+        .iter()
+        .find(|candidate| candidate.as_str() == requested || candidate.replace('.', "-") == requested)
+        .cloned()
+        .unwrap_or_else(|| requested.to_string())
+}
+
+fn provider_for_messages_model<'a>(
+    providers: &'a [ProviderConfig],
+    model: &str,
+) -> Option<&'a ProviderConfig> {
+    providers
+        .iter()
+        .filter(|provider| {
+            provider.r#type == "anthropic"
+                || provider.r#type == "claude_subscription"
+                || provider_accepts_messages_translation(provider)
+        })
+        .find(|provider| {
+            !provider.models.is_empty() && provider.models.iter().any(|item| item == model)
+        })
+        .or_else(|| {
+            providers.iter().find(|provider| {
+                provider.r#type == "claude_subscription"
+                    && provider.models.iter().all(|item| item != model)
+                    && model.starts_with("claude-")
+            })
+        })
+        .or_else(|| {
+            providers.iter().find(|provider| {
+                (provider.r#type == "anthropic"
+                    || provider.r#type == "claude_subscription"
+                    || provider_accepts_messages_translation(provider))
+                    && provider.models.is_empty()
+            })
+        })
+        .or_else(|| {
+            providers.iter().find(|provider| {
+                provider.r#type == "anthropic"
+                    || provider.r#type == "claude_subscription"
+                    || provider_accepts_messages_translation(provider)
+            })
+        })
 }
 
 fn record_metered_decision(
@@ -272,11 +335,21 @@ pub async fn messages(
         None => return (StatusCode::UNAUTHORIZED, "Invalid or missing API key").into_response(),
     };
 
-    let model = req
+    let requested_model = req
         .get("model")
         .and_then(|m| m.as_str())
         .unwrap_or("")
         .to_string();
+    let alias = crate::model_alias::parse_alias(&requested_model);
+    let mut model = match alias.as_ref() {
+        Some(crate::model_alias::AliasTarget::Codex { model })
+        | Some(crate::model_alias::AliasTarget::Local { model, .. }) => model.clone(),
+        None => requested_model.clone(),
+    };
+    let mut req = req;
+    if alias.is_some() {
+        req["model"] = Value::String(model.clone());
+    }
     let stream = req.get("stream").and_then(|s| s.as_bool()).unwrap_or(false);
 
     // Resolve the upstream Anthropic provider. A pure config read — every
@@ -294,42 +367,12 @@ pub async fn messages(
     // `claude-*` model that no provider claims explicitly routes to
     // claude_subscription — it is the only upstream that can serve that
     // namespace. Any non-Claude ID still falls through to translation.
-    let provider = match state
-        .config
-        .providers
-        .iter()
-        .filter(|p| {
-            p.r#type == "anthropic"
-                || p.r#type == "claude_subscription"
-                || provider_accepts_messages_translation(p)
-        })
-        .find(|p| !p.models.is_empty() && p.models.iter().any(|m| m == &model))
-        .or_else(|| {
-            // Unlisted claude-* ID: subscription wins only if no other
-            // provider claims it — the same "explicit list beats wildcard"
-            // precedence as /v1/responses.
-            state.config.providers.iter().find(|p| {
-                p.r#type == "claude_subscription"
-                    && p.models.iter().all(|m| m != &model)
-                    && model.starts_with("claude-")
-            })
-        })
-        .or_else(|| {
-            state.config.providers.iter().find(|p| {
-                (p.r#type == "anthropic"
-                    || p.r#type == "claude_subscription"
-                    || provider_accepts_messages_translation(p))
-                    && p.models.is_empty()
-            })
-        })
-        .or_else(|| {
-            state.config.providers.iter().find(|p| {
-                p.r#type == "anthropic"
-                    || p.r#type == "claude_subscription"
-                    || provider_accepts_messages_translation(p)
-            })
-        }) {
-        Some(p) => p,
+    let provider = match alias.as_ref() {
+        Some(alias) => provider_for_alias(&state.config.providers, alias),
+        None => provider_for_messages_model(&state.config.providers, &model),
+    };
+    let provider = match provider {
+        Some(provider) => provider,
         None => {
             crate::record_decision(
                 &state,
@@ -337,19 +380,21 @@ pub async fn messages(
                 &model,
                 "anthropic",
                 "",
-                "No Anthropic provider configured",
+                "No compatible provider configured for the requested model",
                 0.0,
                 0,
             );
             return (
                 StatusCode::BAD_REQUEST,
-                "No Anthropic provider configured. Add a provider with type = \"anthropic\" \
-                 and base_url = \"https://api.anthropic.com\" (api_key_env for the key), \
-                 or a passthrough provider with type = \"claude_subscription\".",
+                "No compatible provider configured for the requested model alias",
             )
                 .into_response();
         }
     };
+    if alias.is_some() {
+        model = canonical_alias_model(provider, &model);
+        req["model"] = Value::String(model.clone());
+    }
     let subscription = subscription_bypasses_spend_accounting(provider);
     // The upstream credential for a subscription dispatch comes from the
     // Stoke-held OAuth store, NOT the client: the client authenticated to the
@@ -404,6 +449,10 @@ pub async fn messages(
             );
         }
         return (StatusCode::TOO_MANY_REQUESTS, reason).into_response();
+    }
+
+    if let Some(crate::model_alias::AliasTarget::Codex { .. }) = alias.as_ref() {
+        return forward_codex_messages(&state, provider, &requested_model, &req, stream).await;
     }
 
     // Price admission only gates metered dollar spend. A subscription provider
@@ -487,6 +536,362 @@ pub async fn messages(
     }
 }
 
+async fn forward_codex_messages(
+    state: &AppState,
+    provider: &ProviderConfig,
+    alias_model: &str,
+    req: &Value,
+    stream: bool,
+) -> Response {
+    let upstream = match crate::anthropic_translate::translate_request_to_responses(req) {
+        Ok(body) => body,
+        Err(reason) => return (StatusCode::BAD_REQUEST, reason).into_response(),
+    };
+    let url = match crate::subscription::subscription_responses_endpoint(&provider.base_url) {
+        Ok(url) => url,
+        Err(reason) => return (StatusCode::FORBIDDEN, reason).into_response(),
+    };
+    if let Err(reason) = crate::subscription::validate_oauth_destination(&url, "chatgpt.com") {
+        return (StatusCode::FORBIDDEN, reason).into_response();
+    }
+    let (token, account_id) = match load_codex_subscription_credential() {
+        Ok(credential) => credential,
+        Err(reason) => return (StatusCode::SERVICE_UNAVAILABLE, reason).into_response(),
+    };
+    let response = match (&*crate::subscription::OAUTH_CLIENT)
+        .post(url)
+        .bearer_auth(token)
+        .header("chatgpt-account-id", account_id)
+        .header("originator", "codex_cli_rs")
+        .header("content-type", "application/json")
+        .header("accept", "text/event-stream")
+        .json(&upstream)
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("Codex Messages bridge request failed: {error}"),
+            )
+                .into_response()
+        }
+    };
+    let status =
+        StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    if !status.is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return (status, text).into_response();
+    }
+
+    state.budget.record_receipt(true, 0.0);
+    let mut translator =
+        crate::anthropic_translate::ResponsesStreamTranslator::new(alias_model.to_string());
+    if stream {
+        let output = response.bytes_stream().map(move |chunk| {
+            chunk.map(|bytes| axum::body::Bytes::from(translator.feed_bytes(&bytes).concat()))
+        });
+        return Response::builder()
+            .header("content-type", "text/event-stream")
+            .header("cache-control", "no-cache")
+            .header(
+                BILLING_MODE_HEADER,
+                crate::responses::SUBSCRIPTION_BILLING_MODE,
+            )
+            .header("x-stoke-node", provider.name.as_str())
+            .body(Body::from_stream(output))
+            .unwrap();
+    }
+
+    let mut bytes = response.bytes_stream();
+    while let Some(chunk) = bytes.next().await {
+        match chunk {
+            Ok(chunk) => {
+                translator.feed_bytes(&chunk);
+            }
+            Err(error) => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    format!("Codex Messages bridge stream failed: {error}"),
+                )
+                    .into_response()
+            }
+        }
+    }
+    let mut output = Json(translator.finish_response()).into_response();
+    if let Ok(value) = crate::responses::SUBSCRIPTION_BILLING_MODE.parse() {
+        output.headers_mut().insert(BILLING_MODE_HEADER, value);
+    }
+    if let Ok(value) = provider.name.parse() {
+        output.headers_mut().insert("x-stoke-node", value);
+    }
+    output
+}
+
+fn load_codex_subscription_credential() -> Result<(String, String), String> {
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| "Codex subscription login is unavailable: HOME is not set".to_string())?;
+    let path = std::path::PathBuf::from(home).join(".codex/auth.json");
+    let raw = std::fs::read_to_string(path).map_err(|_| {
+        "Codex subscription login is unavailable; sign in with the native Codex app first"
+            .to_string()
+    })?;
+    let auth: Value = serde_json::from_str(&raw).map_err(|_| {
+        "Codex subscription login is invalid; sign in with the native Codex app again".to_string()
+    })?;
+    crate::codex_auth_parts(&auth)
+        .map(|(token, account_id)| (token.to_string(), account_id.to_string()))
+        .ok_or_else(|| {
+            "Codex subscription login is incomplete; sign in with the native Codex app again"
+                .to_string()
+        })
+}
+
+/// True when the upstream body is the flat plan refusing traffic rather than
+/// a model-level rejection: usage limit, rate limit, or overload. Only these
+/// justify a fallback; any other error is a real failure to surface.
+fn subscription_limit_error(status: StatusCode, body: &[u8]) -> bool {
+    if status != StatusCode::TOO_MANY_REQUESTS && status != StatusCode::SERVICE_UNAVAILABLE {
+        return false;
+    }
+    let parsed: Value = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let error_type = parsed
+        .pointer("/error/type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    matches!(
+        error_type,
+        "usage_limit_reached" | "rate_limit_error" | "overloaded_error"
+    )
+}
+
+/// Header names disclosed on a fallback response so the client can see exactly
+/// what served the request instead of the configured Claude model.
+const FALLBACK_HEADER: &str = "x-stoke-fallback-from";
+const FALLBACK_MODEL_HEADER: &str = "x-stoke-fallback-model";
+
+fn insert_fallback_headers(
+    response: &mut axum::response::Response,
+    from_model: &str,
+    served_by: &str,
+    served_model: &str,
+) {
+    if let Ok(v) = format!("claude {from_model}").parse() {
+        response.headers_mut().insert(FALLBACK_HEADER, v);
+    }
+    if let Ok(v) = served_by.parse() {
+        response.headers_mut().insert("x-stoke-node", v);
+    }
+    if let Ok(v) = served_model.parse() {
+        response.headers_mut().insert(FALLBACK_MODEL_HEADER, v);
+    }
+}
+
+/// The model a codex fallback candidate serves: the operator's configured
+/// first model. Stoke ships no model name: a discovery-only provider has no
+/// configured id to pin, and inventing one here would violate the zero-model-
+/// names invariant — the caller resolves such a provider's model live instead.
+fn codex_fallback_model(provider: &ProviderConfig) -> Option<String> {
+    provider.models.first().cloned()
+}
+
+/// The model a local translation fallback candidate serves: the operator's
+/// first configured model, else the gateway `default_model`. A discovery
+/// placeholder like "ollama:*" from a degraded /v1/models must never go
+/// upstream as a model id: with no configured model and no gateway default
+/// the candidate is skipped.
+fn local_fallback_model(
+    config: &crate::config::Config,
+    provider: &ProviderConfig,
+) -> Option<String> {
+    provider
+        .models
+        .first()
+        .cloned()
+        .filter(|model| !(model.ends_with(":*") || model == "*"))
+        .or_else(|| config.default_model.clone())
+}
+
+/// The request body a codex fallback sends upstream: the same Messages
+/// request with the model field retargeted from the refused Claude id to the
+/// model that will actually serve it, so the Responses backend never sees a
+/// claude-* id on the fallback path.
+fn codex_fallback_request(req: &Value, served_model: &str) -> Value {
+    let mut out = req.clone();
+    out["model"] = Value::String(served_model.to_string());
+    out
+}
+
+/// Budget admission for a local translation fallback candidate, run BEFORE any
+/// upstream call: the dispatch gate (`Pricer::allows`) decides the tier may
+/// serve the model at all, then `BudgetGuard::try_reserve` holds the most the
+/// request could cost against the CALLER'S authenticated key. The fallback
+/// rides a subscription refusal, but the dollars it may spend are the caller's.
+fn local_fallback_admission(
+    pricer: &crate::cost::Pricer,
+    budget: &Arc<crate::budget::BudgetGuard>,
+    api_key: &str,
+    provider: &ProviderConfig,
+    model: &str,
+    req: &Value,
+    assumed_max_output_tokens: u64,
+) -> Result<Option<crate::budget::SpendReservation>, String> {
+    // Same dispatch gate as direct /v1/messages dispatch: an unpriced model on
+    // this tier is refused before any upstream call, whatever `unpriced`
+    // policy the operator chose, the refusal is free.
+    pricer.allows(&provider.tier, model)?;
+    let prompt_text = extract_prompt_text(req);
+    let max_tokens = req
+        .get("max_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(assumed_max_output_tokens);
+    let max_cost = pricer.max_cost(model, (prompt_text.len() / 4) as u64, max_tokens);
+    budget.try_reserve(api_key, max_cost)
+}
+
+/// Serve the request from the configured fallback providers in order: the
+/// codex subscription bridge first, then local translation providers. Each
+/// candidate is attempted with the SAME translated request; the first success
+/// is disclosed via `x-stoke-fallback-*` headers, and a failed candidate is
+/// recorded on the dashboard before the next one is tried.
+async fn subscription_fallback_response(
+    state: &AppState,
+    api_key: &str,
+    from_model: &str,
+    req: &Value,
+    stream: bool,
+) -> Response {
+    let fb = &state.config.subscription_fallback;
+    if !fb.enabled {
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    }
+    let candidates = crate::model_alias::fallback_providers(
+        &state.config.providers,
+        state.config.subscription_fallback.codex_provider.as_deref(),
+        state.config.subscription_fallback.allow_local,
+    );
+    for candidate in candidates {
+        if candidate.r#type == "codex_subscription" {
+            // Stoke ships no model names: the candidate serves the operator's
+            // configured model, and a discovery-only provider — which has no
+            // configured id to pin — is skipped rather than sent an invented one.
+            let Some(served) = codex_fallback_model(candidate) else {
+                continue;
+            };
+            // The client asked for a Claude model the plan refused, so the
+            // body's model field is retargeted before the Responses
+            // translation; the backend must never see a claude-* id here.
+            let fallback_req = codex_fallback_request(req, &served);
+            let mut response =
+                forward_codex_messages(state, candidate, &served, &fallback_req, stream).await;
+            if response.status().is_success() {
+                tracing::info!(
+                    "/v1/messages subscription fallback: claude {} -> {} {}",
+                    from_model,
+                    candidate.name,
+                    served
+                );
+                insert_fallback_headers(&mut response, from_model, &candidate.name, &served);
+                return response;
+            }
+            record_metered_decision(
+                &state.dashboard,
+                candidate,
+                crate::dashboard::Outcome::Failed,
+                &served,
+                format!("Fallback attempt failed: {}", response.status()),
+                0.0,
+                0,
+            );
+        } else if provider_accepts_messages_translation(candidate) {
+            // The serving model is the operator's declared choice: the
+            // provider's first configured model, else the gateway
+            // `default_model`. A discovery placeholder like "ollama:*" must
+            // never be sent upstream as a model id — with no configured model
+            // and no gateway default the candidate is skipped.
+            let Some(served) = local_fallback_model(&state.config, candidate) else {
+                continue;
+            };
+            let mut fallback_req = req.clone();
+            fallback_req["model"] = Value::String(served.clone());
+            if stream {
+                fallback_req["stream"] = Value::Bool(true);
+            } else {
+                // The fallback always completes before responding (it must be
+                // able to inspect the status), so a nonstream dispatch must
+                // not carry "stream": true — Ollama would answer with SSE the
+                // buffered translator cannot parse.
+                fallback_req
+                    .as_object_mut()
+                    .expect("request body is an object")
+                    .remove("stream");
+            }
+            // The dollars this fallback may spend belong to the caller's
+            // authenticated key: run the same pricing admission and budget
+            // hold the direct dispatch would have run, BEFORE contacting the
+            // upstream. A refused hold skips the candidate — nothing spent.
+            let reservation = match local_fallback_admission(
+                crate::cost::global(),
+                &state.budget,
+                api_key,
+                candidate,
+                &served,
+                &fallback_req,
+                state.config.limits.assumed_max_output_tokens,
+            ) {
+                Ok(reservation) => reservation,
+                Err(reason) => {
+                    record_metered_decision(
+                        &state.dashboard,
+                        candidate,
+                        crate::dashboard::Outcome::Blocked,
+                        &served,
+                        format!("Fallback admission refused: {reason}"),
+                        0.0,
+                        0,
+                    );
+                    continue;
+                }
+            };
+            let response = if stream {
+                let mut response =
+                    forward_stream_openai(state, api_key, candidate, &served, &fallback_req, reservation)
+                        .await;
+                if response.status().is_success() {
+                    insert_fallback_headers(&mut response, from_model, &candidate.name, &served);
+                }
+                response
+            } else {
+                let _hold = reservation; // released when this branch ends
+                forward_once_openai(state, api_key, candidate, &served, &fallback_req).await
+            };
+            if response.status().is_success() {
+                tracing::info!(
+                    "/v1/messages subscription fallback: claude {} -> {} {}",
+                    from_model,
+                    candidate.name,
+                    served
+                );
+                let mut response = response;
+                insert_fallback_headers(&mut response, from_model, &candidate.name, &served);
+                return response;
+            }
+            tracing::warn!(
+                "subscription fallback candidate {} with model {} returned {}",
+                candidate.name,
+                served,
+                response.status()
+            );
+        }
+    }
+    // Nothing served the request; surface the original refusal shape.
+    StatusCode::TOO_MANY_REQUESTS.into_response()
+}
+
 /// Non-streaming: forward, record spend from the usage block, return the
 /// Anthropic response verbatim with cost/node surfaced in response headers
 /// (the body stays a clean Anthropic payload the client expects).
@@ -500,7 +905,8 @@ async fn forward_once(
     credential: Option<&SubscriptionCredential>,
 ) -> Response {
     if subscription_bypasses_spend_accounting(provider) {
-        return forward_once_subscription(state, provider, model, req, headers, credential).await;
+        return forward_once_subscription(state, api_key, provider, model, req, headers, credential)
+            .await;
     }
     // OpenAI-compatible local provider: translate Anthropic -> OpenAI, dispatch
     // to {base_url}/chat/completions, translate the response back. Unsupported
@@ -606,6 +1012,7 @@ async fn forward_once(
 /// must not be re-wrapped. No dollar accounting of any kind runs.
 async fn forward_once_subscription(
     state: &AppState,
+    api_key: &str,
     provider: &ProviderConfig,
     model: &str,
     req: &Value,
@@ -659,6 +1066,33 @@ async fn forward_once_subscription(
     let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let content_type = resp.headers().get(CONTENT_TYPE).cloned();
     let body = resp.bytes().await.unwrap_or_default();
+    if !status.is_success() && subscription_limit_error(status, &body) {
+        let fallback = subscription_fallback_response(state, api_key, model, req, false).await;
+        let fallback_status =
+            StatusCode::from_u16(fallback.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        if fallback_status.is_success() {
+            let (parts, fallback_body) = fallback.into_parts();
+            let fallback_headers = parts.headers;
+            let content_type = fallback_headers
+                .get(CONTENT_TYPE)
+                .cloned()
+                .unwrap_or_else(|| {
+                    content_type.unwrap_or_else(|| HeaderValue::from_static("application/json"))
+                });
+            let mut out = verbatim_response(fallback_status, Some(content_type), fallback_body);
+            for name in [FALLBACK_HEADER, FALLBACK_MODEL_HEADER, "x-stoke-node"] {
+                if let Some(value) = fallback_headers.get(name) {
+                    if let Ok(owned) =
+                        axum::http::HeaderValue::from_str(value.to_str().unwrap_or_default())
+                    {
+                        out.headers_mut().insert(name, owned);
+                    }
+                }
+            }
+            return out;
+        }
+        return verbatim_response(status, content_type, Body::from(body));
+    }
     record_metered_decision(
         &state.dashboard,
         provider,
@@ -1018,7 +1452,8 @@ async fn forward_stream(
     credential: Option<&SubscriptionCredential>,
 ) -> Response {
     if subscription_bypasses_spend_accounting(provider) {
-        return forward_stream_subscription(state, provider, model, req, headers, credential).await;
+        return forward_stream_subscription(state, api_key, provider, model, req, headers, credential)
+            .await;
     }
     // OpenAI-compatible local provider: translate the request, dispatch to
     // {base_url}/chat/completions, and emit Anthropic SSE events. Metering is
@@ -1106,6 +1541,7 @@ async fn forward_stream(
 /// dollar accounting of any kind happens. A success announces its billing mode.
 async fn forward_stream_subscription(
     state: &AppState,
+    api_key: &str,
     provider: &ProviderConfig,
     model: &str,
     req: &Value,
@@ -1174,6 +1610,35 @@ async fn forward_stream_subscription(
                 StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             let content_type = resp.headers().get(CONTENT_TYPE).cloned();
             let body = resp.bytes().await.unwrap_or_default();
+            if !status.is_success() && subscription_limit_error(status, &body) {
+                tracing::warn!(
+                    "stream subscription 429 detected: attempting fallback for {model}"
+                );
+                // A streaming client needs real SSE, so the fallback runs in
+                // streaming mode; it is wrapped verbatim afterwards.
+                let fallback = subscription_fallback_response(state, api_key, model, req, true).await;
+                let fallback_status = StatusCode::from_u16(fallback.status().as_u16())
+                    .unwrap_or(StatusCode::BAD_GATEWAY);
+                if fallback_status.is_success() {
+                    let (parts, fallback_body) = fallback.into_parts();
+                    let content_type = parts
+                        .headers
+                        .get(CONTENT_TYPE)
+                        .cloned()
+                        .unwrap_or_else(|| HeaderValue::from_static("text/event-stream"));
+                    let mut out = verbatim_response(fallback_status, Some(content_type), fallback_body);
+                    for name in [FALLBACK_HEADER, FALLBACK_MODEL_HEADER, "x-stoke-node"] {
+                        if let Some(value) = parts.headers.get(name) {
+                            if let Ok(owned) =
+                                HeaderValue::from_str(value.to_str().unwrap_or_default())
+                            {
+                                out.headers_mut().insert(name, owned);
+                            }
+                        }
+                    }
+                    return out;
+                }
+            }
             record_metered_decision(
                 &state.dashboard,
                 provider,
@@ -1341,6 +1806,24 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn subscription_limit_errors_are_matched_by_type_not_status_alone() {
+        let body = br#"{"type":"error","error":{"type":"rate_limit_error","message":"Error"},"request_id":"req_x"}"#;
+        assert!(subscription_limit_error(StatusCode::TOO_MANY_REQUESTS, body));
+        assert!(!subscription_limit_error(StatusCode::OK, body));
+        // A 400 invalid-request error is a real failure: never fall back.
+        let invalid = br#"{"type":"error","error":{"type":"invalid_request_error","message":"bad"}}"#;
+        assert!(!subscription_limit_error(StatusCode::BAD_REQUEST, invalid));
+        assert!(!subscription_limit_error(StatusCode::TOO_MANY_REQUESTS, invalid));
+        // usage limit (flat plan exhausted) and overload qualify.
+        let usage = br#"{"error":{"type":"usage_limit_reached","plan_type":"plus"}}"#;
+        assert!(subscription_limit_error(StatusCode::TOO_MANY_REQUESTS, usage));
+        let overloaded = br#"{"error":{"type":"overloaded_error"}}"#;
+        assert!(subscription_limit_error(StatusCode::SERVICE_UNAVAILABLE, overloaded));
+        // Non-JSON bodies fail closed to the original error path.
+        assert!(!subscription_limit_error(StatusCode::TOO_MANY_REQUESTS, b"not json"));
+    }
+
+    #[test]
     fn status_outcomes_distinguish_provider_success_from_failure() {
         assert_eq!(
             message_outcome(StatusCode::OK),
@@ -1350,6 +1833,89 @@ mod tests {
             message_outcome(StatusCode::BAD_GATEWAY),
             crate::dashboard::Outcome::Failed
         );
+    }
+
+    #[test]
+    fn local_fallback_admission_refuses_an_unpriced_model_before_any_upstream_call() {
+        // An empty tier is METERED by design (the ambiguous case must not
+        // default to free), so an unpriced model on it is refused by the same
+        // dispatch gate the direct path would run.
+        let pricer = crate::cost::Pricer::default(); // unpriced = Refuse, fail-closed
+        let budget = crate::budget::BudgetGuard::new();
+        let provider = fallback_provider("sketchy", "openai_compatible", "", &["mystery"]);
+        let req = json!({
+            "model": "mystery",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "hi"}]
+        });
+        let verdict = local_fallback_admission(
+            &pricer,
+            &std::sync::Arc::new(budget),
+            "client-key",
+            &provider,
+            "mystery",
+            &req,
+            1024,
+        );
+        assert!(verdict.is_err(), "unpriced fallback must fail closed");
+        assert!(verdict.unwrap_err().contains("no price configured"));
+    }
+
+    #[tokio::test]
+    async fn local_fallback_admission_holds_money_against_the_caller_key() {
+        let mut prices = std::collections::HashMap::new();
+        prices.insert(
+            "known".to_string(),
+            crate::cost::ModelPricing {
+                input_per_1m: 1.0,
+                output_per_1m: 2.0,
+            },
+        );
+        let pricer =
+            crate::cost::Pricer::new(prices, crate::cost::Unpriced::Refuse);
+        let budget = std::sync::Arc::new(crate::budget::BudgetGuard::new());
+        budget.set_budget("client-key", 0.01);
+        let provider = fallback_provider("ollama", "openai_compatible", "local", &["known"]);
+        // 1M prompt tokens assumed (len/4) + 64 output tokens at $2/1M = over
+        // the $0.01 cap, so the hold must be REFUSED for this key.
+        let big = json!({
+            "model": "known",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "x".repeat(80_000)}]
+        });
+        let refused = local_fallback_admission(
+            &pricer,
+            &budget,
+            "client-key",
+            &provider,
+            "known",
+            &big,
+            1024,
+        );
+        assert!(
+            refused.is_err(),
+            "a fallback that cannot be funded must not be dispatched"
+        );
+        // A request that fits takes a real hold on the CALLER's key.
+        let small = json!({
+            "model": "known",
+            "max_tokens": 4,
+            "messages": [{"role": "user", "content": "hi"}]
+        });
+        let hold = local_fallback_admission(
+            &pricer,
+            &budget,
+            "client-key",
+            &provider,
+            "known",
+            &small,
+            1024,
+        )
+        .unwrap()
+        .expect("a fundable fallback takes a hold");
+        assert!(budget.reserved_spend("client-key") > 0.0);
+        drop(hold);
+        assert_eq!(budget.reserved_spend("client-key"), 0.0);
     }
 
     #[test]
@@ -1369,6 +1935,126 @@ mod tests {
         assert!(text.contains("you are terse"));
         assert!(text.contains("hello"));
         assert!(text.contains("hi"));
+    }
+
+    fn fallback_provider(name: &str, ty: &str, tier: &str, models: &[&str]) -> ProviderConfig {
+        ProviderConfig {
+            name: name.into(),
+            r#type: ty.into(),
+            base_url: "http://127.0.0.1:1".into(),
+            api_key: String::new(),
+            api_key_env: String::new(),
+            models: models.iter().map(|m| m.to_string()).collect(),
+            tier: tier.into(),
+        }
+    }
+
+    fn fallback_config(
+        providers: Vec<ProviderConfig>,
+        default_model: Option<String>,
+    ) -> crate::config::Config {
+        // default_model is a top-level key, so it must precede [server].
+        let model_line = default_model
+            .map(|m| format!("default_model = \"{m}\"\n"))
+            .unwrap_or_default();
+        toml::from_str(&format!(
+            "{model_line}[server]\nhost = \"127.0.0.1\"\nport = 8787\n"
+        ))
+        .map(|mut c: crate::config::Config| {
+            c.providers = providers;
+            c
+        })
+        .expect("fallback test config must parse")
+    }
+
+    #[test]
+    fn codex_fallback_serves_the_operators_configured_model_never_an_invented_one() {
+        // The operator pinned a model on the codex provider: that is the id
+        // the fallback serves and discloses via x-stoke-fallback-model.
+        let pinned = fallback_provider("codex-sub", "codex_subscription", "subscription", &["gpt-future-codex"]);
+        assert_eq!(
+            codex_fallback_model(&pinned).as_deref(),
+            Some("gpt-future-codex")
+        );
+        // A discovery-only codex provider has NO configured id. Stoke ships
+        // zero model names: inventing one would put a hardcoded model string
+        // in src/ outside the pricing table, so the candidate is skipped.
+        let discovery_only = fallback_provider("codex-sub", "codex_subscription", "subscription", &[]);
+        assert_eq!(codex_fallback_model(&discovery_only), None);
+    }
+
+    #[test]
+    fn local_fallback_never_sends_a_discovery_placeholder_upstream() {
+        let config = fallback_config(vec![], Some("home-base".to_string()));
+        // A real configured model is served as-is.
+        let configured = fallback_provider("ollama", "openai_compatible", "local", &["ornith:9b"]);
+        assert_eq!(
+            local_fallback_model(&config, &configured).as_deref(),
+            Some("ornith:9b")
+        );
+        // A degraded /v1/models discovery placeholder must never become the
+        // upstream model id: the gateway default_model is used instead.
+        let placeholder = fallback_provider("ollama", "openai_compatible", "local", &["ollama:*"]);
+        assert_eq!(
+            local_fallback_model(&config, &placeholder).as_deref(),
+            Some("home-base")
+        );
+        // No configured model and no gateway default: the candidate cannot
+        // serve anything real, so it is skipped rather than sending "*".
+        let empty = fallback_config(vec![], None);
+        assert_eq!(local_fallback_model(&empty, &placeholder), None);
+    }
+
+    #[test]
+    fn codex_fallback_request_retargets_the_refused_claude_model() {
+        let req = json!({
+            "model": "claude-sonnet-5",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "hi"}]
+        });
+        let out = codex_fallback_request(&req, "gpt-future-codex");
+        assert_eq!(out["model"], "gpt-future-codex");
+        assert_eq!(out["max_tokens"], 64);
+        assert_eq!(out["messages"][0]["content"], "hi");
+    }
+
+    #[test]
+    fn explicit_alias_selects_only_its_named_provider_family() {
+        fn provider(name: &str, ty: &str, tier: &str) -> ProviderConfig {
+            ProviderConfig {
+                name: name.into(),
+                r#type: ty.into(),
+                base_url: "http://127.0.0.1:11434/v1".into(),
+                api_key: String::new(),
+                api_key_env: String::new(),
+                models: vec![],
+                tier: tier.into(),
+            }
+        }
+        let providers = vec![
+            provider("ollama", "openai_compatible", "local"),
+            provider("chatgpt", "codex_subscription", "subscription"),
+        ];
+        let local = crate::model_alias::AliasTarget::Local {
+            provider: "ollama".into(),
+            model: "ornith:9b".into(),
+        };
+        assert_eq!(
+            provider_for_alias(&providers, &local).unwrap().name,
+            "ollama"
+        );
+        let codex = crate::model_alias::AliasTarget::Codex {
+            model: "future-codex".into(),
+        };
+        assert_eq!(
+            provider_for_alias(&providers, &codex).unwrap().r#type,
+            "codex_subscription"
+        );
+        let missing = crate::model_alias::AliasTarget::Local {
+            provider: "missing".into(),
+            model: "ornith:9b".into(),
+        };
+        assert!(provider_for_alias(&providers, &missing).is_none());
     }
 
     #[test]

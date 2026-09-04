@@ -10,6 +10,7 @@ mod cost;
 mod dashboard;
 mod failover;
 mod messages;
+mod model_alias;
 mod nodes;
 mod plugins;
 mod responses;
@@ -798,50 +799,52 @@ async fn list_pricing() -> Json<Value> {
 }
 
 async fn list_models(State(state): State<AppState>) -> Json<Value> {
-    // Config lists the operator's static models. Subscription providers use
-    // live discovery with the same first-party OAuth identities as their
-    // request paths, so pickers show what each plan currently offers —
-    // including models newer than this Stoke build. On any discovery failure
-    // (not logged in, stale token, upstream error), fall back to that
-    // provider's configured list: model listing never depends on login state.
+    // Discover each provider's current catalog. Static config is only the
+    // fail-safe when discovery is unavailable. Explicit claude-stoke-* aliases
+    // let Claude Desktop select non-Anthropic models without pretending those
+    // models are Claude.
     let mut models: Vec<Value> = Vec::new();
     let mut claude_models: Option<Vec<String>> = None;
     let mut codex_models: Option<Vec<String>> = None;
     for provider in state.config.providers.iter() {
-        if provider.r#type == "claude_subscription" {
-            if claude_models.is_none() {
-                claude_models = Some(fetch_claude_subscription_models().await);
-            }
-            let discovered = claude_models.as_ref().unwrap();
-            if discovered.is_empty() {
-                for m in &provider.models {
-                    models.push(json!({ "id": m, "provider": provider.name }));
+        let discovered = match provider.r#type.as_str() {
+            "claude_subscription" => {
+                if claude_models.is_none() {
+                    claude_models = Some(fetch_claude_subscription_models().await);
                 }
+                claude_models.clone().unwrap_or_default()
+            }
+            "codex_subscription" => {
+                if codex_models.is_none() {
+                    codex_models = Some(fetch_codex_subscription_models().await);
+                }
+                codex_models.clone().unwrap_or_default()
+            }
+            "openai_compatible" if matches!(provider.tier.as_str(), "local" | "remote") => {
+                fetch_openai_compatible_models(provider).await
+            }
+            _ => Vec::new(),
+        };
+        let effective = if discovered.is_empty() {
+            if provider.models.is_empty() {
+                vec![format!("{}:*", provider.name)]
             } else {
-                for m in discovered {
-                    models.push(json!({ "id": m, "provider": provider.name }));
-                }
+                provider.models.clone()
             }
-        } else if provider.r#type == "codex_subscription" {
-            if codex_models.is_none() {
-                codex_models = Some(fetch_codex_subscription_models().await);
-            }
-            let discovered = codex_models.as_ref().unwrap();
-            if discovered.is_empty() {
-                for m in &provider.models {
-                    models.push(json!({ "id": m, "provider": provider.name }));
-                }
-            } else {
-                for m in discovered {
-                    models.push(json!({ "id": m, "provider": provider.name }));
-                }
-            }
-        } else if provider.models.is_empty() {
-            models.push(json!({ "id": format!("{}:*", provider.name), "provider": provider.name }));
         } else {
-            for m in &provider.models {
-                models.push(json!({ "id": m, "provider": provider.name }));
-            }
+            discovered
+        };
+
+        for model in &effective {
+            models.push(json!({ "id": model, "provider": provider.name }));
+        }
+        for alias in crate::model_alias::aliases_for_provider(
+            &provider.name,
+            &provider.r#type,
+            &provider.tier,
+            &effective,
+        ) {
+            models.push(json!({ "id": alias, "provider": provider.name }));
         }
     }
 
@@ -930,7 +933,7 @@ async fn fetch_codex_subscription_models() -> Vec<String> {
     codex_model_ids(&body)
 }
 
-fn codex_auth_parts(auth: &Value) -> Option<(&str, &str)> {
+pub(crate) fn codex_auth_parts(auth: &Value) -> Option<(&str, &str)> {
     let tokens = auth.get("tokens")?;
     let token = tokens.get("access_token")?.as_str()?.trim();
     let account_id = tokens.get("account_id")?.as_str()?.trim();
@@ -951,9 +954,39 @@ fn codex_model_ids(body: &Value) -> Vec<String> {
         .collect()
 }
 
+fn openai_model_ids(body: &Value) -> Vec<String> {
+    body.get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|model| model.get("id").and_then(Value::as_str))
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+async fn fetch_openai_compatible_models(provider: &ProviderConfig) -> Vec<String> {
+    let url = format!("{}/models", provider.base_url.trim_end_matches('/'));
+    let mut request = (&*router::SHARED_CLIENT).get(url);
+    let api_key = provider.resolve_api_key();
+    if !api_key.is_empty() {
+        request = request.bearer_auth(api_key);
+    }
+    let Ok(response) = request.send().await else {
+        return Vec::new();
+    };
+    if !response.status().is_success() {
+        return Vec::new();
+    }
+    match response.json::<Value>().await {
+        Ok(body) => openai_model_ids(&body),
+        Err(_) => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod subscription_model_discovery_tests {
-    use super::{codex_auth_parts, codex_model_ids};
+    use super::{codex_auth_parts, codex_model_ids, openai_model_ids};
     use serde_json::json;
 
     #[test]
@@ -969,6 +1002,22 @@ mod subscription_model_discovery_tests {
         assert_eq!(
             codex_model_ids(&body),
             vec!["future-primary".to_string(), "future-fast".to_string()]
+        );
+    }
+
+    #[test]
+    fn openai_catalog_uses_live_ids_in_upstream_order() {
+        let body = json!({
+            "data": [
+                {"id": "ornith:9b"},
+                {"id": "future.model"},
+                {"name": "missing-id"},
+                {"id": ""}
+            ]
+        });
+        assert_eq!(
+            openai_model_ids(&body),
+            vec!["ornith:9b".to_string(), "future.model".to_string()]
         );
     }
 

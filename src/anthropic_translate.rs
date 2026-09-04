@@ -246,6 +246,389 @@ fn translate_tool_choice(tc: &Value) -> Result<Value, String> {
     }
 }
 
+/// Translate Anthropic Messages into the OpenAI Responses shape used by the
+/// ChatGPT Codex subscription backend. The backend requires streaming even
+/// when the downstream Anthropic client asked for a collected response.
+pub fn translate_request_to_responses(req: &Value) -> Result<Value, String> {
+    for key in ["thinking", "server_tool_use", "web_search"] {
+        if req.get(key).map(|value| !value.is_null()).unwrap_or(false) {
+            return Err(format!(
+                "unsupported request feature '{key}': the Codex Messages bridge cannot represent it"
+            ));
+        }
+    }
+    if req
+        .get("stop_sequences")
+        .and_then(Value::as_array)
+        .map(|items| !items.is_empty())
+        .unwrap_or(false)
+    {
+        return Err(
+            "unsupported request feature 'stop_sequences': the Codex Responses backend has no equivalent"
+                .to_string(),
+        );
+    }
+
+    let model = req.get("model").and_then(Value::as_str).unwrap_or("");
+    let mut input = Vec::new();
+    if let Some(messages) = req.get("messages").and_then(Value::as_array) {
+        for message in messages {
+            responses_input_items(message, &mut input)?;
+        }
+    }
+    let mut out = json!({
+        "model": model,
+        "input": input,
+        "store": false,
+        "stream": true,
+    });
+    if let Some(system) = req.get("system").filter(|value| !value.is_null()) {
+        let instructions = content_text(system)?;
+        if !instructions.is_empty() {
+            out["instructions"] = json!(instructions);
+        }
+    }
+    if let Some(tools) = req.get("tools").filter(|value| !value.is_null()) {
+        let translated = translate_tools(tools)?;
+        out["tools"] = Value::Array(
+            translated
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|tool| {
+                    json!({
+                        "type": "function",
+                        "name": tool.pointer("/function/name").and_then(Value::as_str).unwrap_or(""),
+                        "description": tool.pointer("/function/description").and_then(Value::as_str).unwrap_or(""),
+                        "parameters": tool.pointer("/function/parameters").cloned().unwrap_or_else(|| json!({"type": "object"})),
+                        "strict": false,
+                    })
+                })
+                .collect(),
+        );
+    }
+    if let Some(choice) = req.get("tool_choice").filter(|value| !value.is_null()) {
+        out["tool_choice"] = match choice.get("type").and_then(Value::as_str) {
+            Some("auto") => json!("auto"),
+            Some("any") => json!("required"),
+            Some("tool") => json!({
+                "type": "function",
+                "name": choice.get("name").and_then(Value::as_str).unwrap_or(""),
+            }),
+            Some(other) => {
+                return Err(format!(
+                    "unsupported tool_choice type '{other}': the Codex Messages bridge supports auto, any and named tools"
+                ))
+            }
+            None => return Err("unsupported tool_choice: expected a type".to_string()),
+        };
+    }
+    Ok(out)
+}
+
+fn responses_input_items(message: &Value, out: &mut Vec<Value>) -> Result<(), String> {
+    let role = message
+        .get("role")
+        .and_then(Value::as_str)
+        .unwrap_or("user");
+    let content = message.get("content").unwrap_or(&Value::Null);
+    match content {
+        Value::String(text) => out.push(responses_message_item(role, text)),
+        Value::Null => out.push(responses_message_item(role, "")),
+        Value::Array(blocks) => {
+            let mut text = Vec::new();
+            for block in blocks {
+                match block
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("missing")
+                {
+                    "text" => text.push(
+                        block
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                    ),
+                    "tool_use" => {
+                        flush_responses_text(role, &mut text, out);
+                        let input = block.get("input").cloned().unwrap_or_else(|| json!({}));
+                        out.push(json!({
+                            "type": "function_call",
+                            "call_id": block.get("id").and_then(Value::as_str).unwrap_or(""),
+                            "name": block.get("name").and_then(Value::as_str).unwrap_or(""),
+                            "arguments": serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string()),
+                        }));
+                    }
+                    "tool_result" => {
+                        flush_responses_text(role, &mut text, out);
+                        out.push(json!({
+                            "type": "function_call_output",
+                            "call_id": block.get("tool_use_id").and_then(Value::as_str).unwrap_or(""),
+                            "output": content_text(block.get("content").unwrap_or(&Value::Null))?,
+                        }));
+                    }
+                    kind => {
+                        return Err(format!(
+                            "unsupported content block type '{kind}': the Codex Messages bridge supports text, tool_use and tool_result"
+                        ))
+                    }
+                }
+            }
+            flush_responses_text(role, &mut text, out);
+        }
+        _ => return Err("unsupported message content for the Codex Messages bridge".to_string()),
+    }
+    Ok(())
+}
+
+fn responses_message_item(role: &str, text: &str) -> Value {
+    let content_type = if role == "assistant" {
+        "output_text"
+    } else {
+        "input_text"
+    };
+    json!({
+        "role": role,
+        "content": [{"type": content_type, "text": text}],
+    })
+}
+
+fn flush_responses_text(role: &str, text: &mut Vec<String>, out: &mut Vec<Value>) {
+    if !text.is_empty() {
+        out.push(responses_message_item(
+            role,
+            &std::mem::take(text).join("\n"),
+        ));
+    }
+}
+
+#[derive(Debug)]
+enum ResponsesOpenBlock {
+    Text {
+        index: usize,
+        text: String,
+    },
+    Tool {
+        index: usize,
+        id: String,
+        name: String,
+        arguments: String,
+    },
+}
+
+pub struct ResponsesStreamTranslator {
+    model: String,
+    id: String,
+    partial: Vec<u8>,
+    started: bool,
+    next_index: usize,
+    open: Option<ResponsesOpenBlock>,
+    content: Vec<Value>,
+    input_tokens: u64,
+    output_tokens: u64,
+    used_tool: bool,
+}
+
+impl ResponsesStreamTranslator {
+    pub fn new(model: impl Into<String>) -> Self {
+        Self {
+            model: model.into(),
+            id: "msg_stoke_codex".to_string(),
+            partial: Vec::new(),
+            started: false,
+            next_index: 0,
+            open: None,
+            content: Vec::new(),
+            input_tokens: 0,
+            output_tokens: 0,
+            used_tool: false,
+        }
+    }
+
+    pub fn feed_bytes(&mut self, bytes: &[u8]) -> Vec<String> {
+        self.partial.extend_from_slice(bytes);
+        let mut events = Vec::new();
+        while let Some(end) = self.partial.windows(2).position(|window| window == b"\n\n") {
+            let frame: Vec<u8> = self.partial.drain(..end + 2).collect();
+            let frame = String::from_utf8_lossy(&frame);
+            for line in frame.lines() {
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if data == "[DONE]" {
+                        continue;
+                    }
+                    if let Ok(value) = serde_json::from_str::<Value>(data) {
+                        self.translate_event(&value, &mut events);
+                    }
+                }
+            }
+        }
+        events
+    }
+
+    pub fn finish_response(&self) -> Value {
+        json!({
+            "id": self.id,
+            "type": "message",
+            "role": "assistant",
+            "model": self.model,
+            "content": self.content,
+            "stop_reason": if self.used_tool { "tool_use" } else { "end_turn" },
+            "stop_sequence": Value::Null,
+            "usage": {
+                "input_tokens": self.input_tokens,
+                "output_tokens": self.output_tokens,
+            }
+        })
+    }
+
+    fn translate_event(&mut self, event: &Value, out: &mut Vec<String>) {
+        match event.get("type").and_then(Value::as_str).unwrap_or("") {
+            "response.created" => {
+                if let Some(id) = event.pointer("/response/id").and_then(Value::as_str) {
+                    self.id = id.replacen("resp_", "msg_", 1);
+                }
+                self.start(out);
+            }
+            "response.output_text.delta" => {
+                self.start(out);
+                self.ensure_text(out);
+                let delta = event.get("delta").and_then(Value::as_str).unwrap_or("");
+                if let Some(ResponsesOpenBlock::Text { index, text }) = self.open.as_mut() {
+                    text.push_str(delta);
+                    out.push(sse_event(
+                        "content_block_delta",
+                        json!({"type":"content_block_delta","index":*index,"delta":{"type":"text_delta","text":delta}}),
+                    ));
+                }
+            }
+            "response.output_item.added"
+                if event.pointer("/item/type").and_then(Value::as_str) == Some("function_call") =>
+            {
+                self.start(out);
+                self.close_open(out);
+                let index = self.next_index;
+                self.next_index += 1;
+                let id = event
+                    .pointer("/item/call_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let name = event
+                    .pointer("/item/name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                out.push(sse_event(
+                    "content_block_start",
+                    json!({"type":"content_block_start","index":index,"content_block":{"type":"tool_use","id":id,"name":name,"input":{}}}),
+                ));
+                self.used_tool = true;
+                self.open = Some(ResponsesOpenBlock::Tool {
+                    index,
+                    id,
+                    name,
+                    arguments: String::new(),
+                });
+            }
+            "response.function_call_arguments.delta" => {
+                let delta = event.get("delta").and_then(Value::as_str).unwrap_or("");
+                if let Some(ResponsesOpenBlock::Tool {
+                    index, arguments, ..
+                }) = self.open.as_mut()
+                {
+                    arguments.push_str(delta);
+                    out.push(sse_event(
+                        "content_block_delta",
+                        json!({"type":"content_block_delta","index":*index,"delta":{"type":"input_json_delta","partial_json":delta}}),
+                    ));
+                }
+            }
+            "response.completed" => {
+                self.start(out);
+                self.input_tokens = event
+                    .pointer("/response/usage/input_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                self.output_tokens = event
+                    .pointer("/response/usage/output_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                self.close_open(out);
+                out.push(sse_event(
+                    "message_delta",
+                    json!({"type":"message_delta","delta":{"stop_reason":if self.used_tool {"tool_use"} else {"end_turn"},"stop_sequence":Value::Null},"usage":{"output_tokens":self.output_tokens}}),
+                ));
+                out.push(sse_event("message_stop", json!({"type":"message_stop"})));
+            }
+            _ => {}
+        }
+    }
+
+    fn start(&mut self, out: &mut Vec<String>) {
+        if self.started {
+            return;
+        }
+        self.started = true;
+        out.push(sse_event(
+            "message_start",
+            json!({"type":"message_start","message":{"id":self.id,"type":"message","role":"assistant","model":self.model,"content":[],"stop_reason":Value::Null,"stop_sequence":Value::Null,"usage":{"input_tokens":0,"output_tokens":0}}}),
+        ));
+    }
+
+    fn ensure_text(&mut self, out: &mut Vec<String>) {
+        if matches!(self.open, Some(ResponsesOpenBlock::Text { .. })) {
+            return;
+        }
+        self.close_open(out);
+        let index = self.next_index;
+        self.next_index += 1;
+        out.push(sse_event(
+            "content_block_start",
+            json!({"type":"content_block_start","index":index,"content_block":{"type":"text","text":""}}),
+        ));
+        self.open = Some(ResponsesOpenBlock::Text {
+            index,
+            text: String::new(),
+        });
+    }
+
+    fn close_open(&mut self, out: &mut Vec<String>) {
+        let Some(block) = self.open.take() else {
+            return;
+        };
+        let (index, content) = match block {
+            ResponsesOpenBlock::Text { index, text } => (index, json!({"type":"text","text":text})),
+            ResponsesOpenBlock::Tool {
+                index,
+                id,
+                name,
+                arguments,
+            } => (
+                index,
+                json!({
+                    "type":"tool_use",
+                    "id":id,
+                    "name":name,
+                    "input":serde_json::from_str::<Value>(&arguments).unwrap_or_else(|_| json!({})),
+                }),
+            ),
+        };
+        self.content.push(content);
+        out.push(sse_event(
+            "content_block_stop",
+            json!({"type":"content_block_stop","index":index}),
+        ));
+    }
+}
+
+fn sse_event(event: &str, data: Value) -> String {
+    format!(
+        "event: {event}\ndata: {}\n\n",
+        serde_json::to_string(&data).unwrap_or_else(|_| "{}".to_string())
+    )
+}
+
 /// Map an OpenAI `finish_reason` to an Anthropic `stop_reason`.
 pub fn map_stop_reason(finish_reason: &str) -> &'static str {
     match finish_reason {
@@ -1277,6 +1660,87 @@ mod tests {
                 _ => {}
             }
         }
+    }
+
+    #[test]
+    fn responses_request_preserves_text_and_tools_without_unsupported_limits() {
+        let req = json!({
+            "model": "gpt-future",
+            "system": "be brief",
+            "max_tokens": 64,
+            "temperature": 0.2,
+            "top_p": 0.8,
+            "stream": true,
+            "messages": [{"role": "user", "content": "weather in Paris"}],
+            "tools": [{
+                "name": "get_weather",
+                "description": "Get weather",
+                "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}}
+            }],
+            "tool_choice": {"type": "any"}
+        });
+        let out = translate_request_to_responses(&req).unwrap();
+        assert_eq!(out["model"], "gpt-future");
+        assert_eq!(out["instructions"], "be brief");
+        assert!(out.get("max_output_tokens").is_none());
+        assert!(out.get("temperature").is_none());
+        assert!(out.get("top_p").is_none());
+        assert_eq!(out["stream"], true);
+        assert_eq!(out["store"], false);
+        assert_eq!(out["input"][0]["role"], "user");
+        assert_eq!(out["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(out["tools"][0]["type"], "function");
+        assert_eq!(out["tools"][0]["name"], "get_weather");
+        assert_eq!(out["tool_choice"], "required");
+    }
+
+    #[test]
+    fn responses_stream_becomes_legal_anthropic_text_sse() {
+        let mut translator = ResponsesStreamTranslator::new("claude-stoke-codex--gpt-future");
+        let mut events = translator.feed_bytes(
+            b"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n",
+        );
+        events.extend(translator.feed_bytes(
+            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n",
+        ));
+        events.extend(translator.feed_bytes(
+            b"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}}\n\n",
+        ));
+        let joined = events.join("");
+        assert!(joined.contains("event: message_start"));
+        assert!(joined.contains("\"model\":\"claude-stoke-codex--gpt-future\""));
+        assert!(joined.contains("event: content_block_start"));
+        assert!(joined.contains("\"type\":\"text_delta\""));
+        assert!(joined.contains("\"text\":\"hello\""));
+        assert!(joined.contains("\"stop_reason\":\"end_turn\""));
+        assert!(joined.contains("event: message_stop"));
+        let response = translator.finish_response();
+        assert_eq!(response["content"][0]["text"], "hello");
+        assert_eq!(response["usage"]["input_tokens"], 3);
+    }
+
+    #[test]
+    fn responses_function_call_becomes_anthropic_tool_use() {
+        let mut translator = ResponsesStreamTranslator::new("alias");
+        translator.feed_bytes(
+            b"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n",
+        );
+        let mut events = translator.feed_bytes(
+            b"data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"get_weather\",\"arguments\":\"\"}}\n\n",
+        );
+        events.extend(translator.feed_bytes(
+            b"data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\\\"city\\\":\\\"Paris\\\"}\"}\n\n",
+        ));
+        events.extend(translator.feed_bytes(
+            b"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":4,\"output_tokens\":3}}}\n\n",
+        ));
+        let joined = events.join("");
+        assert!(joined.contains("\"type\":\"tool_use\""));
+        assert!(joined.contains("\"partial_json\":\"{\\\"city"));
+        assert!(joined.contains("\"stop_reason\":\"tool_use\""));
+        let response = translator.finish_response();
+        assert_eq!(response["content"][0]["type"], "tool_use");
+        assert_eq!(response["content"][0]["input"]["city"], "Paris");
     }
 
     #[test]

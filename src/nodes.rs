@@ -700,6 +700,7 @@ mod tests {
             auto_route: Default::default(),
             pricing: Default::default(),
             limits: Default::default(),
+            subscription_fallback: Default::default(),
         };
         NodeRegistry::from_config(&config)
     }

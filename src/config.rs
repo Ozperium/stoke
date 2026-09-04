@@ -32,6 +32,10 @@ pub struct Config {
     /// Ceilings on how much work one inbound request may fan out into.
     #[serde(default)]
     pub limits: LimitsConfig,
+    /// Subscription fallback: what a `claude_subscription` provider may do when
+    /// the flat plan refuses traffic. Off by default.
+    #[serde(default)]
+    pub subscription_fallback: SubscriptionFallbackConfig,
 }
 
 /// Operator-declared model prices.
@@ -48,6 +52,33 @@ pub struct PricingConfig {
 
 fn default_unpriced() -> String {
     "refuse".to_string()
+}
+
+/// What a `claude_subscription` provider may do when the flat plan refuses
+/// traffic (usage limit / rate limit). Stoke ships no model names here: the
+/// fallback is described by provider NAME and family, resolved against the
+/// live provider list at request time.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SubscriptionFallbackConfig {
+    /// Off by default — a subscription serving its own plan never silently
+    /// substitutes another backend.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Codex-family provider NAME to try when Anthropic returns 429. Empty
+    /// means the first `codex_subscription` provider, and only when that
+    /// provider has no explicit `models` list (operator opted into discovery).
+    #[serde(default)]
+    pub codex_provider: Option<String>,
+    /// Whether local openai_compatible providers (tier local|remote) may serve
+    /// as the last resort. Off by default.
+    #[serde(default)]
+    pub allow_local: bool,
+}
+
+impl SubscriptionFallbackConfig {
+    pub fn is_default(&self) -> bool {
+        !self.enabled && self.codex_provider.is_none() && !self.allow_local
+    }
 }
 
 /// One inbound HTTP request can become many billed provider calls. `routing`,
@@ -716,7 +747,10 @@ tier = "subscription"
                  base_url = \"{hostile}\"\ntier = \"subscription\"\n"
             ));
             let err = c.validate().unwrap_err();
-            assert!(err.contains("claude-sub"), "error must name the provider: {err}");
+            assert!(
+                err.contains("claude-sub"),
+                "error must name the provider: {err}"
+            );
             assert!(
                 err.contains("api.anthropic.com"),
                 "error must name the required base_url: {err}"
@@ -741,13 +775,19 @@ tier = "subscription"
     fn claude_subscription_must_not_declare_an_api_key() {
         // A subscription provider's credential is the OAuth token store; a
         // static api_key beside it would silently override the OAuth flow.
-        for key_field in ["api_key = \"sk-ant-x\"", "api_key_env = \"ANTHROPIC_API_KEY\""] {
+        for key_field in [
+            "api_key = \"sk-ant-x\"",
+            "api_key_env = \"ANTHROPIC_API_KEY\"",
+        ] {
             let c = cfg(&format!(
                 "{BASE}\n[[providers]]\nname = \"claude-sub\"\ntype = \"claude_subscription\"\n\
                  base_url = \"https://api.anthropic.com\"\ntier = \"subscription\"\n{key_field}\n"
             ));
             let err = c.validate().unwrap_err();
-            assert!(err.contains("claude-sub"), "error must name the provider: {err}");
+            assert!(
+                err.contains("claude-sub"),
+                "error must name the provider: {err}"
+            );
             assert!(
                 err.contains("api_key"),
                 "error must explain that subscription providers take no api_key: {err}"
