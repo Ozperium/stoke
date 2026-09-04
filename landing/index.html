@@ -305,7 +305,7 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
       <div class="hero-copy">
         <div class="kicker">Enforce, don't just observe.</div>
         <h1>Your agents. Your machines.<br><span class="hl">Your rules.</span></h1>
-        <p class="hero-sub">Route to your own hardware — or approved cloud when you choose. Keep sensitive routes off unapproved providers; redact known credentials before dispatch. Refuse anything over budget. Kill loops in seconds. One ~5.5&nbsp;MB Rust binary that decides <em>before</em> the money is spent, with an embedded control room at <code>/ui</code> so you can watch enforcement happen in real time.</p>
+        <p class="hero-sub">Route to your own hardware — or approved cloud when you choose. Keep sensitive routes off unapproved providers; redact known credentials before dispatch. Refuse anything over budget. Kill loops in seconds. Run Claude Code on your local models or a flat subscription plan, with disclosed fallback when the plan refuses. One ~5.5&nbsp;MB Rust binary that decides <em>before</em> the money is spent, with an embedded control room at <code>/ui</code>.</p>
         <div class="hero-cta">
           <a data-track="install_cta_clicked" href="#install" class="btn btn-primary">Install in 60 seconds</a>
           <a href="#control-room" class="btn btn-secondary">See it live</a>
@@ -403,7 +403,7 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
     <div class="section-tag">The local capacity layer</div>
     <h2>One endpoint for the capacity you configure.</h2>
     <div class="compatibility">
-      <div class="compatibility-card"><h3>Clients in front</h3><p>Point OpenAI-compatible clients or Claude Code at Stoke. Production integrations stay in place.</p></div>
+      <div class="compatibility-card"><h3>Clients in front</h3><p>Point OpenAI-compatible clients, Codex, or Claude Code at Stoke. Claude Code can serve from local chat models or a Codex subscription via explicit <code class="inline">claude-stoke-*</code> aliases; flat-plan refusals degrade to your configured capacity, disclosed by response headers.</p></div>
       <div class="compatibility-card"><h3>Capacity behind it</h3><p>Stoke discovers model inventory and health through <code class="inline">/v1/nodes</code>, then routes across configured Ollama nodes and gateways without manual topology selection.</p></div>
     </div>
     <div class="routing-flow" aria-label="Node discovery and routing flow">

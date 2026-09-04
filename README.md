@@ -237,7 +237,9 @@ STOKE_API_KEY=stk-mykey stoke run claude
 STOKE_API_KEY=stk-mykey stoke run claude -- --print "Review this repository"
 ```
 
-`stoke run claude` sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` for the child process and removes `ANTHROPIC_API_KEY` from that child. The separately running Stoke server keeps the real upstream credential. `POST /v1/messages` runs auth, budget, rate, and loop enforcement, then forwards the request and Claude Code's `anthropic-*` feature headers to Anthropic. (Running Claude Code against your *local* models needs Anthropic↔OpenAI translation — that's on the roadmap; today it forwards to an Anthropic upstream.)
+`stoke run claude` sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` for the child process and removes `ANTHROPIC_API_KEY` from that child. The separately running Stoke server keeps the real upstream credential. `POST /v1/messages` runs auth, budget, rate, and loop enforcement, then forwards the request and Claude Code's `anthropic-*` feature headers to Anthropic.
+
+**Running Claude Code against local or Codex models (alias bridge).** `/v1/messages` accepts explicit aliases: `claude-stoke-codex--<model>` dispatches to a configured `codex_subscription` provider over the Responses API, and `claude-stoke-local--<provider>--<model>` translates Messages into chat completions for an `openai_compatible` provider on tier `local`. `GET /v1/models` lists the aliases it will actually route — catalog and dispatch share the same admission gates. Model IDs come from config or live discovery; Stoke ships no model names.
 
 **Codex CLI** uses OpenAI's Responses API. Configure an OpenAI upstream provider and list the Codex model it may use, then run:
 
@@ -266,6 +268,17 @@ env_http_headers = { "x-stoke-key" = "STOKE_API_KEY" }
 Fully quit and reopen the app so it picks up the config, then start a **new** task — a running task keeps its old provider. The app keeps its normal ChatGPT subscription login; Stoke consumes the `x-stoke-key` header for its own enforcement. If the app cannot see `STOKE_API_KEY` in its environment, the desktop app may load it from an owner-only `~/.codex/.env` — create that file with only the variable, readable by your user alone.
 
 What Stoke does with the subscription credential: ChatGPT OAuth/account identity is forwarded **only** for the `codex_subscription` provider, and only to the exact first-party ChatGPT endpoint (`https://chatgpt.com/backend-api/codex`, HTTPS, redirects disabled). That identity is stripped from requests to Ollama and every other provider. Subscription traffic has no per-request price, so it is **not** reported as API-dollar spend in `stoke_cost` or the budget ledger; rate limiting and loop detection still apply to it.
+
+**Claude subscription with opt-in fallback.** A `claude_subscription` provider bills the operator's flat Claude plan (OAuth held by Stoke, exact `api.anthropic.com` destination, redirects disabled). When the plan refuses traffic with a qualified limit error (429/503 plus `usage_limit_reached`/`rate_limit_error`/`overloaded_error`), Stoke can fall back to a named `codex_subscription` provider or to `openai_compatible` tier-`local` providers — off by default, enabled per config:
+
+```toml
+[subscription_fallback]
+enabled = true
+codex_provider = "chatgpt"
+allow_local = true
+```
+
+A successful fallback is disclosed with `x-stoke-fallback-from`, `x-stoke-fallback-model`, and `x-stoke-node` headers. Dollars a local fallback may spend belong to the caller: the same pricing gate and budget hold the direct path runs apply before any upstream call, and spend is recorded on the caller's key.
 
 To swap the desktop app onto a local model instead, set top-level `model = "<your-local-model>"` in the same `~/.codex/config.toml` and configure that model under a regular local Ollama provider in `stoke.toml`; no protocol translation is needed when Ollama supports `/v1/responses`.
 
@@ -337,10 +350,10 @@ Planned, not built. Nothing here is a current-feature claim.
 
 - [x] Anthropic Messages API endpoint (`/v1/messages`) — Claude Code via `ANTHROPIC_BASE_URL`, enforced passthrough to an `anthropic` provider *(shipped)*
 - [x] OpenAI Responses API endpoint (`/v1/responses`) and `stoke run claude|codex` launchers *(shipped)*
-- [ ] Anthropic ↔ OpenAI translation, so Claude Code can run against your **local** models (today `/v1/messages` forwards to an Anthropic upstream)
+- [x] Anthropic ↔ OpenAI translation, so Claude Code can run against your **local** models — `/v1/messages` alias bridge to `codex_subscription` (Responses) and `openai_compatible` tier-`local` chat providers *(shipped)*
 - [ ] Homebrew formula and Docker images *(release CI and Dockerfile are in the repo; first tagged release pending)*
 - [x] Cost accounting for streamed responses (SSE usage parsing) so streamed spend counts against budget caps
-- [ ] Quota-aware cloud escalation (429 cooldown) and a degrade-to-local policy action
+- [x] Quota-aware subscription fallback: qualified Claude-plan refusals (usage limit / rate limit / overload) can degrade to a named Codex subscription or local models, off by default and disclosed via response headers *(shipped)*
 - [ ] Per-key loop-detection thresholds in TOML (budget caps and rate limits are already configured per key today)
 - [ ] Per-tenant usage entitlement enforcement (per-customer caps for AI products — if you need this, open an issue and talk to us)
 - [ ] Enforcement benchmark harness with published p99 overhead, time-to-trip, and false-positive rates
