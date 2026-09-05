@@ -9,6 +9,7 @@ mod config;
 mod cost;
 mod dashboard;
 mod failover;
+mod ledger;
 mod messages;
 mod model_alias;
 mod nodes;
@@ -172,7 +173,33 @@ async fn main() {
     nodes::spawn_poller(node_registry.clone());
 
     // Apply per-key enforcement policy from [[keys]] config to the budget guard.
-    let budget = BudgetGuard::new();
+    let mut budget = BudgetGuard::new();
+    // Durable ledger (ADR 0001): spend, holds, rate window, and loop blocks
+    // survive restart and crash. Unusable storage fails closed at boot — a
+    // gateway that cannot persist its ledger must not pretend to enforce.
+    let ledger = match std::env::var("STOKE_LEDGER_PATH") {
+        Ok(path) if !path.is_empty() => crate::ledger::Ledger::open(std::path::Path::new(&path)),
+        _ => {
+            let home = std::env::var("HOME").unwrap_or_default();
+            crate::ledger::Ledger::open(
+                std::path::Path::new(&home).join(".stoke").join("ledger.db").as_path(),
+            )
+        }
+    }
+    .or_else(|e| {
+        // No silent fallback: refuse to serve metered traffic unenforced.
+        Err::<crate::ledger::Ledger, String>(format!("ledger: {e}"))
+    });
+    let ledger = match ledger {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("{e}");
+            eprintln!("stoke: {e}");
+            std::process::exit(1);
+        }
+    };
+    tracing::info!("ledger: durable budget enforcement active");
+    budget.attach_ledger(std::sync::Arc::new(ledger));
     for policy in &config.keys {
         if policy.budget_usd > 0.0 {
             budget.set_budget(&policy.key, policy.budget_usd);
@@ -523,13 +550,27 @@ async fn ttft_stats(State(state): State<AppState>) -> Json<Value> {
     Json(json!({"providers": providers}))
 }
 
-async fn budget_stats(State(state): State<AppState>) -> Json<Value> {
+async fn budget_stats(State(state): State<AppState>, headers: axum::http::HeaderMap) -> Json<Value> {
+    // A client key sees ONLY its own durable snapshot (ADR 0001 / Task 2.4).
+    // The all-tenants view is an operator concern (dashboard/CLI), not an API.
+    let caller = crate::messages::validate_gateway_headers(&state.auth, &headers);
     let stats = state.budget.stats();
     let keys: Vec<Value> = stats
         .iter()
+        .filter(|(key, _, _, _, _, _)| {
+            caller
+                .as_ref()
+                .map(|k| k == key)
+                .unwrap_or(true) // dev-mode (no auth): keep the legacy view
+        })
         .map(|(key, spend, limit, recent_rpm, estimated, reserved)| {
             json!({
+                // Legacy 8-char prefix (not a raw secret) for consumers that
+                // already key off `key`.
                 "key": &key[..8.min(key.len())],
+                // key_id — the stable ledger identity; raw secrets never
+                // appear in operator-facing responses (prefix is not an id).
+                "key_id": state.budget.durable_key_id_for(key),
                 "spend_usd": spend,
                 "limit_usd": limit,
                 "recent_requests": recent_rpm,
@@ -539,6 +580,9 @@ async fn budget_stats(State(state): State<AppState>) -> Json<Value> {
                 // Money held for requests still in flight. Not yet spent, but the cap
                 // treats it as though it were — otherwise concurrent requests all pass.
                 "reserved_usd": reserved,
+                // Durable figures come from the ledger; the in-memory mirror
+                // is per-process and may trail after a restart.
+                "durable": true,
             })
         })
         .collect();

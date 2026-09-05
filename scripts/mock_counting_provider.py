@@ -93,6 +93,12 @@ class Handler(BaseHTTPRequestHandler):
         if req.get("stream"):
             self._stream(req)
         else:
+             # Honor --slow-ms on the non-stream path too: it pauses BEFORE the
+             # reply so an in-flight spend reservation is observably open for a
+             # crash probe. Without this a non-stream request completes in
+             # microseconds and the hold is released long before a test can look.
+            if SLOW_MS:
+                time.sleep(SLOW_MS / 1000.0)
             self._json({
                 "id": "mock-1", "object": "chat.completion", "created": 0,
                 "model": req.get("model", "mock"),

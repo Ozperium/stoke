@@ -77,10 +77,10 @@ tier = "remote"
 EOF
 
 echo "==> starting stoke A (:$A_PORT) and B (:$B_PORT)"
-(cd "$WORK_A" && exec env STOKE_DEV=1 STOKE_NODE_POLL_SECS=1 \
+(cd "$WORK_A" && exec env STOKE_LEDGER_PATH="$WORK_A/ledger.db" STOKE_DEV=1 STOKE_NODE_POLL_SECS=1 \
   "$REPO_DIR/target/debug/stoke" > "$WORK_A/stoke.log" 2>&1) &
 PIDS+=($!)
-(cd "$WORK_B" && exec env STOKE_API_KEYS="$B_KEY" STOKE_NODE_POLL_SECS=1 \
+(cd "$WORK_B" && exec env STOKE_LEDGER_PATH="$WORK_B/ledger.db" STOKE_API_KEYS="$B_KEY" STOKE_NODE_POLL_SECS=1 \
   "$REPO_DIR/target/debug/stoke" > "$WORK_B/stoke.log" 2>&1) &
 PIDS+=($!)
 

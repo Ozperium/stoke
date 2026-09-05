@@ -34,6 +34,10 @@ pub struct SpendReservation {
     budget: Arc<BudgetGuard>,
     key: String,
     amount: f64,
+    /// Durable counterpart: the ledger reservation row written before the
+    /// provider call (ADR 0001). `None` when no durable hold was taken
+    /// (zero amount or unlimited key).
+    ledger: Option<std::sync::Arc<crate::ledger::Ledger>>,
 }
 
 impl std::fmt::Debug for SpendReservation {
@@ -54,10 +58,27 @@ impl SpendReservation {
 impl Drop for SpendReservation {
     fn drop(&mut self) {
         self.budget.release(&self.key, self.amount);
+        // Mirror the release durably: without this a refusal/early-return
+        // after a durable reserve would leave the hold counting forever.
+        if let Some(ledger) = self.ledger.take() {
+            let key_id = self.budget.durable_key_id(&self.key);
+            if let Err(e) = ledger.release(&key_id, self.amount) {
+                tracing::error!(
+                    "ledger: durable release failed for key_id {}: {} —                      run stoke ledger reconcile",
+                    &key_id[..12.min(key_id.len())],
+                    e
+                );
+            }
+        }
     }
 }
 
 pub struct BudgetGuard {
+    /// Durable ledger (ADR 0001). None = memory-only mode (tests); the
+    /// gateway always wires one.
+    ledger: Option<Arc<crate::ledger::Ledger>>,
+    /// key -> derived stable ledger id (cache; raw keys never stored).
+    key_ids: RwLock<HashMap<String, String>>,
     /// API key -> cumulative spend in USD
     spend: RwLock<HashMap<String, f64>>,
     /// The share of `spend` that Stoke estimated rather than read from a
@@ -100,6 +121,8 @@ pub struct BudgetGuard {
 impl BudgetGuard {
     pub fn new() -> Self {
         Self {
+            ledger: None,
+            key_ids: RwLock::new(HashMap::new()),
             spend: RwLock::new(HashMap::new()),
             estimated: RwLock::new(HashMap::new()),
             reserved: RwLock::new(HashMap::new()),
@@ -155,6 +178,41 @@ impl BudgetGuard {
     pub fn receipts(&self) -> (u64, u64, f64) {
         let r = self.receipts.read().unwrap();
         (r.requests, r.zero_marginal, r.avoided_usd_est)
+    }
+
+    /// Attach the durable ledger. Called once at boot, before any request.
+    pub fn attach_ledger(&mut self, ledger: Arc<crate::ledger::Ledger>) {
+        self.ledger = Some(ledger);
+    }
+
+    /// Stable durable id for a key. Raw keys never enter the ledger: the id
+    /// is SHA-256 over (secret, per-installation salt), hex. Secret rotation
+    /// with the same id keeps spend; the id survives config reordering
+    /// because the salt lives in the ledger itself.
+    /// Public read for /v1/budget: report the stable id, never the secret.
+    pub fn durable_key_id_for(&self, key: &str) -> String {
+        self.durable_key_id(key)
+    }
+    fn durable_key_id(&self, key: &str) -> String {
+        if let Some(id) = self.key_ids.read().unwrap().get(key) {
+            return id.clone();
+        }
+        let salt = self
+            .ledger
+            .as_ref()
+            .and_then(|l| l.install_salt().ok())
+            .unwrap_or_default();
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&salt);
+        hasher.update(key.as_bytes());
+        let digest = hasher.finalize();
+        let id = hex::encode(digest);
+        self.key_ids
+            .write()
+            .unwrap()
+            .insert(key.to_string(), id.clone());
+        id
     }
 
     /// Set a budget limit for an API key. Applied at startup from [[keys]] config.
@@ -219,26 +277,53 @@ impl BudgetGuard {
             let limits = self.limits.read().unwrap();
             let limit = limits.get(key).copied().unwrap_or(0.0);
             if limit > 0.0 {
-                // Locks are always taken limits -> spend -> reserved, everywhere.
+                 // Locks are always taken limits -> spend -> reserved, everywhere.
                 let spend = self.spend.read().unwrap();
                 let reserved = self.reserved.read().unwrap();
-                let committed = spend.get(key).copied().unwrap_or(0.0)
-                    + reserved.get(key).copied().unwrap_or(0.0);
+                let committed_base =
+                     spend.get(key).copied().unwrap_or(0.0) + reserved.get(key).copied().unwrap_or(0.0);
+                // When the ledger is attached, durable holds live in the ledger,
+                // not in the in-memory map — the gate must count them or
+                // concurrent streams overshoot the cap after a restart.
+                let ledger_held = self.ledger.as_ref().and_then(|ledger| {
+                    let key_id = self.durable_key_id(key);
+                    ledger.held(&key_id).ok()
+                });
+                let committed = match ledger_held {
+                    Some(h) => committed_base.max(h),
+                    None => committed_base,
+                 };
                 if committed >= limit {
                     return Err(format!(
                         "Budget exceeded: ${:.4}/${:.4} for key {}",
                         committed,
                         limit,
-                        &key[..8.min(key.len())]
-                    ));
-                }
-            }
+                         &key[..8.min(key.len())]
+                     ));
+                 }
+             }
         }
 
         {
             let rate_limits = self.rate_limits.read().unwrap();
             let rpm = rate_limits.get(key).copied().unwrap_or(0);
             if rpm > 0 {
+                // Durable bucket when the ledger is attached: the window
+                // survives restart, so a crash cannot refresh the quota.
+                if let Some(ledger) = &self.ledger {
+                    let key_id = self.durable_key_id(key);
+                    match ledger.record_rate_hit(&key_id) {
+                        Ok(count) => {
+                            if count >= rpm as i64 {
+                                return Err(format!(
+                                    "Rate limit exceeded (durable ledger): {count}/{rpm} rpm for key {}",
+                                    &key[..8.min(key.len())]
+                                ));
+                            }
+                        }
+                        Err(e) => return Err(format!("ledger: rate read failed: {e}")),
+                    }
+                }
                 let mut times = self.request_times.write().unwrap();
                 let entries = times.entry(key.to_string()).or_default();
                 let now = Instant::now();
@@ -297,7 +382,16 @@ impl BudgetGuard {
             });
 
             if similar_count + 1 >= self.loop_threshold {
-                // Trip the circuit breaker
+                // Trip the circuit breaker — durably first, then in memory,
+                // so a crash right after tripping cannot lose the block.
+                if let Some(ledger) = &self.ledger {
+                    let key_id = self.durable_key_id(key);
+                    let until_epoch =
+                        chrono::Utc::now().timestamp() + self.loop_block_duration.as_secs() as i64;
+                    if let Err(e) = ledger.set_loop_block(&key_id, until_epoch) {
+                        tracing::error!("ledger: durable loop block failed: {e}");
+                    }
+                }
                 let mut blocked = self.loop_blocked.write().unwrap();
                 blocked.insert(key.to_string(), now + self.loop_block_duration);
 
@@ -360,10 +454,27 @@ impl BudgetGuard {
     }
 
     /// Record a cost for an API key (call after the request completes).
+    /// When the key holds a durable reservation (ADR 0001), the charge is
+    /// atomically converted in the ledger first: spend without releasing the
+    /// hold would double-count the money.
     pub fn record_spend(&self, key: &str, cost_usd: f64) {
-        let mut spend = self.spend.write().unwrap();
-        let entry = spend.entry(key.to_string()).or_insert(0.0);
-        *entry += cost_usd;
+        {
+            let mut spend = self.spend.write().unwrap();
+            let entry = spend.entry(key.to_string()).or_insert(0.0);
+            *entry += cost_usd;
+        }
+        if let Some(ledger) = &self.ledger {
+            let key_id = self.durable_key_id(key);
+            if let Err(e) = ledger.charge_and_release(&key_id, cost_usd) {
+                // The in-memory figure already counts this; the durable one
+                // must too. A failed conversion is a hard error: log loudly.
+                tracing::error!(
+                    "ledger: charge_and_release failed for key_id {}: {} —                      durable spend may lag; run stoke ledger reconcile",
+                    &key_id[..12.min(key_id.len())],
+                    e
+                );
+            }
+        }
     }
 
     /// Take a hold on the money a request is about to cost, refusing if the hold
@@ -383,6 +494,25 @@ impl BudgetGuard {
         key: &str,
         amount: f64,
     ) -> Result<Option<SpendReservation>, String> {
+        // With the ledger attached (the gateway always attaches one), the
+        // durable path IS try_reserve: memory-only remains for tests only.
+        match &self.ledger {
+            Some(ledger) => self.try_reserve_durable(key, amount, Some(ledger)),
+            None => self.try_reserve_durable(key, amount, None),
+        }
+    }
+
+    /// The durable variant: when a ledger is wired, the admission figure and
+    /// the hold are the LEDGER's (ADR 0001). The reservation row is written
+    /// before the provider call and survives crash; on any ledger failure the
+    /// request is refused (fail-closed) — the gateway never degrades to
+    /// memory-only enforcement.
+    pub fn try_reserve_durable(
+        self: &Arc<Self>,
+        key: &str,
+        amount: f64,
+        ledger: Option<&std::sync::Arc<crate::ledger::Ledger>>,
+    ) -> Result<Option<SpendReservation>, String> {
         if !(amount > 0.0) {
             return Ok(None);
         }
@@ -390,6 +520,30 @@ impl BudgetGuard {
         let limit = self.limits.read().unwrap().get(key).copied().unwrap_or(0.0);
         if limit <= 0.0 {
             return Ok(None); // unlimited key: nothing to protect
+        }
+        if let Some(ledger) = ledger {
+            let key_id = self.durable_key_id(key);
+            // Committed = durable spend + durable open holds. Restart and
+            // crash both keep this figure, which is the whole point.
+            let spent = ledger.spend(&key_id)?;
+            let held = ledger.held(&key_id)?;
+            if spent + held + amount > limit {
+                return Err(format!(
+                    "Budget exceeded (durable ledger): ${:.4} spent + ${:.4} in flight + ${:.4} for this request exceeds ${:.4} for key_id {}",
+                    spent,
+                    held,
+                    amount,
+                    limit,
+                    &key_id[..12.min(key_id.len())]
+                ));
+            }
+            ledger.reserve(&key_id, amount)?;
+            return Ok(Some(SpendReservation {
+                budget: Arc::clone(self),
+                key: key.to_string(),
+                amount,
+                ledger: Some(std::sync::Arc::clone(ledger)),
+            }));
         }
         // Hold the spend guard across the reserved write. Reading `spent` into a
         // temporary first would let two concurrent reserves each see the same stale
@@ -414,6 +568,7 @@ impl BudgetGuard {
             budget: Arc::clone(self),
             key: key.to_string(),
             amount,
+            ledger: None,
         }))
     }
 
@@ -483,12 +638,25 @@ impl BudgetGuard {
 
         keys.iter()
             .map(|k| {
-                let s = spend.get(k).copied().unwrap_or(0.0);
+                // Durable figures win when the ledger is attached: after a
+                // restart the memory maps are empty but the cap must still
+                // show the ledger's spend and open holds (ADR 0001).
+                let (d_spend, d_held) = self
+                    .ledger
+                    .as_ref()
+                    .and_then(|ledger| {
+                        let key_id = self.durable_key_id(k);
+                        let s = ledger.spend(&key_id).ok()?;
+                        let h = ledger.held(&key_id).ok()?;
+                        Some((s, h))
+                    })
+                    .unwrap_or((0.0, 0.0));
+                let s = spend.get(k).copied().unwrap_or(0.0).max(d_spend);
                 let l = limits.get(k).copied().unwrap_or(0.0);
                 let r = rate_limits.get(k).copied().unwrap_or(0);
                 let recent = times.get(k).map(|v| v.len() as u32).unwrap_or(0);
                 let e = estimated.get(k).copied().unwrap_or(0.0);
-                let held = reserved.get(k).copied().unwrap_or(0.0);
+                let held = reserved.get(k).copied().unwrap_or(0.0).max(d_held);
                 (k.clone(), s, l, recent, e, held)
             })
             .collect()
@@ -625,6 +793,63 @@ mod tests {
     /// `STOKE_DEV` / `STOKE_API_KEYS` are process-global, so the tests that
     /// mutate them must not run concurrently with each other.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+        #[test]
+    fn try_reserve_writes_the_durable_hold_when_a_ledger_is_attached() {
+        let mut guard = BudgetGuard::new();
+        guard.set_budget("k", 1.0);
+        let ledger = std::sync::Arc::new(crate::ledger::Ledger::open_in_memory().unwrap());
+        guard.attach_ledger(std::sync::Arc::clone(&ledger));
+        let guard = std::sync::Arc::new(guard);
+        let key_id = guard.durable_key_id_for("k");
+        let reservation = guard
+            .try_reserve("k", 0.25)
+            .unwrap()
+            .expect("fits under the cap");
+        // The durable row exists the moment the guard is handed out.
+        assert_eq!(ledger.held(&key_id).unwrap(), 0.25);
+        assert_eq!(ledger.spend(&key_id).unwrap(), 0.0);
+        // Completion converts the hold to spend, durably.
+        guard.record_spend("k", 0.25);
+        assert_eq!(ledger.spend(&key_id).unwrap(), 0.25);
+        assert_eq!(ledger.held(&key_id).unwrap(), 0.0);
+        drop(reservation);
+    }
+
+    #[test]
+    fn try_reserve_refuses_from_the_durable_figure_after_restart() {
+        let dir = std::env::temp_dir().join(format!(
+            "stoke-budget-durable-{}",
+            std::process::id()
+        ));
+        let path = dir.join("ledger.db");
+        let _ = std::fs::remove_dir_all(&dir);
+        {
+            let mut guard = BudgetGuard::new();
+            guard.set_budget("k", 0.05);
+            let ledger = std::sync::Arc::new(crate::ledger::Ledger::open(&path).unwrap());
+            guard.attach_ledger(std::sync::Arc::clone(&ledger));
+            let guard = std::sync::Arc::new(guard);
+            guard
+                .try_reserve("k", 0.03)
+                .unwrap()
+                .expect("fits");
+            // "Request completes": durable spend $0.03.
+            guard.record_spend("k", 0.03);
+        }
+        {
+            // Restart: fresh guard, same ledger file, same key.
+            let mut guard = BudgetGuard::new();
+            guard.set_budget("k", 0.05);
+            let ledger = std::sync::Arc::new(crate::ledger::Ledger::open(&path).unwrap());
+            guard.attach_ledger(std::sync::Arc::clone(&ledger));
+            let guard = std::sync::Arc::new(guard);
+            // $0.03 spent durably; a $0.025 hold would total $0.055 > $0.05.
+            let err = guard.try_reserve("k", 0.025).unwrap_err();
+            assert!(err.contains("durable ledger"), "unexpected refusal: {err}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[tokio::test]
     async fn test_budget_tracking() {

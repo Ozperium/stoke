@@ -59,7 +59,7 @@ allowed_tiers = ["remote"]
 EOF
 
 echo "==> starting stoke on :$STOKE_PORT"
-(cd "$WORK_DIR" && exec env STOKE_DEV=1 STOKE_NODE_POLL_SECS=1 \
+(cd "$WORK_DIR" && exec env STOKE_LEDGER_PATH="${WORK_DIR}/ledger.db" STOKE_DEV=1 STOKE_NODE_POLL_SECS=1 \
   "$REPO_DIR/target/debug/stoke" > "$WORK_DIR/stoke.log" 2>&1) &
 PIDS+=($!)
 

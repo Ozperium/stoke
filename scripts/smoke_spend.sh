@@ -68,8 +68,11 @@ post_path() {
     -H "Authorization: Bearer $KEY_A" -H 'Content-Type: application/json' -d "$2"
 }
 start_stoke() {
-  ( cd "$WORK_DIR" && exec env STOKE_API_KEYS="$KEY_A,$KEY_B" \
-      "$REPO_DIR/target/debug/stoke" > "$WORK_DIR/stoke.log" 2>&1 ) &
+   # Reset the ledger between sections: the test checks per-section caps
+   # and the in-memory model was the original contract.
+  rm -f "$WORK_DIR/ledger.db" "$WORK_DIR/ledger.db-wal" "$WORK_DIR/ledger.db-shm" 2>/dev/null
+   ( cd "$WORK_DIR" && exec env STOKE_LEDGER_PATH="${WORK_DIR}/ledger.db" STOKE_API_KEYS="$KEY_A,$KEY_B" \
+       "$REPO_DIR/target/debug/stoke" > "$WORK_DIR/stoke.log" 2>&1 ) &
   sleep 3
 }
 stop_stoke() { pkill -f "$REPO_DIR/target/debug/stoke" 2>/dev/null || true; sleep 1; }

@@ -47,3 +47,6 @@ jobs:
 
       - name: Smoke — subscription fallback + alias bridge (deterministic mocks)
         run: ./scripts/smoke_subscription_fallback.sh
+
+      - name: Smoke — durable budget ledger (spend survives crash/restart, raw key never in DB)
+        run: ./scripts/smoke_durable_ledger.sh

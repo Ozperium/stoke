@@ -51,7 +51,7 @@ until curl -fsS "http://127.0.0.1:$PROVIDER_PORT/health" >/dev/null 2>&1; do
 done
 (
     cd "$TMP"
-    STOKE_API_KEYS=test-key OPENAI_API_KEY=upstream-key "$BIN" >"$TMP/stoke.log" 2>&1
+    STOKE_LEDGER_PATH="${TMP}/ledger.db" STOKE_API_KEYS=test-key OPENAI_API_KEY=upstream-key "$BIN" >"$TMP/stoke.log" 2>&1
 ) &
 STOKE_PID=$!
 

@@ -23,7 +23,7 @@ CODEX_PORT=${CODEX_PORT:-11712}
 LOCAL_PORT=${LOCAL_PORT:-11713}
 STOKE_PORT=${STOKE_PORT:-8792}
 KEY_A="key-alpha"
-FIXTURE_HOME="$WORK_DIR/home"
+FIXTURE_STOKE_LEDGER_PATH="${WORK_DIR}/ledger.db" HOME="$WORK_DIR/home"
 
 cleanup() {
   kill $(jobs -p) 2>/dev/null || true
