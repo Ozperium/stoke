@@ -47,10 +47,7 @@ use tracing_subscriber;
 use budget::{Auth, BudgetGuard};
 use cache::ResponseCache;
 use futures_util::StreamExt;
-use router::{
-    call_provider_hop, cascade, cascade_test_models, self_consistency, test_vote_models,
-    ProviderResult, SHARED_CLIENT,
-};
+use router::{call_provider_hop, cascade, self_consistency, ProviderResult, SHARED_CLIENT};
 use ttft::TtftTracker;
 
 #[derive(Clone)]
@@ -619,9 +616,8 @@ fn hold_amount(
     match routing {
         // One model, N samples, every one of them generated and billed.
         "self_consistency" => one(model) * n_samples.max(1) as f64,
-        // Every candidate generates; the tests or the vote pick a winner afterwards.
-        // A candidate that fails its tests has already been billed for its tokens.
-        "test_vote" | "parallel_vote" | "cascade_test" if !vote_models.is_empty() => {
+        // Every candidate generates; the vote picks a winner afterwards.
+        "parallel_vote" if !vote_models.is_empty() => {
             vote_models.iter().map(|m| one(m)).sum()
         }
         // First success wins and the losers never generated, but which model wins
@@ -843,6 +839,12 @@ async fn list_models(State(state): State<AppState>) -> Json<Value> {
             &provider.r#type,
             &provider.tier,
             &effective,
+            state
+                .config
+                .providers
+                .iter()
+                .filter(|p| p.r#type == "codex_subscription")
+                .count(),
         ) {
             models.push(json!({ "id": alias, "provider": provider.name }));
         }
@@ -1333,20 +1335,6 @@ async fn chat_completions(
         }
     }
 
-    // For test_vote: the test harness code and entry point function name
-    let mut test_code = req
-        .extra
-        .get("test_code")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let mut entry_point = req
-        .extra
-        .get("entry_point")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-
     // For self_consistency: number of samples and temperature. The caller names a
     // number; the operator sets the ceiling. Unclamped, `n_samples` is a direct
     // multiplier on the bill (router.rs loops over it, one provider call each).
@@ -1448,19 +1436,14 @@ async fn chat_completions(
         if !decision.vote_models.is_empty() {
             vote_models = decision.vote_models.clone();
         }
-        if decision.pattern == "cascade_test" || decision.pattern == "test_vote" {
-            test_code = opts.test_code.clone();
-            entry_point = opts.entry_point.clone();
-        }
     }
 
     // ─── Fan-out enforcement, on the RESOLVED routing ────────────────────────
     // Everything that can name a routing pattern has now spoken: the route
     // profile, the request body, the config default, the auto-router, and the
-    // pre_request plugins. Checking earlier missed the interesting case —
-    // `routing: "auto"` is not itself a fan-out, but `decide()` can resolve it
-    // into `cascade_test`, using `test_code`/`entry_point` taken straight from
-    // the request body. A caller could pick a fan-out without ever naming one.
+    // pre_request plugins. (The auto-router no longer resolves into the removed
+    // test-execution patterns, but the gate stays on the resolved routing so a
+    // caller can never name a fan-out through a pattern alias.)
     if config::is_fanout_routing(&routing)
         && routing_from_caller
         && !state.config.limits.allow_caller_routing
@@ -1807,68 +1790,23 @@ async fn chat_completions(
 
     let result: Result<ProviderResult, (StatusCode, String)> = async {
         match routing.as_str() {
-            "test_vote" => {
-                if vote_models.is_empty() {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        "test_vote requires 'vote_models' field".to_string(),
-                    ));
-                }
-                if test_code.is_empty() || entry_point.is_empty() {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        "test_vote requires 'test_code' and 'entry_point' fields".to_string(),
-                    ));
-                }
-                let provider = provider_for_model_filtered(
-                    &state.config,
-                    &model,
-                    exclude_stoke,
-                    allowed_tiers,
-                )
-                .ok_or_else(|| {
-                    (
-                        StatusCode::NOT_FOUND,
-                        format!("No provider for model: {}", model),
-                    )
-                })?;
-                test_vote_models(provider, &vote_models, &req, &test_code, &entry_point)
-                    .await
-                    .map_err(|e| (StatusCode::BAD_GATEWAY, e))
+            "test_vote" | "cascade_test" => {
+                // Validated test-execution patterns were removed: they ran
+                // caller-supplied Python on the gateway host (the KRYT-1 RCE).
+                // Refuse before any provider call; nothing spends, nothing runs.
+                Err((
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "routing \"{routing}\" is not served: gateway-side execution of \
+                         caller test code was removed for security. Use \
+                         \"single\"/\"cascade\" client-side, or verify outside the gateway."
+                    ),
+                ))
             }
             "cascade" => {
                 let providers: Vec<_> =
                     eligible_providers(&state.config, exclude_stoke, allowed_tiers);
                 cascade(providers, &req)
-                    .await
-                    .map_err(|e| (StatusCode::BAD_GATEWAY, e))
-            }
-            "cascade_test" => {
-                if vote_models.is_empty() {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        "cascade_test requires 'vote_models' field".to_string(),
-                    ));
-                }
-                if test_code.is_empty() || entry_point.is_empty() {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        "cascade_test requires 'test_code' and 'entry_point' fields".to_string(),
-                    ));
-                }
-                let provider = provider_for_model_filtered(
-                    &state.config,
-                    &model,
-                    exclude_stoke,
-                    allowed_tiers,
-                )
-                .ok_or_else(|| {
-                    (
-                        StatusCode::NOT_FOUND,
-                        format!("No provider for model: {}", model),
-                    )
-                })?;
-                cascade_test_models(provider, &vote_models, &req, &test_code, &entry_point)
                     .await
                     .map_err(|e| (StatusCode::BAD_GATEWAY, e))
             }
@@ -2172,15 +2110,14 @@ mod hold_sizing_tests {
     fn a_vote_pattern_holds_for_each_leg_at_that_legs_own_price() {
         // Scaling the base model's price by the leg count would hold $4; the legs
         // actually bill $2 + $20.
-        assert!((hold("test_vote", "cheap", &["cheap", "dear"], 1) - 22.0).abs() < 1e-9);
-        assert!((hold("cascade_test", "cheap", &["cheap", "dear"], 1) - 22.0).abs() < 1e-9);
+        assert!((hold("parallel_vote", "cheap", &["cheap", "dear"], 1) - 22.0).abs() < 1e-9);
     }
 
     #[test]
     fn an_unpriced_base_model_still_holds_for_its_priced_legs() {
         // Regression: the base model often exists only to pick a provider. Pricing
         // the hold against it yielded $0 — no hold at all — while the legs spent.
-        assert!((hold("test_vote", "router", &["dear", "dear"], 1) - 40.0).abs() < 1e-9);
+        assert!((hold("parallel_vote", "router", &["dear", "dear"], 1) - 40.0).abs() < 1e-9);
         assert_eq!(
             hold("single", "router", &[], 1),
             0.0,

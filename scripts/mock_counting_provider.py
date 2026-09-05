@@ -61,7 +61,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         global CALLS, LAST_BODY, STREAM_OPTIONS_SEEN
         raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        if "chat/completions" not in self.path and "/v1/messages" not in self.path:
+        if "chat/completions" not in self.path and "/v1/messages" not in self.path \
+                and "/responses" not in self.path:
             self._json({}, 404)
             return
         try:
@@ -74,6 +75,10 @@ class Handler(BaseHTTPRequestHandler):
             LAST_BODY = raw
             if "stream_options" in req:
                 STREAM_OPTIONS_SEEN += 1
+
+        if "/responses" in self.path:
+            self._responses_sse(req)
+            return
 
         if "/v1/messages" in self.path:
             self._json({
@@ -95,6 +100,41 @@ class Handler(BaseHTTPRequestHandler):
                              "message": {"role": "assistant", "content": "42"}}],
                 "usage": USAGE,
             })
+
+    def _responses_sse(self, req):
+        """OpenAI Responses wire over SSE: the codex Messages bridge feeds this
+        into ResponsesStreamTranslator, so the frames must be Responses events."""
+        model = req.get("model", "mock")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        def frame(obj):
+            payload = ("data: " + json.dumps(obj) + "\n\n").encode()
+            self.wfile.write(payload)
+            self.wfile.flush()
+
+        frame({"type": "response.created", "response": {"id": "resp_mock1"}})
+        frame({"type": "response.output_text.delta", "delta": "42"})
+        frame({"type": "response.completed", "response": {
+            "id": "resp_mock1", "model": model,
+            "usage": {"input_tokens": 1000, "output_tokens": 1000},
+        }})
+        self.close_connection = True
+
+    def _responses_json(self, req):
+        self._json({
+            "id": "resp_mock1", "object": "response", "created_at": 0,
+            "status": "completed", "model": req.get("model", "mock"),
+            "output": [{
+                "type": "message", "id": "msg_mock1", "role": "assistant",
+                "status": "completed", "name": None,
+                "content": [{"type": "output_text", "text": "42", "annotations": []}],
+            }],
+            "usage": {"input_tokens": 1000, "output_tokens": 1000, "total_tokens": 2000},
+        })
 
     def _stream(self, req):
         model = req.get("model", "mock")

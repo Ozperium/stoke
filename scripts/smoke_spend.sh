@@ -138,8 +138,8 @@ output_per_1m = 25.0
 input_per_1m = 5.0
 output_per_1m = 25.0
 
-# Two vote models + a code prompt + test_code is what makes auto_route::decide
-# answer "cascade_test" — a fan-out the caller never names.
+# Two vote models give the auto-router a fan-out candidate list (kept for the
+# caller-routing gate below; decide() itself no longer resolves test patterns).
 [auto_route]
 coder = "priced-model"
 fast = "priced-model"
@@ -268,15 +268,24 @@ AFTER=$(calls)
 [ "$CODE" = "403" ] || fail "caller fan-out: expected 403, got $CODE"
 [ "$((AFTER - BEFORE))" = "0" ] || fail "refused fan-out still called the provider"
 
-echo "==> assert: routing=\"auto\" cannot launder a caller into a fan-out pattern"
-# `auto` is not itself a fan-out, so a check on the *requested* routing waves it
-# through — but decide() resolves it to cascade_test when the caller supplies a
-# code prompt plus test_code/entry_point. Enforcement must run post-resolution.
+echo "==> assert: the removed test-execution patterns are refused before any provider call"
+# KRYT-1: test_vote/cascade_test ran caller-supplied Python on the gateway host.
+# They are gone: the caller-routing gate answers 403 (a fan-out the caller named)
+# and nothing ever reaches the provider, whatever fields the caller supplies.
+BEFORE=$(calls)
+CODE=$(post "$KEY_A" '{"model":"priced-model","routing":"cascade_test","vote_models":["priced-model","priced-model-2"],"test_code":"assert f(1) == 1","entry_point":"f","messages":[{"role":"user","content":"implement a python function that adds one"}]}')
+AFTER=$(calls)
+[ "$CODE" = "403" ] || fail "removed cascade_test: expected 403, got $CODE"
+[ "$((AFTER - BEFORE))" = "0" ] || fail "refused pattern still called the provider"
+
+echo "==> assert: routing=\"auto\" with test_code rides along as a single call"
+# The auto-router no longer resolves test patterns (KRYT-1), so test_code in the
+# body is inert: auto routes to a single call like any other request.
 BEFORE=$(calls)
 CODE=$(post "$KEY_A" '{"model":"auto","routing":"auto","test_code":"assert f(1) == 1","entry_point":"f","messages":[{"role":"user","content":"implement a python function that adds one"}]}')
 AFTER=$(calls)
-[ "$CODE" = "403" ] || fail "auto resolved into a fan-out for a caller: expected 403, got $CODE"
-[ "$((AFTER - BEFORE))" = "0" ] || fail "auto fan-out reached the provider $((AFTER - BEFORE)) times"
+[ "$CODE" = "200" ] || fail "auto with inert test_code: expected 200 single, got $CODE"
+[ "$((AFTER - BEFORE))" = "1" ] || fail "expected exactly 1 upstream call"
 
 # ── Streamed responses accrue spend ──────────────────────────────────
 echo "==> assert: a streamed response is billed from the usage the provider reports"

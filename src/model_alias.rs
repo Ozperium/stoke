@@ -5,7 +5,10 @@ const HERMES_LOCAL_PREFIX: &str = "stoke-local--";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AliasTarget {
-    Codex { model: String },
+    /// provider: None = the sole configured codex provider; Some(name) = that
+    /// exact provider. A qualified alias must never resolve to a different
+    /// provider, and an unqualified one must never guess between two.
+    Codex { provider: Option<String>, model: String },
     Local { provider: String, model: String },
 }
 
@@ -13,18 +16,37 @@ pub fn codex_alias(model: &str) -> String {
     format!("{CODEX_PREFIX}{model}")
 }
 
+/// Provider-qualified codex alias: minted whenever more than one
+/// codex_subscription provider is configured, so an alias advertised for
+/// provider B can never dispatch to provider A.
+pub fn codex_alias_qualified(provider: &str, model: &str) -> String {
+    format!("{CODEX_PREFIX}{provider}--{model}")
+}
+
 pub fn local_alias(provider: &str, model: &str) -> String {
     format!("{LOCAL_PREFIX}{provider}--{model}")
 }
 
 pub fn parse_alias(alias: &str) -> Option<AliasTarget> {
-    let codex_model = alias
+    let codex_rest = alias
         .strip_prefix(CODEX_PREFIX)
         .or_else(|| alias.strip_prefix(HERMES_CODEX_PREFIX))
-        .filter(|model| !model.is_empty());
-    if let Some(model) = codex_model {
-        return Some(AliasTarget::Codex {
-            model: model.to_string(),
+        .filter(|rest| !rest.is_empty());
+    if let Some(rest) = codex_rest {
+        // "provider--model" (qualified) or plain "model" (unqualified).
+        // A provider NAME cannot contain "--" (config identifiers are plain),
+        // so the first "--" splits the pair; its absence means unqualified.
+        return Some(match rest.split_once("--") {
+            Some((provider, model)) if !provider.is_empty() && !model.is_empty() => {
+                AliasTarget::Codex {
+                    provider: Some(provider.to_string()),
+                    model: model.to_string(),
+                }
+            }
+            _ => AliasTarget::Codex {
+                provider: None,
+                model: rest.to_string(),
+            },
         });
     }
     let rest = alias
@@ -86,6 +108,7 @@ pub fn aliases_for_provider(
     provider_type: &str,
     tier: &str,
     models: &[String],
+    codex_provider_count: usize,
 ) -> Vec<String> {
     // Only advertise aliases /v1/messages can actually route. Local aliases
     // ride the Messages->chat-completions translation, which accepts exactly
@@ -93,11 +116,23 @@ pub fn aliases_for_provider(
     // "provider:*" wildcard from a degraded discovery never routes upstream.
     let wildcard = |model: &str| model.ends_with(":*") || model == "*";
     match (provider_type, tier) {
-        ("codex_subscription", _) => models
-            .iter()
-            .filter(|model| !wildcard(model))
-            .map(|model| codex_alias(model))
-            .collect(),
+        ("codex_subscription", _) => {
+            let qualified = codex_provider_count > 1;
+            models
+                .iter()
+                .filter(|model| !wildcard(model))
+                .map(|model| {
+                    if qualified {
+                        // Two+ codex providers: the bare alias is ambiguous
+                        // (the unqualified form fails closed), so the catalog
+                        // mints provider-qualified aliases only.
+                        codex_alias_qualified(provider_name, model)
+                    } else {
+                        codex_alias(model)
+                    }
+                })
+                .collect()
+        }
         ("openai_compatible", "local" | "remote") => models
             .iter()
             .filter(|model| !wildcard(model))
@@ -118,12 +153,14 @@ mod tests {
         assert_eq!(
             parse_alias(&codex),
             Some(AliasTarget::Codex {
+                provider: None,
                 model: "gpt-5.6-sol".into(),
             })
         );
         assert_eq!(
             parse_alias("stoke-codex--gpt-5.6-sol"),
             Some(AliasTarget::Codex {
+                provider: None,
                 model: "gpt-5.6-sol".into(),
             })
         );
@@ -150,22 +187,59 @@ mod tests {
     fn catalog_aliases_are_only_created_for_codex_and_local_translation_providers() {
         let models = vec!["first:model".to_string(), "second.model".to_string()];
         assert_eq!(
-            aliases_for_provider("chatgpt", "codex_subscription", "subscription", &models),
+            aliases_for_provider("chatgpt", "codex_subscription", "subscription", &models, 1),
             vec![
                 "claude-stoke-codex--first:model",
                 "claude-stoke-codex--second.model"
             ]
         );
         assert_eq!(
-            aliases_for_provider("ollama", "openai_compatible", "local", &models),
+            aliases_for_provider("ollama", "openai_compatible", "local", &models, 1),
             vec![
                 "claude-stoke-local--ollama--first:model",
                 "claude-stoke-local--ollama--second.model"
             ]
         );
         assert!(
-            aliases_for_provider("anthropic", "claude_subscription", "subscription", &models)
+            aliases_for_provider("anthropic", "claude_subscription", "subscription", &models, 1)
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn qualified_codex_aliases_are_minted_when_two_providers_are_configured() {
+        // Two codex_subscription providers: a bare `claude-stoke-codex--<model>`
+        // cannot say which account serves it, so the catalog mints the
+        // provider-qualified form and never the ambiguous short one.
+        let models = vec!["gpt-5.6-sol".to_string()];
+        assert_eq!(
+            aliases_for_provider("work", "codex_subscription", "subscription", &models, 2),
+            vec!["claude-stoke-codex--work--gpt-5.6-sol"]
+        );
+        assert_eq!(
+            aliases_for_provider("personal", "codex_subscription", "subscription", &models, 2),
+            vec!["claude-stoke-codex--personal--gpt-5.6-sol"]
+        );
+    }
+
+    #[test]
+    fn qualified_codex_alias_parses_to_its_named_provider_never_another() {
+        let alias = codex_alias_qualified("personal", "gpt-5.6-sol");
+        assert_eq!(alias, "claude-stoke-codex--personal--gpt-5.6-sol");
+        assert_eq!(
+            parse_alias(&alias),
+            Some(AliasTarget::Codex {
+                provider: Some("personal".into()),
+                model: "gpt-5.6-sol".into(),
+            })
+        );
+        // The bare form still parses as unqualified (sole-provider case).
+        assert_eq!(
+            parse_alias("claude-stoke-codex--gpt-5.6-sol"),
+            Some(AliasTarget::Codex {
+                provider: None,
+                model: "gpt-5.6-sol".into(),
+            })
         );
     }
 
@@ -175,19 +249,19 @@ mod tests {
         // /v1/messages only translates local|remote openai_compatible providers,
         // so cloud-tier providers must not advertise routable-looking aliases.
         assert!(
-            aliases_for_provider("openrouter", "openai_compatible", "cloud", &models).is_empty()
+            aliases_for_provider("openrouter", "openai_compatible", "cloud", &models, 1).is_empty()
         );
         assert_eq!(
-            aliases_for_provider("openrouter", "openai_compatible", "remote", &models),
+            aliases_for_provider("openrouter", "openai_compatible", "remote", &models, 1),
             vec!["claude-stoke-local--openrouter--some/model"]
         );
         assert_eq!(
-            aliases_for_provider("ollama", "openai_compatible", "local", &models),
+            aliases_for_provider("ollama", "openai_compatible", "local", &models, 1),
             vec!["claude-stoke-local--ollama--some/model"]
         );
         // Codex aliases are type-gated, not tier-gated.
         assert_eq!(
-            aliases_for_provider("chatgpt", "codex_subscription", "subscription", &models),
+            aliases_for_provider("chatgpt", "codex_subscription", "subscription", &models, 1),
             vec!["claude-stoke-codex--some/model"]
         );
     }
@@ -196,20 +270,21 @@ mod tests {
     fn discovery_placeholder_wildcards_never_become_aliases() {
         let placeholder = vec!["ollama:*".to_string()];
         assert!(
-            aliases_for_provider("ollama", "openai_compatible", "local", &placeholder).is_empty()
+            aliases_for_provider("ollama", "openai_compatible", "local", &placeholder, 1).is_empty()
         );
         let codex_placeholder = vec!["chatgpt:*".to_string()];
         assert!(aliases_for_provider(
             "chatgpt",
             "codex_subscription",
             "subscription",
-            &codex_placeholder
+            &codex_placeholder,
+            1
         )
         .is_empty());
         // A real model id that merely contains a colon still aliases.
         let real = vec!["llama3.2:3b".to_string()];
         assert_eq!(
-            aliases_for_provider("ollama", "openai_compatible", "local", &real),
+            aliases_for_provider("ollama", "openai_compatible", "local", &real, 1),
             vec!["claude-stoke-local--ollama--llama3.2:3b"]
         );
     }

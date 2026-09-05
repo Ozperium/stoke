@@ -682,15 +682,14 @@ port = 8787
     }
 
     #[test]
-    fn auto_is_not_itself_a_fanout_but_can_resolve_into_one() {
-        // `auto` names no fan-out, so the *pre*-resolution check waves it through.
-        // That is why enforcement must run on the routing the auto-router returns
-        // (auto_route::decide can answer "cascade_test"), not on what was asked for.
+    fn removed_test_patterns_are_still_gated_as_fanouts() {
+        // KRYT-1 removed the validated test-execution patterns. The names stay in
+        // the fan-out gate so a caller-routed request is refused (403) on policy
+        // grounds before dispatch answers (400) on the removed implementation —
+        // and so re-introducing them cannot skip the fan-out ceiling.
         assert!(!is_fanout_routing("auto"));
-        assert!(
-            is_fanout_routing("cascade_test"),
-            "the pattern auto can resolve into"
-        );
+        assert!(is_fanout_routing("test_vote"));
+        assert!(is_fanout_routing("cascade_test"));
     }
 
     #[test]

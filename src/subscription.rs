@@ -8,9 +8,15 @@ pub static OAUTH_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
 });
 
 /// Refuse to put a subscription credential on anything except the exact,
-/// operator-selected first-party HTTPS host.
+/// operator-selected first-party HTTPS host. The test-only base override
+/// (`STOKE_TEST_SUBSCRIPTION_BASES`) admits plain-HTTP loopback mocks so the
+/// smoke harness can exercise OAuth-bearing paths deterministically; unset,
+/// this check is absolute.
 pub fn validate_oauth_destination(url: &str, allowed_host: &str) -> Result<(), String> {
     let parsed = reqwest::Url::parse(url).map_err(|_| "invalid OAuth upstream URL".to_string())?;
+    if test_allowed_subscription_bases().contains(&url.trim_end_matches('/').to_string()) {
+        return Ok(());
+    }
     if parsed.scheme() != "https"
         || parsed.host_str() != Some(allowed_host)
         || !parsed.username().is_empty()
@@ -27,15 +33,38 @@ pub fn validate_oauth_destination(url: &str, allowed_host: &str) -> Result<(), S
 /// The exact Responses endpoint Codex's subscription backend serves.
 pub const CHATGPT_CODEX_BASE: &str = "https://chatgpt.com/backend-api/codex";
 
+/// Test-only escape hatch for deterministic smoke harnesses: `STOKE_TEST_SUBSCRIPTION_BASES`
+/// names the mock base URLs the gateway may accept IN ADDITION to the pinned
+/// first-party hosts. Unset (production) the override does not exist and the
+/// pins are absolute — fail-closed by default.
+fn test_allowed_subscription_bases() -> Vec<String> {
+    let raw = std::env::var("STOKE_TEST_SUBSCRIPTION_BASES").unwrap_or_default();
+    let mut out = Vec::new();
+    for entry in raw.split(',') {
+        let base = entry.trim().trim_end_matches('/').to_string();
+        if base.is_empty() {
+            continue;
+        }
+        // The pins are checked against full endpoint URLs too
+        // ("<base>/responses", "<base>/v1/messages"), so the override admits
+        // the same shapes for each allowed mock base.
+        out.push(base.clone());
+        out.push(format!("{base}/responses"));
+        out.push(format!("{base}/v1/messages"));
+    }
+    out
+}
+
 /// The single endpoint a `codex_subscription` provider may dispatch to.
 pub fn subscription_responses_endpoint(base_url: &str) -> Result<String, String> {
     let base = base_url.trim_end_matches('/');
-    if base != CHATGPT_CODEX_BASE {
+    if base != CHATGPT_CODEX_BASE && !test_allowed_subscription_bases().contains(&base.to_string())
+    {
         return Err(format!(
             "codex_subscription base_url must be exactly {CHATGPT_CODEX_BASE}"
         ));
     }
-    Ok(format!("{CHATGPT_CODEX_BASE}/responses"))
+    Ok(format!("{base}/responses"))
 }
 
 /// The exact Anthropic API root Claude subscription OAuth credentials serve.
@@ -47,17 +76,28 @@ pub const CLAUDE_API_HOST: &str = "api.anthropic.com";
 /// The single endpoint a `claude_subscription` provider may dispatch to.
 pub fn claude_subscription_messages_endpoint(base_url: &str) -> Result<String, String> {
     let base = base_url.trim_end_matches('/');
-    if base != CLAUDE_API_BASE {
+    if base != CLAUDE_API_BASE && !test_allowed_subscription_bases().contains(&base.to_string()) {
         return Err(format!(
             "claude_subscription base_url must be exactly {CLAUDE_API_BASE}"
         ));
     }
-    Ok(format!("{CLAUDE_API_BASE}/v1/messages"))
+    Ok(format!("{base}/v1/messages"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_test_base_override_does_not_exist_by_default() {
+        // Fail-closed: production never sets STOKE_TEST_SUBSCRIPTION_BASES, so
+        // the pins stay absolute. Assert the override truly changes nothing
+        // when unset for a non-pinned URL.
+        std::env::remove_var("STOKE_TEST_SUBSCRIPTION_BASES");
+        assert!(subscription_responses_endpoint("http://127.0.0.1:1/v1").is_err());
+        assert!(claude_subscription_messages_endpoint("http://127.0.0.1:1").is_err());
+        assert!(validate_oauth_destination("http://127.0.0.1:1/x", "chatgpt.com").is_err());
+    }
 
     #[tokio::test]
     async fn oauth_client_never_follows_redirects() {

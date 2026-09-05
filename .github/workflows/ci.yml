@@ -44,3 +44,6 @@ jobs:
 
       - name: Smoke — Claude Code and Codex launchers
         run: ./scripts/smoke_client_run.sh
+
+      - name: Smoke — subscription fallback + alias bridge (deterministic mocks)
+        run: ./scripts/smoke_subscription_fallback.sh

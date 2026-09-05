@@ -97,9 +97,23 @@ fn provider_for_alias<'a>(
     alias: &crate::model_alias::AliasTarget,
 ) -> Option<&'a ProviderConfig> {
     match alias {
-        crate::model_alias::AliasTarget::Codex { .. } => providers
+        crate::model_alias::AliasTarget::Codex { provider: Some(name), .. } => providers
             .iter()
-            .find(|provider| provider.r#type == "codex_subscription"),
+            .find(|candidate| {
+                candidate.name == *name && candidate.r#type == "codex_subscription"
+            }),
+        crate::model_alias::AliasTarget::Codex { provider: None, .. } => {
+            // Unqualified: unambiguous only when exactly one codex provider is
+            // configured. Two providers = no guess — the alias fails closed.
+            let codex: Vec<&ProviderConfig> = providers
+                .iter()
+                .filter(|provider| provider.r#type == "codex_subscription")
+                .collect();
+            match codex[..] {
+                [only] => Some(only),
+                _ => None,
+            }
+        }
         crate::model_alias::AliasTarget::Local { provider, .. } => {
             providers.iter().find(|candidate| {
                 candidate.name == *provider && provider_accepts_messages_translation(candidate)
@@ -342,7 +356,7 @@ pub async fn messages(
         .to_string();
     let alias = crate::model_alias::parse_alias(&requested_model);
     let mut model = match alias.as_ref() {
-        Some(crate::model_alias::AliasTarget::Codex { model })
+        Some(crate::model_alias::AliasTarget::Codex { model, .. })
         | Some(crate::model_alias::AliasTarget::Local { model, .. }) => model.clone(),
         None => requested_model.clone(),
     };
@@ -673,6 +687,30 @@ fn subscription_limit_error(status: StatusCode, body: &[u8]) -> bool {
 /// what served the request instead of the configured Claude model.
 const FALLBACK_HEADER: &str = "x-stoke-fallback-from";
 const FALLBACK_MODEL_HEADER: &str = "x-stoke-fallback-model";
+
+/// Copy the disclosure headers from a successful fallback response onto the
+/// response the client finally sees. Stream and non-stream wrappers both call
+/// this, so neither can silently drop a billing disclosure the other kept:
+/// `x-stoke-fallback-*`/`x-stoke-node` (provenance), `x-stoke-billing-mode`
+/// (codex subscription served it), and `x-stoke-cost` (metered dollars).
+fn copy_fallback_disclosure_headers(
+    out: &mut axum::response::Response,
+    fallback_headers: &axum::http::HeaderMap,
+) {
+    for name in [
+        FALLBACK_HEADER,
+        FALLBACK_MODEL_HEADER,
+        BILLING_MODE_HEADER,
+        "x-stoke-cost",
+        "x-stoke-node",
+    ] {
+        if let Some(value) = fallback_headers.get(name) {
+            if let Ok(owned) = HeaderValue::from_str(value.to_str().unwrap_or_default()) {
+                out.headers_mut().insert(name, owned);
+            }
+        }
+    }
+}
 
 fn insert_fallback_headers(
     response: &mut axum::response::Response,
@@ -1080,15 +1118,7 @@ async fn forward_once_subscription(
                     content_type.unwrap_or_else(|| HeaderValue::from_static("application/json"))
                 });
             let mut out = verbatim_response(fallback_status, Some(content_type), fallback_body);
-            for name in [FALLBACK_HEADER, FALLBACK_MODEL_HEADER, "x-stoke-node"] {
-                if let Some(value) = fallback_headers.get(name) {
-                    if let Ok(owned) =
-                        axum::http::HeaderValue::from_str(value.to_str().unwrap_or_default())
-                    {
-                        out.headers_mut().insert(name, owned);
-                    }
-                }
-            }
+            copy_fallback_disclosure_headers(&mut out, &fallback_headers);
             return out;
         }
         return verbatim_response(status, content_type, Body::from(body));
@@ -1627,15 +1657,7 @@ async fn forward_stream_subscription(
                         .cloned()
                         .unwrap_or_else(|| HeaderValue::from_static("text/event-stream"));
                     let mut out = verbatim_response(fallback_status, Some(content_type), fallback_body);
-                    for name in [FALLBACK_HEADER, FALLBACK_MODEL_HEADER, "x-stoke-node"] {
-                        if let Some(value) = parts.headers.get(name) {
-                            if let Ok(owned) =
-                                HeaderValue::from_str(value.to_str().unwrap_or_default())
-                            {
-                                out.headers_mut().insert(name, owned);
-                            }
-                        }
-                    }
+                    copy_fallback_disclosure_headers(&mut out, &parts.headers);
                     return out;
                 }
             }
@@ -2044,6 +2066,7 @@ mod tests {
             "ollama"
         );
         let codex = crate::model_alias::AliasTarget::Codex {
+            provider: None,
             model: "future-codex".into(),
         };
         assert_eq!(
@@ -2055,6 +2078,62 @@ mod tests {
             model: "ornith:9b".into(),
         };
         assert!(provider_for_alias(&providers, &missing).is_none());
+    }
+
+    #[test]
+    fn a_qualified_codex_alias_routes_only_to_its_named_provider() {
+        fn codex(name: &str, models: &[&str]) -> ProviderConfig {
+            ProviderConfig {
+                name: name.into(),
+                r#type: "codex_subscription".into(),
+                base_url: crate::subscription::CHATGPT_CODEX_BASE.into(),
+                api_key: String::new(),
+                api_key_env: String::new(),
+                models: models.iter().map(|m| m.to_string()).collect(),
+                tier: "subscription".into(),
+            }
+        }
+        // Review blocker: an alias minted from `personal`'s catalog must never
+        // dispatch to `work`, whatever the config order is.
+        let providers = vec![codex("work", &["gpt-5.6-sol"]), codex("personal", &["gpt-5.6-sol"])];
+        let target = crate::model_alias::AliasTarget::Codex {
+            provider: Some("personal".into()),
+            model: "gpt-5.6-sol".into(),
+        };
+        assert_eq!(provider_for_alias(&providers, &target).unwrap().name, "personal");
+        // A provider name with no configured codex provider fails closed.
+        let ghost = crate::model_alias::AliasTarget::Codex {
+            provider: Some("ghost".into()),
+            model: "gpt-5.6-sol".into(),
+        };
+        assert!(provider_for_alias(&providers, &ghost).is_none());
+    }
+
+    #[test]
+    fn an_unqualified_codex_alias_fails_closed_when_two_providers_exist() {
+        fn codex(name: &str) -> ProviderConfig {
+            ProviderConfig {
+                name: name.into(),
+                r#type: "codex_subscription".into(),
+                base_url: crate::subscription::CHATGPT_CODEX_BASE.into(),
+                api_key: String::new(),
+                api_key_env: String::new(),
+                models: vec!["gpt-5.6-sol".into()],
+                tier: "subscription".into(),
+            }
+        }
+        let two = vec![codex("work"), codex("personal")];
+        let bare = crate::model_alias::AliasTarget::Codex {
+            provider: None,
+            model: "gpt-5.6-sol".into(),
+        };
+        assert!(
+            provider_for_alias(&two, &bare).is_none(),
+            "two codex providers: no first-match guess"
+        );
+        // Exactly one provider: the bare alias is unambiguous and routes.
+        let one = vec![codex("work")];
+        assert_eq!(provider_for_alias(&one, &bare).unwrap().name, "work");
     }
 
     #[test]
@@ -2426,6 +2505,47 @@ mod tests {
             response.headers()[BILLING_MODE_HEADER],
             "claude_subscription"
         );
+    }
+
+    #[test]
+    fn fallback_wrapper_preserves_every_billing_disclosure() {
+        // Review blocker: the stream/non-stream wrappers rebuilt the response
+        // copying only fallback/node headers, dropping x-stoke-billing-mode
+        // (codex fallback) and x-stoke-cost (metered fallback). One helper now
+        // copies the full disclosure set for both paths.
+        let mut inner = verbatim_response(
+            StatusCode::OK,
+            Some(HeaderValue::from_static("application/json")),
+            Body::empty(),
+        );
+        if let Ok(v) = "claude sonnet-5".parse::<HeaderValue>() {
+            inner.headers_mut().insert(FALLBACK_HEADER, v);
+        }
+        if let Ok(v) = "gpt-future-codex".parse::<HeaderValue>() {
+            inner.headers_mut().insert(FALLBACK_MODEL_HEADER, v);
+        }
+        if let Ok(v) = "chatgpt_subscription".parse::<HeaderValue>() {
+            inner.headers_mut().insert(BILLING_MODE_HEADER, v);
+        }
+        if let Ok(v) = "0.012500".parse::<HeaderValue>() {
+            inner.headers_mut().insert("x-stoke-cost", v);
+        }
+        if let Ok(v) = "ollama".parse::<HeaderValue>() {
+            inner.headers_mut().insert("x-stoke-node", v);
+        }
+        let (parts, _) = inner.into_parts();
+
+        let mut out = verbatim_response(
+            StatusCode::OK,
+            Some(HeaderValue::from_static("application/json")),
+            Body::empty(),
+        );
+        copy_fallback_disclosure_headers(&mut out, &parts.headers);
+        assert_eq!(out.headers()[FALLBACK_HEADER], "claude sonnet-5");
+        assert_eq!(out.headers()[FALLBACK_MODEL_HEADER], "gpt-future-codex");
+        assert_eq!(out.headers()[BILLING_MODE_HEADER], "chatgpt_subscription");
+        assert_eq!(out.headers()["x-stoke-cost"], "0.012500");
+        assert_eq!(out.headers()["x-stoke-node"], "ollama");
     }
 
     #[test]

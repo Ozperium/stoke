@@ -25,34 +25,6 @@ fn mock_request() -> ChatCompletionRequest {
 }
 
 #[test]
-fn test_extract_completion_code_plain() {
-    let code = extract_completion_code("return a + b");
-    assert_eq!(code, "return a + b");
-}
-
-#[test]
-fn test_extract_completion_code_python_block() {
-    let input = "Here is the code:\n```python\nreturn a + b\n```\nDone.";
-    let code = extract_completion_code(input);
-    assert_eq!(code, "\nreturn a + b\n");
-}
-
-#[test]
-fn test_extract_completion_code_generic_block() {
-    let input = "```\nreturn a + b\n```";
-    let code = extract_completion_code(input);
-    assert_eq!(code, "return a + b\n");
-}
-
-#[test]
-fn test_extract_completion_code_nested_backticks() {
-    // Should find the first ```python block
-    let input = "```python\nx = 1\n```\n```python\ny = 2\n```";
-    let code = extract_completion_code(input);
-    assert_eq!(code, "\nx = 1\n");
-}
-
-#[test]
 fn test_provider_config_resolve_api_key_direct() {
     let p = mock_provider("test", "http://localhost:11434/v1");
     assert_eq!(p.resolve_api_key(), "test-key");

@@ -72,8 +72,6 @@ fn cli_route(args: &[String]) -> ExitCode {
     let mut prompt = String::new();
     let mut routing = String::from("single");
     let mut vote_models = String::new();
-    let mut test_code = String::new();
-    let mut entry_point = String::new();
     let mut temperature = 0.0f64;
     let mut max_tokens = 8192u32;
     let mut stream = false;
@@ -105,18 +103,6 @@ fn cli_route(args: &[String]) -> ExitCode {
                     vote_models = args[i].clone();
                 }
             }
-            "--test-code" => {
-                i += 1;
-                if i < args.len() {
-                    test_code = args[i].clone();
-                }
-            }
-            "--entry-point" => {
-                i += 1;
-                if i < args.len() {
-                    entry_point = args[i].clone();
-                }
-            }
             "--temperature" | "-t" => {
                 i += 1;
                 if i < args.len() {
@@ -138,10 +124,8 @@ fn cli_route(args: &[String]) -> ExitCode {
                      Options:\n  \
                        --model, -m       Model name (required)\n  \
                        --prompt, -p      Prompt text (required)\n  \
-                       --routing, -r     Routing pattern: single, test_vote, cascade_test, self_consistency\n  \
+                       --routing, -r     Routing pattern: single, cascade, self_consistency\n  \
                        --vote-models     Comma-separated models for multi-model patterns\n  \
-                       --test-code       Test code for test_vote/cascade_test\n  \
-                       --entry-point     Entry point function name for test_vote\n  \
                        --temperature, -t Sampling temperature (default: 0.0)\n  \
                        --max-tokens      Max tokens to generate (default: 8192)\n  \
                        --stream, -s      Stream response (SSE)"
@@ -181,12 +165,6 @@ fn cli_route(args: &[String]) -> ExitCode {
                 .map(|s| serde_json::Value::String(s.trim().to_string()))
                 .collect(),
         );
-    }
-    if !test_code.is_empty() {
-        payload["test_code"] = serde_json::Value::String(test_code);
-    }
-    if !entry_point.is_empty() {
-        payload["entry_point"] = serde_json::Value::String(entry_point);
     }
 
     if stream {
@@ -256,7 +234,7 @@ fn cli_bench(args: &[String]) -> ExitCode {
              Delegates to benchmarks/run_benchmark.py. All arguments are forwarded.\n\n\
              Common options:\n  \
                --model         Model to test (required)\n  \
-               --routing       Routing pattern (single, test_vote, self_consistency, etc.)\n  \
+               --routing       Routing pattern (single, cascade, self_consistency, etc.)\n  \
                --limit         Number of problems (default 20, max 164)\n  \
                --dataset       humaneval or humanevalplus\n  \
                --vote-models   Comma-separated models for multi-model patterns\n  \

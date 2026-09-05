@@ -84,9 +84,9 @@ returns `429` and the request never reaches a provider:
   named. A vote pattern bills each leg at its own model's price, and the requested model
   is often only there to select a provider — pricing the hold against it would leave an
   unpriced base model holding nothing at all while its legs spent real money. So
-  `self_consistency` holds one model's cost times its sample count; `test_vote` and
-  `cascade_test` hold the sum over their candidates; a race holds for the dearest of
-  them, since one of them wins.
+  `self_consistency` holds one model's cost times its sample count; a parallel vote
+  holds the sum over its candidates; a race holds for the dearest of them, since one
+  of them wins.
 
   A cache hit contacts no provider and costs nothing, so the cache is consulted before
   any hold is taken. Because the hold otherwise assumes the worst case, a burst of
@@ -189,10 +189,14 @@ predicted latency + preference order; hard context/tool fit exclusions; modes
 request. When `hedge = true` and a small prompt's model sits on two zero-marginal
 nodes, the streaming path races both via `stream_hedged` — first past prefill wins.
 
-Other routing modes (`cascade`, `self_consistency`, `test_vote`, `cascade_test`,
-`stream_race`) are experimental multi-model request strategies that live in
-`src/router.rs`, `src/stream_fusion.rs`, and `src/auto_route.rs`. They all respect the
-hop guard.
+Other routing modes (`cascade`, `self_consistency`, `parallel_vote`, `stream_race`)
+are experimental multi-model request strategies that live in `src/router.rs`,
+`src/stream_fusion.rs`, and `src/auto_route.rs`. They all respect the hop guard.
+
+The `test_vote`/`cascade_test` patterns were removed: they executed caller-supplied
+test code with a host Python process (an RCE on every authenticated client, bypassed
+by a one-line import). Requests naming them are refused before any provider call;
+validation of model output belongs to the client that can verify it.
 
 ### 8. Cost tracking and response annotation
 
@@ -219,10 +223,8 @@ select a multi-call pattern in the request body).
 
 Both the fan-out refusal and the `vote_models` ceiling are enforced on the **resolved**
 routing, after the route profile, request body, config default, auto-router, and
-`pre_request` plugins have all had their say. Checking earlier misses the interesting
-case: `auto` is not itself a fan-out, but `decide()` resolves it to `cascade_test` when
-the caller supplies `test_code` and `entry_point` — so a caller could select a fan-out
-without ever naming one.
+`pre_request` plugins have all had their say. Checking earlier would miss any pattern
+that resolves out of an alias — the gate stays on what actually dispatches.
 
 The gateway annotates the JSON response with non-standard fields that OpenAI clients
 ignore:

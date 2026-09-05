@@ -62,29 +62,20 @@ Try models in order. If a model fails (HTTP error, timeout, bad response), fall 
 
 **Our implementation:** Sequential provider list, first success wins.
 
-### 5. Cascade+Test (Ensemble After — Sequential with Validation)
+### 5. Cascade+Test (Ensemble After — Sequential with Validation) — REMOVED
 **Academic origin:** Novel — combines cascade failover with test-based selection.
 
-Try each model sequentially. After each response, validate it against a test or verifier. Stop on first pass. This is the sequential version of test_vote — cheaper (no parallel fan-out) but slower (sequential).
+Status: **removed from the gateway** (September 2026). Executing caller-supplied
+validation code on the gateway host was an RCE on every authenticated client that no
+import blocklist can close. The pattern remains valid as a *client-side* strategy:
+the client generates, executes the verifier in its own sandbox, and cascades.
 
-**When it works:** Code generation with unit tests, any task with an executable verifier. In our experiments this matched test_vote's accuracy at a fraction of the latency, since models run sequentially and stop on first pass.
-
-**When it fails:** When no model can solve the problem (same ceiling as test_vote).
-
-**Our implementation:** Sequential models, test each, stop on first pass, return last result as fallback.
-
-### 6. Test Vote (Ensemble After — Parallel with Validation)
+### 6. Test Vote (Ensemble After — Parallel with Validation) — REMOVED
 **Academic origin:** [Best-of-N (Snell et al., 2024)](https://arxiv.org/abs/2408.03314) + [Self-Consistency](https://arxiv.org/abs/2203.11171)
 
-Fan out to N models in parallel. Test each candidate against a verifier. Return the first that passes. This is best-of-N where the verifier is an executable test rather than a reward model.
-
-**When it works:** Code generation with unit tests. In our experiments this matched cascade_test's accuracy; marginal cost per request was local electricity only.
-
-**When it fails:** When no model in the set can solve the problem (same ceiling as cascade_test). Also wastes compute — all models run even if the first one passes.
-
-**Academic insight:** [Snell et al.](https://arxiv.org/abs/2408.03314) showed that best-of-N is suboptimal — a "compute-optimal" strategy that adapts N to prompt difficulty is 4x more efficient. Cascade+Test is a step toward this (sequential = adaptive N).
-
-**Our implementation:** Parallel fan-out, test each as it arrives, early-exit on first pass.
+Status: **removed from the gateway** (September 2026), same reason as Cascade+Test:
+the verifier ran as caller-supplied Python inside the daemon. Keep the validation
+loop where the tests are already trusted — in the caller.
 
 ### 7. Chain / Refine (Ensemble During — Sequential Refinement)
 **Academic origin:** [RecursiveMAS (Yang et al., 2026)](https://arxiv.org/abs/2604.25917) — recursive latent-space refinement; [DMAD (Liu et al., ICLR 2025)](https://openreview.net/forum?id=qsKo9mdGNu) — diverse multi-agent debate
@@ -117,7 +108,7 @@ Fan out to N generator models. A merge model synthesizes all responses into one.
 ### 9. Best-of-N with Verifier (Not yet implemented)
 **Academic origin:** [Best-of-N + Process Reward Models (Snell et al., 2024)](https://arxiv.org/abs/2408.03314); [Self-Certainty (Kang et al., 2025)](https://arxiv.org/abs/2502.18581)
 
-Generate N samples, score each with a verifier (reward model or self-certainty), pick the best. Different from test_vote (which uses binary pass/fail) — this uses a graded score.
+Generate N samples, score each with a verifier (reward model or self-certainty), pick the best. Different from the removed gateway test_vote (which used binary pass/fail) — this uses a graded score.
 
 **Self-Certainty** is the reward-free version: use the model's own logprob distribution to estimate confidence. No external reward model needed. Scales with N like reward models but without the compute overhead.
 
@@ -141,7 +132,7 @@ Classify prompt difficulty, route to cheap model for easy, expensive model for h
 
 2. **Diversity matters** — [DMAD (ICLR 2025)](https://openreview.net/forum?id=qsKo9mdGNu) showed that diverse reasoning approaches beat persona-based diversity. For us: use different model families, not just different prompts.
 
-3. **Adaptive compute** — [Snell et al.](https://arxiv.org/abs/2408.03314) showed compute-optimal scaling (adapting N to difficulty) is 4x more efficient than fixed best-of-N. Our cascade_test is a step toward this.
+3. **Adaptive compute** — [Snell et al.](https://arxiv.org/abs/2408.03314) showed compute-optimal scaling (adapting N to difficulty) is 4x more efficient than fixed best-of-N. The removed gateway cascade_test was a step toward this (the strategy itself remains valid client-side).
 
 4. **Collaborativeness** — [MoA](https://arxiv.org/abs/2406.04692) found models improve when seeing other models' outputs, even inferior ones. This is why parallel_merge works for text.
 

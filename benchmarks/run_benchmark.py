@@ -98,8 +98,6 @@ def call_stoke(
     routing: str = "single",
     vote_models: Optional[list] = None,
     timeout: int = 120,
-    test_code: Optional[str] = None,
-    entry_point: Optional[str] = None,
 ) -> tuple:
     """Call the Stoke proxy and return (response_text, cost_dict)."""
     payload = {
@@ -111,10 +109,6 @@ def call_stoke(
     }
     if vote_models:
         payload["vote_models"] = vote_models
-    if test_code:
-        payload["test_code"] = test_code
-    if entry_point:
-        payload["entry_point"] = entry_point
 
     try:
         resp = requests.post(
@@ -250,14 +244,11 @@ def benchmark_single(
     start = time.time()
     
     if routing == "auto":
-        # Auto-routing: let the proxy classify and route.
-        # Pass test_code + entry_point so the proxy can use cascade_test for code.
-        test_code = problem.get("test", "")
-        entry_point = problem.get("entry_point", "")
+        # Auto-routing: let the proxy classify and route a single call.
+        # (Gateway-side test execution was removed; validation is local below.)
         raw_messages = [{"role": "user", "content": prompt}]
         response, cost = call_stoke(
             model, raw_messages, routing="auto", timeout=timeout,
-            test_code=test_code, entry_point=entry_point,
         )
         elapsed = time.time() - start
         code = extract_code(prompt, response)
@@ -272,15 +263,11 @@ def benchmark_single(
         }
 
     if routing == "test_vote" and vote_models:
-        # Use server-side test_vote via the proxy — includes cost tracking,
-        # early-exit, and server-side code extraction with import handling.
-        # Send the raw prompt (not wrapped) so the server can detect function defs.
-        test_code = problem.get("test", "")
-        entry_point = problem.get("entry_point", "")
+        # Gateway-side test execution was removed (security); the benchmark
+        # validates locally instead and bills single-call routing per model.
         raw_messages = [{"role": "user", "content": prompt}]
         response, cost = call_stoke(
-            model, raw_messages, routing="test_vote", vote_models=vote_models, timeout=timeout,
-            test_code=test_code, entry_point=entry_point,
+            model, raw_messages, routing="single", timeout=timeout,
         )
         elapsed = time.time() - start
 
@@ -300,13 +287,11 @@ def benchmark_single(
         }
 
     if routing == "cascade_test" and vote_models:
-        # Use server-side cascade_test via the proxy
-        test_code = problem.get("test", "")
-        entry_point = problem.get("entry_point", "")
+        # Gateway-side test execution was removed (security); the benchmark
+        # validates locally instead and bills single-call routing.
         raw_messages = [{"role": "user", "content": prompt}]
         response, cost = call_stoke(
-            model, raw_messages, routing="cascade_test", vote_models=vote_models, timeout=timeout,
-            test_code=test_code, entry_point=entry_point,
+            model, raw_messages, routing="single", timeout=timeout,
         )
         elapsed = time.time() - start
         code = extract_code(prompt, response)
@@ -527,7 +512,7 @@ def main():
     parser = argparse.ArgumentParser(description="Stoke HumanEval Benchmark")
     parser.add_argument("--model", required=True, help="Model to test")
     parser.add_argument("--routing", default="single", 
-                        choices=["single", "auto", "parallel_vote", "cascade", "cascade_test", "test_vote", "chain", "parallel_merge", "self_consistency", "best_of_n", "deliberation"],
+                        choices=["single", "auto", "parallel_vote", "cascade", "chain", "parallel_merge", "self_consistency", "best_of_n", "deliberation"],
                         help="Routing/fusion strategy")
     parser.add_argument("--n-samples", type=int, default=5,
                         help="Number of samples for self_consistency (default 5)")

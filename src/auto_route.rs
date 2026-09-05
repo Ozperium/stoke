@@ -170,14 +170,9 @@ pub struct RouteOpts {
     pub quality: Vec<String>,
     pub vote_models: Vec<String>,
     pub quality_mode: bool,
-    pub test_code: String,
-    pub entry_point: String,
 }
 
 impl RouteOpts {
-    pub fn has_tests(&self) -> bool {
-        !self.test_code.is_empty() && !self.entry_point.is_empty()
-    }
 
     /// Resolve candidate lists from config + discovery. Synchronous.
     pub fn resolve(
@@ -255,8 +250,6 @@ impl RouteOpts {
             quality,
             vote_models,
             quality_mode: extra.get("quality_mode").and_then(|v| v.as_bool()).unwrap_or(false),
-            test_code: extra.get("test_code").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            entry_point: extra.get("entry_point").and_then(|v| v.as_str()).unwrap_or("").to_string(),
         }
     }
 }
@@ -442,30 +435,10 @@ pub fn decide(
     }
 
     // Always score first, so fit exclusions (context/tools) and discovery are
-    // honored even on the validated-pattern path — the primary model must be a
-    // candidate the scorer would actually pick, never a blind models.first().
+    // honored — the primary model must be a candidate the scorer would
+    // actually pick, never a blind models.first().
     let scored = score_list(&models, discovered, pricer, facts);
     let chosen = scored.iter().find(|c| c.excluded.is_none()).cloned();
-
-    // Validated pattern when tests ride along, and a fit primary model exists.
-    if class == PromptClass::Code && opts.has_tests() && opts.vote_models.len() >= 2 {
-        if let Some(c) = &chosen {
-            return AutoDecision {
-                class,
-                pattern: "cascade_test".into(),
-                model: c.model.clone(),
-                vote_models: opts.vote_models.clone(),
-                reason: format!(
-                    "Code with tests → validated fallback (primary {} on {})",
-                    c.model, c.node
-                ),
-                chosen: Some(c.clone()),
-                not_taken: vec![],
-                counterfactual_usd,
-            };
-        }
-        // else fall through to the standard exclusion-reporting path below
-    }
 
     let not_taken: Vec<ScoredCandidate> = scored
         .iter()
@@ -563,8 +536,6 @@ mod tests {
             quality: vec![],
             vote_models: vec!["fixture-a".into(), "fixture-b".into()],
             quality_mode: false,
-            test_code: String::new(),
-            entry_point: String::new(),
         }
     }
 
@@ -706,24 +677,6 @@ mod tests {
         let msgs = vec![json!({"role":"user","content":[{"type":"text","text": big}]})];
         assert_eq!(classify(&msgs), PromptClass::LongContext, "array content must be seen");
         assert!(extract_text(&msgs).len() > 20000);
-    }
-
-    #[test]
-    fn cascade_test_respects_fit_exclusions() {
-        // coder[0] can't fit; tests present → must NOT blindly pick coder[0]
-        let mut small = dm("fixture-coder", "laptop", 0, true);
-        small.context_length = Some(50);
-        let big = dm("fixture-coder-small", "laptop", 0, true);
-        let mut o = opts();
-        o.coder = vec!["fixture-coder".into(), "fixture-coder-small".into()];
-        o.test_code = "assert True".into();
-        o.entry_point = "f".into();
-        let msgs = vec![json!({"role":"user","content":"implement python function def f(): pass  # code"})];
-        let mut f = facts(Mode::Balanced);
-        f.prompt_tokens_est = 100; f.gen_tokens_est = 100;
-        let d = decide(&msgs, &o, &[small, big], &Pricer::default(), &f);
-        assert_eq!(d.pattern, "cascade_test");
-        assert_eq!(d.model, "fixture-coder-small", "must skip the unfitting primary");
     }
 
     #[test]
