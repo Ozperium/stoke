@@ -64,7 +64,7 @@ impl Drop for SpendReservation {
             let key_id = self.budget.durable_key_id(&self.key);
             if let Err(e) = ledger.release(&key_id, self.amount) {
                 tracing::error!(
-                    "ledger: durable release failed for key_id {}: {} —                      run stoke ledger reconcile",
+                    "ledger: durable release failed for key_id {}: {} — run `stoke ledger reconcile`",
                     &key_id[..12.min(key_id.len())],
                     e
                 );
@@ -469,7 +469,7 @@ impl BudgetGuard {
                 // The in-memory figure already counts this; the durable one
                 // must too. A failed conversion is a hard error: log loudly.
                 tracing::error!(
-                    "ledger: charge_and_release failed for key_id {}: {} —                      durable spend may lag; run stoke ledger reconcile",
+                    "ledger: charge_and_release failed for key_id {}: {} — durable spend may lag; run `stoke ledger reconcile`",
                     &key_id[..12.min(key_id.len())],
                     e
                 );

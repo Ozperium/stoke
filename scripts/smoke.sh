@@ -188,4 +188,12 @@ done
 curl -fsS "http://127.0.0.1:$STOKE_PORT/ui" | grep -q "Loop detected" \
   || fail "demo loop refusal missing from dashboard"
 
-echo "SMOKE TEST PASSED ✔ (dashboard, enforcement feed, demo, discovery, placement, failover, health)"
+echo "==> assert: stoke ledger status reads the gateway's durable ledger (ADR 0001)"
+STOKE_LEDGER_PATH="$WORK_DIR/ledger.db" "$REPO_DIR/target/debug/stoke" ledger status \
+  > "$WORK_DIR/ledger-status.out" || fail "stoke ledger status exited non-zero"
+grep -q "key_id\|no spend recorded" "$WORK_DIR/ledger-status.out" \
+  || fail "ledger status output missing both table and empty-state text"
+STOKE_LEDGER_PATH="$WORK_DIR/ledger.db" "$REPO_DIR/target/debug/stoke" ledger reconcile \
+  2>/dev/null && fail "reconcile without a key_id must fail"
+
+echo "SMOKE TEST PASSED ✔ (dashboard, enforcement feed, demo, discovery, placement, failover, health, ledger)"

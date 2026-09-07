@@ -94,7 +94,8 @@ fn handle_flags() {
                  Reads stoke.toml from the current directory or ~/.config/stoke/,\n\
                  then serves when invoked without arguments.\n\n\
                  Commands:\n  \
-                   run              launch Claude Code or Codex through Stoke\n\n\
+                   run              launch Claude Code or Codex through Stoke\n  \
+                   ledger           durable budget ledger: status, reconcile\n\n\
                  Options:\n  \
                    -V, --version   print version and exit\n  \
                    -h, --help      print this help and exit\n\n\
@@ -116,6 +117,21 @@ fn handle_flags() {
 
 #[tokio::main]
 async fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        // `stoke ledger` — the durable-ledger operator surface (ADR 0001).
+        // Handled before config load: reconciliation must work when the
+        // gateway is down or its config is broken.
+        Some("ledger") => {
+            let code = ledger::cli_main(&args[1..]);
+            if code == std::process::ExitCode::SUCCESS {
+                std::process::exit(0);
+            } else {
+                std::process::exit(1);
+            }
+        }
+        _ => {}
+    }
     handle_flags();
     tracing_subscriber::fmt::init();
 

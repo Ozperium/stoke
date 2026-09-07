@@ -32,8 +32,17 @@ pub struct Unresolved {
     pub created_at: i64,
 }
 
-// The CLI ledger commands (status/reconcile) land with the operator surface;
-// until then these are exercised by the unit tests below.
+/// One key's durable snapshot as printed by `stoke ledger status`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyStatus {
+    pub key_id: String,
+    pub spend_usd: f64,
+    pub estimated_usd: f64,
+    pub held_usd: f64,
+}
+
+// The CLI operator surface (`stoke ledger status|reconcile`) lives in
+// `cli_main` below, shared by both binaries.
 #[allow(dead_code)]
 impl Ledger {
     /// Open (creating if needed) the ledger database and ensure the schema.
@@ -226,6 +235,91 @@ impl Ledger {
         Ok(out)
     }
 
+    /// Per-key durable snapshot (spend + open holds) for every key the ledger
+    /// knows about — the `stoke ledger status` view.
+    pub fn list_spend(&self) -> Result<Vec<KeyStatus>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT key_id, spend_usd, estimated_usd FROM spend
+                 UNION
+                 SELECT key_id, 0, 0 FROM reservations
+                 WHERE key_id NOT IN (SELECT key_id FROM spend)",
+            )
+            .map_err(|e| format!("ledger: status list: {e}"))?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(KeyStatus {
+                    key_id: r.get(0)?,
+                    spend_usd: r.get(1)?,
+                    estimated_usd: r.get(2)?,
+                    held_usd: 0.0,
+                })
+            })
+            .map_err(|e| format!("ledger: status list: {e}"))?;
+        let mut out: Vec<KeyStatus> = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|e| format!("ledger: status row: {e}"))?);
+        }
+        // Fill in open holds per key; a crash may leave holds with no spend row.
+        let mut stmt = conn
+            .prepare(
+                "SELECT key_id, COALESCE(SUM(amount_usd), 0) FROM reservations
+                 GROUP BY key_id",
+            )
+            .map_err(|e| format!("ledger: status holds: {e}"))?;
+        let holds = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?)))
+            .map_err(|e| format!("ledger: status holds: {e}"))?;
+        for row in holds {
+            let (key_id, held) = row.map_err(|e| format!("ledger: status row: {e}"))?;
+            match out.iter_mut().find(|k| k.key_id == key_id) {
+                Some(entry) => entry.held_usd = held,
+                None => out.push(KeyStatus {
+                    key_id,
+                    spend_usd: 0.0,
+                    estimated_usd: 0.0,
+                    held_usd: held,
+                }),
+            }
+        }
+        out.sort_by(|a, b| a.key_id.cmp(&b.key_id));
+        Ok(out)
+    }
+
+    /// Operator-facing plaintext status for the whole ledger. Never prints raw
+    /// secrets — the rows only ever contain key ids.
+    pub fn status_text(&self) -> Result<String, String> {
+        let keys = self.list_spend()?;
+        let mut out = String::new();
+        if keys.is_empty() {
+            out.push_str("ledger: no spend recorded, no open holds\n");
+            return Ok(out);
+        }
+        out.push_str(&format!(
+            "{:<20} {:>12} {:>12} {:>12}\n",
+            "key_id", "spend_usd", "held_usd", "estimated"
+        ));
+        for k in &keys {
+            out.push_str(&format!(
+                "{:<20} {:>12.4} {:>12.4} {:>12.4}\n",
+                Self::short_id(&k.key_id),
+                k.spend_usd,
+                k.held_usd,
+                k.estimated_usd
+            ));
+        }
+        Ok(out)
+    }
+
+    fn short_id(id: &str) -> String {
+        if id.len() <= 16 {
+            id.to_string()
+        } else {
+            format!("{}…", &id[..15])
+        }
+    }
+
     /// Operator reconciliation after a crash: count a key's unresolved holds
     /// as real spend (the request may have reached the provider before dying).
     /// Returns the reconciled total.
@@ -369,6 +463,99 @@ fn epoch_min_now() -> i64 {
     unix_now() / 60
 }
 
+/// The `stoke ledger` operator commands (ADR 0001). Shared by both binaries:
+/// the daemon accepts `ledger` as a subcommand before it serves, and
+/// `stoke-cli ledger` forwards here. Takes the ledger path from
+/// STOKE_LEDGER_PATH, falling back to ~/.stoke/ledger.db — the same path the
+/// gateway uses, so the operator inspects exactly what the gateway enforces.
+pub fn cli_main(args: &[String]) -> std::process::ExitCode {
+    let sub = args.first().map(String::as_str).unwrap_or("");
+    let path = ledger_path();
+    match sub {
+        "status" => {
+            let ledger = match Ledger::open(&path) {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("ledger: cannot open {}: {e}", path.display());
+                    return std::process::ExitCode::FAILURE;
+                }
+            };
+            match ledger.status_text() {
+                Ok(text) => {
+                    print!("{text}");
+                    std::process::ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::ExitCode::FAILURE
+                }
+            }
+        }
+        "reconcile" => {
+            let mut key_id = String::new();
+            for a in args.iter().skip(1) {
+                if a == "--key" {
+                    continue;
+                }
+                if !a.starts_with('-') {
+                    key_id = a.clone();
+                }
+            }
+            if key_id.is_empty() {
+                eprintln!("usage: stoke ledger reconcile <key_id>");
+                return std::process::ExitCode::FAILURE;
+            }
+            let ledger = match Ledger::open(&path) {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("ledger: cannot open {}: {e}", path.display());
+                    return std::process::ExitCode::FAILURE;
+                }
+            };
+            match ledger.operator_reconcile(&key_id) {
+                Ok(charged) => {
+                    println!("reconciled {key_id}: charged ${charged:.4} of unresolved holds");
+                    std::process::ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::ExitCode::FAILURE
+                }
+            }
+        }
+        "--help" | "-h" | "help" | "" => {
+            eprintln!(
+                "stoke ledger — durable budget ledger operator surface (ADR 0001)\n\n\
+                 Usage: stoke ledger <command>\n\n\
+                 Commands:\n  \
+                   status                per-key durable spend, holds, and estimates\n  \
+                   reconcile <key_id>    charge a key's unresolved crash holds as real spend\n\n\
+                 The ledger path follows the gateway's: STOKE_LEDGER_PATH, else ~/.stoke/ledger.db.\n\
+                 Unresolved holds keep counting against the key until reconciled — that is\n\
+                 the documented \"hard cap\" crash semantics, never auto-forgiven."
+            );
+            std::process::ExitCode::SUCCESS
+        }
+        other => {
+            eprintln!("unknown ledger command: {other} (try 'stoke ledger --help')");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+/// Same resolution order the gateway uses at boot (src/main.rs).
+fn ledger_path() -> std::path::PathBuf {
+    match std::env::var("STOKE_LEDGER_PATH") {
+        Ok(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        _ => {
+            let home = std::env::var("HOME").unwrap_or_default();
+            std::path::Path::new(&home)
+                .join(".stoke")
+                .join("ledger.db")
+        }
+    }
+}
+
 fn rand_bytes() -> [u8; 32] {
     use sha2::{Digest, Sha256};
     // Per-installation randomness: std has no RNG API, so seed from boot
@@ -402,6 +589,34 @@ mod tests {
         ledger.charge_and_release("k1", 0.25).unwrap();
         assert_eq!(ledger.spend("k1").unwrap(), 0.25);
         assert_eq!(ledger.held("k1").unwrap(), 0.0);
+    }
+
+    #[test]
+    fn status_reports_spend_and_open_holds_per_key() {
+        let ledger = l();
+        ledger.reserve("k1", 0.25).unwrap();
+        ledger.charge_and_release("k1", 0.25).unwrap();
+        ledger.reserve("k2", 0.40).unwrap(); // unresolved crash hold
+        let text = ledger.status_text().unwrap();
+        // The spend row and the hold row are both visible, keyed by id only.
+        assert!(text.contains("key_id"), "{text}");
+        assert!(text.contains("spend_usd"), "{text}");
+        assert!(text.contains("held_usd"), "{text}");
+        let keys = ledger.list_spend().unwrap();
+        let k1 = keys.iter().find(|k| k.key_id == "k1").unwrap();
+        assert_eq!(k1.spend_usd, 0.25);
+        assert_eq!(k1.held_usd, 0.0);
+        // k2 has no spend row but its hold must still appear — this is the
+        // post-crash state the operator needs to see before reconciling.
+        let k2 = keys.iter().find(|k| k.key_id == "k2").unwrap();
+        assert_eq!(k2.spend_usd, 0.0);
+        assert_eq!(k2.held_usd, 0.40);
+    }
+
+    #[test]
+    fn status_on_an_empty_ledger_is_not_an_error() {
+        let text = l().status_text().unwrap();
+        assert!(text.contains("no spend recorded"), "{text}");
     }
 
     #[test]

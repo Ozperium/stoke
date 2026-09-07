@@ -143,6 +143,20 @@ Because prompts route to your own machines by default, they never leave your inf
 
 Single Rust binary (~5.5 MB release build), zero runtime dependencies, TOML config, default port 8787.
 
+### Crash recovery for the durable budget ledger
+
+Budget spend and in-flight holds live in a SQLite ledger (ADR 0001) and survive
+crashes and restarts — a hold written before a provider call stays open until it
+is converted to spend or reconciled by an operator. Inspect it and reconcile it
+after a crash:
+
+```bash
+stoke ledger status             # per-key durable spend, open holds, estimates
+stoke ledger reconcile <key_id> # charge a key's unresolved crash holds as real spend
+```
+
+The ledger path follows the gateway's: `STOKE_LEDGER_PATH`, else `~/.stoke/ledger.db`. Unresolved holds keep counting against the key until reconciled — that is the documented "hard cap" crash semantics; Stoke never auto-forges forgiveness for money it may have spent.
+
 ## Quickstart
 
 The product boundary and the answer to “where do the models come from?” are recorded in [`docs/control-plane-positioning.md`](docs/control-plane-positioning.md). Stoke is a control plane for capacity you attach; it does not ship a hidden model catalogue or provider credits.

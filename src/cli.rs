@@ -17,6 +17,7 @@ fn main() -> ExitCode {
         "bench" => cli_bench(&args[2..]),
         "models" => cli_models(&args[2..]),
         "login-claude" => cli_login_claude(&args[2..]),
+        "ledger" => stoke::ledger::cli_main(&args[2..]),
         "pricing" => cli_pricing(&args[2..]),
         "routes" => cli_routes(&args[2..]),
         "version" | "--version" | "-V" => {
@@ -48,6 +49,7 @@ fn print_usage() {
            routes   List configured route profiles\n  \
            models   List available models\n  \
           login-claude  Sign in with your Claude subscription (or --status)\n  \
+          ledger    Durable ledger: status, reconcile (crash recovery)\n  \
            pricing  Show model pricing\n  \
            version  Show version\n\n\
          Quick start:\n  \
