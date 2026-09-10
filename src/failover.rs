@@ -96,21 +96,8 @@ pub async fn stream_with_failover_detailed(
                     });
                 } else {
                     let status = resp.status();
-                    let retry_after = resp
-                        .headers()
-                        .get("retry-after")
-                        .and_then(|value| value.to_str().ok())
-                        .filter(|value| value.len() <= 10 && !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()))
-                        .map(str::to_string);
-                    let should_retry = resp
-                        .headers()
-                        .get("x-should-retry")
-                        .and_then(|value| value.to_str().ok())
-                        .and_then(|value| {
-                            if value.eq_ignore_ascii_case("true") { Some("true".to_string()) }
-                            else if value.eq_ignore_ascii_case("false") { Some("false".to_string()) }
-                            else { None }
-                        });
+                    let (retry_after, should_retry) =
+                        crate::router::capture_upstream_hints(&resp);
                     let text = resp.text().await.unwrap_or_default();
                     last_error = crate::router::ProviderError {
                         message: format!("Provider {}: {} {}", provider.name, status, text),

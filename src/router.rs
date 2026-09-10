@@ -78,21 +78,32 @@ impl ProviderError {
     }
 }
 
-fn allowlisted_retry_after(resp: &reqwest::Response) -> Option<String> {
-    let value = resp.headers().get("retry-after")?.to_str().ok()?;
-    (value.len() <= 10 && !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()))
-        .then(|| value.to_string())
+fn unique_header_value<'a>(resp: &'a reqwest::Response, name: &str) -> Option<&'a str> {
+    let mut values = resp.headers().get_all(name).iter();
+    let value = values.next()?;
+    if values.next().is_some() {
+        return None;
+    }
+    value.to_str().ok()
 }
 
-fn allowlisted_should_retry(resp: &reqwest::Response) -> Option<String> {
-    let value = resp.headers().get("x-should-retry")?.to_str().ok()?;
-    if value.eq_ignore_ascii_case("true") {
-        Some("true".to_string())
-    } else if value.eq_ignore_ascii_case("false") {
-        Some("false".to_string())
-    } else {
-        None
-    }
+fn allowlisted_retry_after_value(value: &str) -> Option<String> {
+    let integer_seconds = !value.is_empty()
+        && value.len() <= 10
+        && value.bytes().all(|byte| byte.is_ascii_digit());
+    let http_date = chrono::DateTime::parse_from_rfc2822(value).is_ok();
+    (integer_seconds || http_date).then(|| value.to_string())
+}
+
+pub(crate) fn capture_upstream_hints(
+    resp: &reqwest::Response,
+) -> (Option<String>, Option<String>) {
+    let retry_after = unique_header_value(resp, "retry-after")
+        .and_then(allowlisted_retry_after_value);
+    let should_retry = unique_header_value(resp, "x-should-retry")
+        .filter(|value| matches!(*value, "true" | "false"))
+        .map(str::to_string);
+    (retry_after, should_retry)
 }
 
 /// Call a single provider with a chat completion request.
@@ -153,8 +164,7 @@ pub async fn call_provider_hop_detailed(
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let retry_after = allowlisted_retry_after(&resp);
-        let should_retry = allowlisted_should_retry(&resp);
+        let (retry_after, should_retry) = capture_upstream_hints(&resp);
         let text = resp.text().await.unwrap_or_default();
         return Err(ProviderError {
             message: format!("Provider {} returned {}: {}", provider.name, status, text),

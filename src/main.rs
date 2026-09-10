@@ -2249,16 +2249,72 @@ fn response_with_upstream_hints(
     message: String,
     upstream: Option<&router::UpstreamErrorMetadata>,
 ) -> Response {
-    let mut response = Response::builder().status(status);
+    let mut response = (status, message).into_response();
     if let Some(upstream) = upstream {
         if let Some(value) = &upstream.retry_after {
-            response = response.header("Retry-After", value);
+            response.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                value.parse().expect("validated Retry-After header"),
+            );
         }
         if let Some(value) = &upstream.should_retry {
-            response = response.header("x-should-retry", value);
+            response.headers_mut().insert(
+                axum::http::HeaderName::from_static("x-should-retry"),
+                value.parse().expect("validated x-should-retry header"),
+            );
         }
     }
-    response.body(axum::body::Body::from(message)).unwrap()
+    response
+}
+
+#[cfg(test)]
+mod upstream_hint_response_tests {
+    use super::{response_with_upstream_hints, router::UpstreamErrorMetadata};
+    use axum::body::to_bytes;
+    use axum::http::StatusCode;
+
+    #[tokio::test]
+    async fn preserves_text_response_semantics_for_local_and_upstream_errors() {
+        let local = response_with_upstream_hints(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "local failure".to_string(),
+            None,
+        );
+        assert_eq!(local.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            local.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
+        assert_eq!(
+            to_bytes(local.into_body(), 1024).await.unwrap().as_ref(),
+            b"local failure"
+        );
+
+        let upstream = UpstreamErrorMetadata {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            retry_after: Some("Tue, 01 Jan 2030 00:00:00 GMT".to_string()),
+            should_retry: Some("false".to_string()),
+        };
+        let hinted = response_with_upstream_hints(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "upstream failure".to_string(),
+            Some(&upstream),
+        );
+        assert_eq!(hinted.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            hinted.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
+        assert_eq!(
+            hinted.headers().get("retry-after").unwrap(),
+            "Tue, 01 Jan 2030 00:00:00 GMT"
+        );
+        assert_eq!(hinted.headers().get("x-should-retry").unwrap(), "false");
+        assert_eq!(
+            to_bytes(hinted.into_body(), 1024).await.unwrap().as_ref(),
+            b"upstream failure"
+        );
+    }
 }
 
 fn response_with_cache_marker(mut response_json: Value, marker: &str) -> Response {
