@@ -1553,24 +1553,25 @@ async fn chat_completions(
     // Scoped to (api_key, path): a cached response is a response the caller was
     // already authorised to receive, and nobody else.
     let cache_scope = ResponseCache::scope_of(&api_key, path);
+    let cache_request = serde_json::to_value(&req).unwrap_or_default();
     let cache_key = if routing == "single" && !req.stream.unwrap_or(false) {
-        ResponseCache::cache_key(
-            &cache_scope,
-            &model,
-            &req.messages,
-            req.temperature,
-            req.max_tokens,
-        )
+        ResponseCache::cache_key(&cache_scope, &model, &cache_request)
     } else {
         None
     };
 
     let cache_prompt = ResponseCache::extract_prompt(&req.messages);
+    let semantic_identity = ResponseCache::semantic_identity(&cache_scope, &model, &cache_request);
 
     if let Some(ref key) = cache_key {
         if let Some((_matched_key, cached)) = state
             .cache
-            .get_smart(key, &cache_scope, &cache_prompt)
+            .get_smart(
+                key,
+                &cache_scope,
+                &cache_prompt,
+                semantic_identity.as_deref(),
+            )
             .await
         {
             tracing::info!("cache hit: key={}", &key[..8]);
@@ -2114,7 +2115,13 @@ async fn chat_completions(
     if let Some(ref key) = cache_key {
         state
             .cache
-            .put_with_embedding(key, &cache_scope, response_json.clone(), &cache_prompt)
+            .put_with_embedding(
+                key,
+                &cache_scope,
+                response_json.clone(),
+                &cache_prompt,
+                semantic_identity.as_deref(),
+            )
             .await;
     }
 
