@@ -51,6 +51,30 @@ use futures_util::StreamExt;
 use router::{call_provider_hop, cascade, self_consistency, ProviderResult, SHARED_CLIENT};
 use ttft::TtftTracker;
 
+fn cache_control_bypasses_response_cache(headers: &axum::http::HeaderMap) -> bool {
+    headers.get_all("cache-control").iter().any(|value| {
+        let Ok(value) = value.to_str() else { return true };
+        value.split(',').any(|directive| {
+            let name = directive.split_once('=').map(|(name, _)| name).unwrap_or(directive);
+            name.trim().eq_ignore_ascii_case("no-store")
+                || name.trim().eq_ignore_ascii_case("no-cache")
+        })
+    })
+}
+
+fn response_is_cacheable_text_completion(response: &Value) -> bool {
+    let Some(object) = response.as_object() else { return false };
+    if object.contains_key("error") { return false; }
+    let Some(choices) = object.get("choices").and_then(Value::as_array) else { return false; };
+    !choices.is_empty() && choices.iter().all(|choice| {
+        let Some(choice) = choice.as_object() else { return false; };
+        if choice.get("finish_reason").and_then(Value::as_str) != Some("stop") { return false; }
+        let Some(message) = choice.get("message").and_then(Value::as_object) else { return false; };
+        message.get("content").and_then(Value::as_str).is_some()
+            && !message.contains_key("tool_calls")
+    })
+}
+
 #[derive(Clone)]
 pub struct AppState {
     config: Arc<Config>,
@@ -1142,6 +1166,7 @@ async fn chat_completions(
             return (StatusCode::UNAUTHORIZED, "Invalid or missing API key").into_response();
         }
     };
+    let cache_control_bypass = cache_control_bypasses_response_cache(&headers);
 
     // Compute prompt hash for loop detection (model + messages + temp)
     let prompt_text: String = req
@@ -1553,27 +1578,34 @@ async fn chat_completions(
     // Scoped to (api_key, path): a cached response is a response the caller was
     // already authorised to receive, and nobody else.
     let cache_scope = ResponseCache::scope_of(&api_key, path);
-    let cache_request = serde_json::to_value(&req).unwrap_or_default();
-    let cache_key = if routing == "single" && !req.stream.unwrap_or(false) {
-        ResponseCache::cache_key(&cache_scope, &model, &cache_request)
-    } else {
-        None
-    };
-
-    let cache_prompt = ResponseCache::extract_prompt(&req.messages);
-    let semantic_identity = ResponseCache::semantic_identity(&cache_scope, &model, &cache_request);
-
+    let response_cache_policy = route_profile.and_then(|profile| profile.response_cache.as_ref());
+    let cache_eligible = routing == "single"
+        && !req.stream.unwrap_or(false)
+        && !cache_control_bypass
+        && !matches!(response_cache_policy.map(|p| p.mode.as_str()), Some("off"));
+    let exact_route_ttl = response_cache_policy
+        .and_then(|policy| (policy.mode == "exact").then(|| policy.ttl_secs).flatten())
+        .map(|ttl_secs| state.cache.effective_ttl(ttl_secs));
+    let exact_route = exact_route_ttl.is_some();
+    let mut cache_key: Option<String> = None;
+    let mut cache_prompt: Option<String> = None;
+    let mut semantic_identity: Option<String> = None;
+    if cache_eligible {
+        let cache_request = serde_json::to_value(&req).unwrap_or_default();
+        cache_key = ResponseCache::cache_key(&cache_scope, &model, &cache_request);
+        if !exact_route {
+            cache_prompt = Some(ResponseCache::extract_prompt(&req.messages));
+            semantic_identity = ResponseCache::semantic_identity(&cache_scope, &model, &cache_request);
+        }
+    }
     if let Some(ref key) = cache_key {
-        if let Some((_matched_key, cached)) = state
-            .cache
-            .get_smart(
-                key,
-                &cache_scope,
-                &cache_prompt,
-                semantic_identity.as_deref(),
-            )
-            .await
-        {
+        let cached = if let Some(ttl) = exact_route_ttl {
+            state.cache.get_exact_with_ttl(key, ttl)
+        } else {
+            state.cache.get_smart(key, &cache_scope, cache_prompt.as_deref().unwrap_or_default(), semantic_identity.as_deref()).await
+                .map(|(_matched_key, response)| response)
+        };
+        if let Some(cached) = cached {
             tracing::info!("cache hit: key={}", &key[..8]);
             record_decision(
                 &state,
@@ -2110,19 +2142,14 @@ async fn chat_completions(
         },
     );
 
-    // Store in cache if we have a key (single routing, temp=0)
-    // Uses put_with_embedding to generate embedding for semantic cache
-    if let Some(ref key) = cache_key {
-        state
-            .cache
-            .put_with_embedding(
-                key,
-                &cache_scope,
-                response_json.clone(),
-                &cache_prompt,
-                semantic_identity.as_deref(),
-            )
-            .await;
+    if exact_route && !response_is_cacheable_text_completion(&response_json) {
+        tracing::debug!("exact response cache: response is not a complete text completion");
+    } else if let Some(ref key) = cache_key {
+        if exact_route {
+            state.cache.put_exact(key, &cache_scope, response_json.clone());
+        } else {
+            state.cache.put_with_embedding(key, &cache_scope, response_json.clone(), cache_prompt.as_deref().unwrap_or_default(), semantic_identity.as_deref()).await;
+        }
     }
 
     Json(response_json).into_response()
@@ -2200,5 +2227,26 @@ mod hold_sizing_tests {
     #[test]
     fn an_empty_vote_list_falls_back_to_the_requested_model() {
         assert!((hold("test_vote", "dear", &[], 1) - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn response_cache_headers_bypass_all_duplicate_case_insensitive_directives() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.append("cache-control", "max-age=0".parse().unwrap());
+        headers.append("cache-control", "No-Store".parse().unwrap());
+        assert!(super::cache_control_bypasses_response_cache(&headers));
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("cache-control", "public, NO-CACHE".parse().unwrap());
+        assert!(super::cache_control_bypasses_response_cache(&headers));
+    }
+
+    #[test]
+    fn exact_policy_only_stores_complete_text_completions() {
+        let complete = serde_json::json!({"choices": [{"finish_reason":"stop", "message":{"content":"ok"}}]});
+        let truncated = serde_json::json!({"choices": [{"finish_reason":"length", "message":{"content":"partial"}}]});
+        let tool_call = serde_json::json!({"choices": [{"finish_reason":"stop", "message":{"content":null,"tool_calls":[]}}]});
+        assert!(super::response_is_cacheable_text_completion(&complete));
+        assert!(!super::response_is_cacheable_text_completion(&truncated));
+        assert!(!super::response_is_cacheable_text_completion(&tool_call));
     }
 }

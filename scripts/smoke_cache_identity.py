@@ -20,6 +20,7 @@ from urllib.request import Request, urlopen
 binary = os.environ.get("STOKE_BIN")
 if not binary:
     raise SystemExit("STOKE_BIN must point at the built stoke binary")
+binary = str(Path(binary).resolve())
 calls = []
 
 
@@ -45,6 +46,7 @@ class Mock(BaseHTTPRequestHandler):
             return
         calls.append(request)
         answer = json.dumps([message["role"] for message in request["messages"]])
+        finish_reason = "length" if request.get("max_tokens") == 1 else "stop"
         self.send_json(
             {
                 "id": "mock",
@@ -54,7 +56,7 @@ class Mock(BaseHTTPRequestHandler):
                 "choices": [
                     {
                         "index": 0,
-                        "finish_reason": "stop",
+                        "finish_reason": finish_reason,
                         "message": {"role": "assistant", "content": answer},
                     }
                 ],
@@ -82,6 +84,23 @@ try:
             base_url="http://127.0.0.1:{server.server_port}/v1"
             models=["cache-fixture"]
             tier="local"
+            [[routes]]
+            name="exact"
+            path="/v1/exact/completions"
+            model="cache-fixture"
+            routing="single"
+            stream=false
+            [routes.response_cache]
+            mode="exact"
+            ttl_secs=60
+            [[routes]]
+            name="off"
+            path="/v1/off/completions"
+            model="cache-fixture"
+            routing="single"
+            stream=false
+            [routes.response_cache]
+            mode="off"
             '''
         )
         env = dict(os.environ, STOKE_API_KEYS=key, STOKE_LEDGER_PATH=str(work / "ledger.db"))
@@ -104,7 +123,7 @@ try:
                 else:
                     raise RuntimeError("gateway did not become healthy")
 
-                def ask(messages, **settings):
+                def ask(messages, path="/v1/chat/completions", headers=None, **settings):
                     body = {
                         "model": "cache-fixture",
                         "temperature": 0,
@@ -113,13 +132,15 @@ try:
                         "messages": messages,
                         **settings,
                     }
+                    request_headers = {
+                        "Authorization": "Bearer " + key,
+                        "Content-Type": "application/json",
+                    }
+                    request_headers.update(headers or {})
                     req = Request(
-                        base + "/v1/chat/completions",
+                        base + path,
                         data=json.dumps(body).encode(),
-                        headers={
-                            "Authorization": "Bearer " + key,
-                            "Content-Type": "application/json",
-                        },
+                        headers=request_headers,
                     )
                     return json.load(urlopen(req, timeout=5))
 
@@ -145,6 +166,33 @@ try:
                 assert setting_result.get("stoke_cache") != "hit", "setting change reused cache"
                 assert len(calls) == 4, "setting-distinct request did not reach provider"
 
+                exact_messages = [{"role": "user", "content": "policy exact"}]
+                exact_first = ask(exact_messages, "/v1/exact/completions")
+                exact_second = ask(exact_messages, "/v1/exact/completions")
+                assert exact_second.get("stoke_cache") == "hit", "exact route missed full-identity hit"
+                assert len(calls) == 5, "exact route contacted provider twice"
+
+                off_messages = [{"role": "user", "content": "policy off"}]
+                off_first = ask(off_messages, "/v1/off/completions")
+                off_second = ask(off_messages, "/v1/off/completions")
+                assert off_first.get("stoke_cache") != "hit" and off_second.get("stoke_cache") != "hit"
+                assert len(calls) == 7, "off route unexpectedly reused a response"
+
+                bypass_messages = [{"role": "user", "content": "policy bypass"}]
+                bypass = ask(bypass_messages, "/v1/exact/completions", {"Cache-Control": "No-Store"})
+                after_bypass = ask(bypass_messages, "/v1/exact/completions")
+                after_bypass_hit = ask(bypass_messages, "/v1/exact/completions")
+                assert bypass.get("stoke_cache") != "hit"
+                assert after_bypass.get("stoke_cache") != "hit", "bypass populated exact cache"
+                assert after_bypass_hit.get("stoke_cache") == "hit"
+                assert len(calls) == 9, "header bypass did not force exactly one provider call"
+
+                incomplete_messages = [{"role": "user", "content": "policy incomplete"}]
+                incomplete = ask(incomplete_messages, "/v1/exact/completions", max_tokens=1)
+                incomplete_again = ask(incomplete_messages, "/v1/exact/completions", max_tokens=1)
+                assert incomplete.get("stoke_cache") != "hit" and incomplete_again.get("stoke_cache") != "hit"
+                assert len(calls) == 11, "non-cacheable completion populated exact cache"
+
                 receipt = {
                     "identical_cache_status": identical.get("stoke_cache"),
                     "identical_provider_calls_after_pair": 1,
@@ -154,7 +202,8 @@ try:
                         role_result_b["choices"][0]["message"]["content"],
                     ],
                     "final_provider_calls": len(calls),
-                    "negative_cases": ["role/message-boundary", "max_tokens"],
+                    "policy_routes": {"exact_calls": 1, "off_calls": 2, "header_bypass_calls": 2, "incomplete_calls": 2},
+                    "negative_cases": ["role/message-boundary", "max_tokens", "no-store", "truncated_completion"],
                     "measurement": "mock wire identity check, not a token/cost benchmark",
                 }
                 print(json.dumps(receipt, indent=2))

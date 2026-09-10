@@ -72,6 +72,11 @@ impl ResponseCache {
         hex::encode(hasher.finalize())
     }
 
+    /// Route retention may shorten, but never extend, global retention.
+    pub fn effective_ttl(&self, route_ttl_secs: u64) -> Duration {
+        Duration::from_secs(route_ttl_secs.min(self.ttl.as_secs()))
+    }
+
     /// Compute cache key from request parameters.
     /// Only caches deterministic requests (temperature == 0).
     pub fn cache_key(scope: &str, model: &str, request: &Value) -> Option<String> {
@@ -143,15 +148,41 @@ impl ResponseCache {
 
     /// Look up exact match by hash.
     pub fn get_exact(&self, key: &str) -> Option<Value> {
+        self.get_exact_with_ttl(key, self.ttl)
+    }
+
+    pub fn get_exact_with_ttl(&self, key: &str, ttl: Duration) -> Option<Value> {
+        self.get_exact_at(key, ttl, Instant::now())
+    }
+
+    fn get_exact_at(&self, key: &str, ttl: Duration, now: Instant) -> Option<Value> {
         let exact = self.exact.read().unwrap();
         if let Some(entry) = exact.get(key) {
-            // Check TTL
-            if entry.created_at.elapsed() < self.ttl {
+            if now.duration_since(entry.created_at) < ttl {
                 tracing::debug!("cache hit (exact): key={}", &key[..8]);
                 return Some(entry.response.clone());
             }
         }
         None
+    }
+
+    /// Store a route-policy exact entry without deriving prompt text or an
+    /// embedding. The request identity has already been computed by the caller.
+    pub fn put_exact(&self, key: &str, scope: &str, response: Value) {
+        self.put_exact_at(key, scope, response, Instant::now());
+    }
+
+    fn put_exact_at(&self, key: &str, scope: &str, response: Value, created_at: Instant) {
+        let entry = CacheEntry {
+            response,
+            embedding: Vec::new(),
+            prompt_hash: key.to_string(),
+            semantic_identity: None,
+            scope: scope.to_string(),
+            created_at,
+            hit_count: 0,
+        };
+        self.exact.write().unwrap().insert(key.to_string(), entry);
     }
 
     /// Look up semantic match by embedding similarity.
@@ -615,5 +646,28 @@ mod scope_tests {
             cache.get_semantic(&theirs, &[1.0, 0.0]).is_some(),
             "own-scope semantic hit must still work — otherwise this test proves nothing"
         );
+    }
+
+    #[test]
+    fn route_exact_ttl_expires_against_injected_instant_without_sleeping() {
+        let cache = ResponseCache::new(3600, 0.92, false);
+        let scope = ResponseCache::scope_of("key", "/v1/exact");
+        let created_at = Instant::now() - Duration::from_secs(11);
+        cache.exact.write().unwrap().insert(
+            "key".to_string(),
+            CacheEntry {
+                response: json!({"answer": "old"}),
+                embedding: Vec::new(),
+                prompt_hash: "key".to_string(),
+                semantic_identity: None,
+                scope,
+                created_at,
+                hit_count: 0,
+            },
+        );
+        assert!(cache.get_exact_at("key", Duration::from_secs(10), Instant::now()).is_none());
+        assert!(cache.get_exact_at("key", Duration::from_secs(12), Instant::now()).is_some());
+        assert_eq!(cache.effective_ttl(10), Duration::from_secs(10));
+        assert_eq!(cache.effective_ttl(7200), Duration::from_secs(3600));
     }
 }

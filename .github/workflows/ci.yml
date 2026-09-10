@@ -45,6 +45,9 @@ jobs:
       - name: Smoke — Claude Code and Codex launchers
         run: ./scripts/smoke_client_run.sh
 
+      - name: Smoke — cache policy and A1 identity
+        run: STOKE_BIN=target/debug/stoke python3 scripts/smoke_cache_identity.py
+
       - name: Smoke — subscription fallback + alias bridge (deterministic mocks)
         run: ./scripts/smoke_subscription_fallback.sh
 

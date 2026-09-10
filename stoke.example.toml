@@ -134,6 +134,13 @@ tier = "local"
 # routing = "single"
 # builtins = ["prompt_harness", "code_formatter"]
 # allowed_tiers = ["local", "remote"]  # deny cloud fallback
+#
+# Optional response cache policy. `exact` uses the full effective request
+# identity, never semantic lookup/embeddings, and only stores complete text
+# completions. Route retention is min(route ttl, existing global retention).
+# [routes.response_cache]
+# mode = "exact"   # "exact" or "off"
+# ttl_secs = 60     # required and > 0 for exact
 
 # ─── Pricing (required for any non-local provider) ───────────────
 # Stoke ships no model names and no prices. A provider on a metered tier

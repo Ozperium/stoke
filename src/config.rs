@@ -384,6 +384,39 @@ impl Config {
                     ));
                 }
             }
+            if let Some(policy) = &route.response_cache {
+                match policy.mode.as_str() {
+                    "off" => {
+                        if policy.ttl_secs.is_some() {
+                            return Err(format!(
+                                "route '{}' response_cache mode 'off' must not set ttl_secs",
+                                route.name
+                            ));
+                        }
+                    }
+                    "exact" => match policy.ttl_secs {
+                        Some(ttl_secs) if ttl_secs > 0 => {}
+                        Some(_) => {
+                            return Err(format!(
+                                "route '{}' response_cache exact ttl_secs must be > 0",
+                                route.name
+                            ));
+                        }
+                        None => {
+                            return Err(format!(
+                                "route '{}' response_cache exact requires ttl_secs",
+                                route.name
+                            ));
+                        }
+                    },
+                    mode => {
+                        return Err(format!(
+                            "route '{}' response_cache mode '{}' is invalid; use off or exact",
+                            route.name, mode
+                        ));
+                    }
+                }
+            }
         }
         for p in &self.providers {
             if p.r#type != "claude_subscription" {
@@ -535,6 +568,38 @@ mod validate_tests {
 host = "127.0.0.1"
 port = 8787
 "#;
+
+    #[test]
+    fn response_cache_policy_validates_modes_and_exact_ttl() {
+        let exact = cfg(&format!(
+            "{BASE}\n[[routes]]\nname = \"exact\"\npath = \"/v1/exact\"\n\n[routes.response_cache]\nmode = \"exact\"\nttl_secs = 30\n"
+        ));
+        assert!(exact.validate().is_ok());
+
+        for policy in [
+            "mode = \"bogus\"\nttl_secs = 30",
+            "mode = \"exact\"",
+            "mode = \"exact\"\nttl_secs = 0",
+            "mode = \"off\"\nttl_secs = 30",
+        ] {
+            let parsed = toml::from_str::<Config>(&format!(
+                "{BASE}\n[[routes]]\nname = \"route\"\npath = \"/v1/route\"\n\n[routes.response_cache]\n{policy}\n"
+            ));
+            let config = parsed.expect("policy mode cases should parse before validation");
+            assert!(
+                config.validate().is_err(),
+                "accepted invalid policy: {policy}"
+            );
+        }
+
+        let wrong_type = toml::from_str::<Config>(&format!(
+            "{BASE}\n[[routes]]\nname = \"route\"\npath = \"/v1/route\"\n\n[routes.response_cache]\nmode = \"exact\"\nttl_secs = \"30\"\n"
+        ));
+        assert!(
+            wrong_type.is_err(),
+            "wrong ttl type must fail at config load"
+        );
+    }
 
     #[test]
     fn a_provider_without_a_tier_is_rejected_at_boot() {
