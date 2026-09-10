@@ -70,7 +70,9 @@ fn response_is_cacheable_text_completion(response: &Value) -> bool {
         let Some(choice) = choice.as_object() else { return false; };
         if choice.get("finish_reason").and_then(Value::as_str) != Some("stop") { return false; }
         let Some(message) = choice.get("message").and_then(Value::as_object) else { return false; };
-        message.get("content").and_then(Value::as_str).is_some()
+        message.get("role").and_then(Value::as_str) == Some("assistant")
+            && message.get("content").and_then(Value::as_str).is_some()
+            && !message.contains_key("function_call")
             && !message.contains_key("tool_calls")
     })
 }
@@ -2242,11 +2244,29 @@ mod hold_sizing_tests {
 
     #[test]
     fn exact_policy_only_stores_complete_text_completions() {
-        let complete = serde_json::json!({"choices": [{"finish_reason":"stop", "message":{"content":"ok"}}]});
+        let complete = serde_json::json!({"choices": [{"finish_reason":"stop", "message":{"role":"assistant", "content":"ok"}}]});
         let truncated = serde_json::json!({"choices": [{"finish_reason":"length", "message":{"content":"partial"}}]});
-        let tool_call = serde_json::json!({"choices": [{"finish_reason":"stop", "message":{"content":null,"tool_calls":[]}}]});
+        let tool_call = serde_json::json!({"choices": [{"finish_reason":"stop", "message":{"role":"assistant", "content":null,"tool_calls":[]}}]});
         assert!(super::response_is_cacheable_text_completion(&complete));
         assert!(!super::response_is_cacheable_text_completion(&truncated));
         assert!(!super::response_is_cacheable_text_completion(&tool_call));
+    }
+
+    #[test]
+    fn exact_policy_rejects_missing_role() {
+        let response = serde_json::json!({"choices": [{"finish_reason":"stop", "message":{"content":"ok"}}]});
+        assert!(!super::response_is_cacheable_text_completion(&response));
+    }
+
+    #[test]
+    fn exact_policy_rejects_non_assistant_role() {
+        let response = serde_json::json!({"choices": [{"finish_reason":"stop", "message":{"role":"user", "content":"ok"}}]});
+        assert!(!super::response_is_cacheable_text_completion(&response));
+    }
+
+    #[test]
+    fn exact_policy_rejects_legacy_function_call() {
+        let response = serde_json::json!({"choices": [{"finish_reason":"stop", "message":{"role":"assistant", "content":"ok", "function_call":{"name":"lookup","arguments":"{}"}}}]});
+        assert!(!super::response_is_cacheable_text_completion(&response));
     }
 }

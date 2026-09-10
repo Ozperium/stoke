@@ -47,6 +47,12 @@ class Mock(BaseHTTPRequestHandler):
         calls.append(request)
         answer = json.dumps([message["role"] for message in request["messages"]])
         finish_reason = "length" if request.get("max_tokens") == 1 else "stop"
+        prompt = request["messages"][-1]["content"]
+        message: dict = {"role": "assistant", "content": answer}
+        if prompt == "policy missing role":
+            del message["role"]
+        elif prompt == "policy legacy function call":
+            message["function_call"] = {"name": "lookup", "arguments": "{}"}
         self.send_json(
             {
                 "id": "mock",
@@ -57,7 +63,7 @@ class Mock(BaseHTTPRequestHandler):
                     {
                         "index": 0,
                         "finish_reason": finish_reason,
-                        "message": {"role": "assistant", "content": answer},
+                        "message": message,
                     }
                 ],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
@@ -193,6 +199,18 @@ try:
                 assert incomplete.get("stoke_cache") != "hit" and incomplete_again.get("stoke_cache") != "hit"
                 assert len(calls) == 11, "non-cacheable completion populated exact cache"
 
+                missing_role_messages = [{"role": "user", "content": "policy missing role"}]
+                missing_role = ask(missing_role_messages, "/v1/exact/completions")
+                missing_role_again = ask(missing_role_messages, "/v1/exact/completions")
+                assert missing_role.get("stoke_cache") != "hit" and missing_role_again.get("stoke_cache") != "hit"
+                assert len(calls) == 13, "missing-role completion populated exact cache"
+
+                legacy_call_messages = [{"role": "user", "content": "policy legacy function call"}]
+                legacy_call = ask(legacy_call_messages, "/v1/exact/completions")
+                legacy_call_again = ask(legacy_call_messages, "/v1/exact/completions")
+                assert legacy_call.get("stoke_cache") != "hit" and legacy_call_again.get("stoke_cache") != "hit"
+                assert len(calls) == 15, "legacy function-call completion populated exact cache"
+
                 receipt = {
                     "identical_cache_status": identical.get("stoke_cache"),
                     "identical_provider_calls_after_pair": 1,
@@ -202,8 +220,8 @@ try:
                         role_result_b["choices"][0]["message"]["content"],
                     ],
                     "final_provider_calls": len(calls),
-                    "policy_routes": {"exact_calls": 1, "off_calls": 2, "header_bypass_calls": 2, "incomplete_calls": 2},
-                    "negative_cases": ["role/message-boundary", "max_tokens", "no-store", "truncated_completion"],
+                    "policy_routes": {"exact_calls": 1, "off_calls": 2, "header_bypass_calls": 2, "incomplete_calls": 2, "missing_role_calls": 2, "legacy_function_call_calls": 2},
+                    "negative_cases": ["role/message-boundary", "max_tokens", "no-store", "truncated_completion", "missing_role", "legacy_function_call"],
                     "measurement": "mock wire identity check, not a token/cost benchmark",
                 }
                 print(json.dumps(receipt, indent=2))
