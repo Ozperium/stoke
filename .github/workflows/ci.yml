@@ -48,6 +48,9 @@ jobs:
       - name: Smoke — cache policy and A1 identity
         run: STOKE_BIN=target/debug/stoke python3 scripts/smoke_cache_identity.py
 
+      - name: Smoke — bounded cold-request coalescing
+        run: STOKE_BIN=target/debug/stoke python3 scripts/smoke_coalescing.py
+
       - name: Smoke — subscription fallback + alias bridge (deterministic mocks)
         run: ./scripts/smoke_subscription_fallback.sh
 

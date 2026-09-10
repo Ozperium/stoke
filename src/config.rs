@@ -417,6 +417,17 @@ impl Config {
                     }
                 }
             }
+            if route.coalesce
+                && !matches!(
+                    route.response_cache.as_ref().map(|policy| policy.mode.as_str()),
+                    Some("exact")
+                )
+            {
+                return Err(format!(
+                    "route '{}' coalesce requires an explicit response_cache mode 'exact'",
+                    route.name
+                ));
+            }
         }
         for p in &self.providers {
             if p.r#type != "claude_subscription" {
@@ -867,5 +878,36 @@ tier = "subscription"
              base_url = \"https://api.anthropic.com\"\ntier = \"cloud\"\napi_key_env = \"ANTHROPIC_API_KEY\"\n"
         ));
         assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn route_coalescing_is_off_by_default_and_exact_opt_in_is_valid() {
+        let c = cfg(&format!(
+            "{BASE}\n[[routes]]\nname = \"joined\"\npath = \"/v1/joined/completions\"\nrouting = \"single\"\n\
+             response_cache = {{ mode = \"exact\", ttl_secs = 60 }}\n"
+        ));
+        assert!(!c.routes[0].coalesce);
+
+        let enabled = cfg(&format!(
+            "{BASE}\n[[routes]]\nname = \"joined\"\npath = \"/v1/joined/completions\"\nrouting = \"single\"\ncoalesce = true\n\
+             [routes.response_cache]\nmode = \"exact\"\nttl_secs = 60\n"
+        ));
+        assert!(enabled.validate().is_ok());
+        assert!(enabled.routes[0].coalesce);
+    }
+
+    #[test]
+    fn route_coalescing_requires_explicit_exact_cache_policy() {
+        for policy in [
+            "",
+            "[routes.response_cache]\nmode = \"off\"\n",
+        ] {
+            let c = cfg(&format!(
+                "{BASE}\n[[routes]]\nname = \"joined\"\npath = \"/v1/joined/completions\"\nrouting = \"single\"\ncoalesce = true\n{policy}"
+            ));
+            let err = c.validate().unwrap_err();
+            assert!(err.contains("coalesce"), "unexpected error: {err}");
+            assert!(err.contains("exact"), "unexpected error: {err}");
+        }
     }
 }

@@ -452,6 +452,10 @@ pub struct RouteProfile {
     /// gateway's legacy exact+semantic cache behavior.
     #[serde(default)]
     pub response_cache: Option<ResponseCachePolicy>,
+    /// Coalesce cold identical requests on this named route. Requires an
+    /// explicit exact response cache policy; disabled by default.
+    #[serde(default)]
+    pub coalesce: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

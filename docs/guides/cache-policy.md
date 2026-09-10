@@ -9,6 +9,7 @@ path = "/v1/repeatable/completions"
 model = "your-configured-model"
 routing = "single"
 stream = false
+coalesce = true
 
 [routes.response_cache]
 mode = "exact"
@@ -29,6 +30,15 @@ request for response caching. All duplicate Cache-Control values and directive
 case variants are honored. These request directives do not alter provider-native
 prompt caching.
 
+`coalesce` is opt-in and valid only with the explicit exact policy above. On a
+cold overlap, the first admitted request becomes the leader; followers wait at
+most five seconds, then re-read the existing exact cache and use it only if the
+complete result is present and still within TTL. A joined response is marked
+`stoke_cache = "coalesced"`; a timeout, provider error, canceled leader, or
+non-cacheable result wakes followers and each may perform its own normal single
+dispatch once. The bounded in-flight registry stores only notification state,
+not response bodies, and is bypassed when full.
+
 The route TTL can shorten the existing global cache retention, never extend it:
 `effective_ttl = min(route.ttl_secs, global_ttl)`. The current global retention
 is 3600 seconds. A TTL larger than that is therefore capped rather than silently
@@ -44,12 +54,16 @@ Build and run the provider-fixture smoke test from the repository root:
 ```sh
 cargo build --offline --locked
 STOKE_BIN=target/debug/stoke python3 scripts/smoke_cache_identity.py
+STOKE_BIN=target/debug/stoke python3 scripts/smoke_coalescing.py
 ```
 
 The smoke starts a fresh gateway and mock provider, then verifies legacy exact
 behavior, exact-route hits, off-route misses, Cache-Control bypass without
 population, and non-cacheable truncated responses using provider call counts.
-The test is a wire-behavior check, not an inference or savings benchmark.
+The coalescing smoke separately uses a delayed cold provider and simultaneous
+requests to prove one upstream call plus a joined marker; warm-cache hits are
+not used as evidence. These tests are wire-behavior checks, not inference or
+savings benchmarks.
 
 ## Limitations
 

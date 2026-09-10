@@ -4,6 +4,7 @@ mod auto_route;
 mod budget;
 mod builtins;
 mod cache;
+mod coalescing;
 mod client_run;
 mod config;
 mod cost;
@@ -47,6 +48,7 @@ use tracing_subscriber;
 
 use budget::{Auth, BudgetGuard};
 use cache::ResponseCache;
+use coalescing::{Claim, Coalescer};
 use futures_util::StreamExt;
 use router::{call_provider_hop, cascade, self_consistency, ProviderResult, SHARED_CLIENT};
 use ttft::TtftTracker;
@@ -81,6 +83,7 @@ fn response_is_cacheable_text_completion(response: &Value) -> bool {
 pub struct AppState {
     config: Arc<Config>,
     cache: Arc<ResponseCache>,
+    coalescer: Arc<Coalescer>,
     ttft: Arc<TtftTracker>,
     auth: Arc<Auth>,
     budget: Arc<BudgetGuard>,
@@ -268,6 +271,7 @@ async fn main() {
             0.92,
             std::env::var("STOKE_SEMANTIC_CACHE").is_ok(),
         )),
+        coalescer: Arc::new(Coalescer::default()),
         ttft: Arc::new(TtftTracker::new()),
         auth: Arc::new(Auth::new()),
         budget: Arc::new(budget),
@@ -1136,6 +1140,7 @@ async fn list_routes(State(state): State<AppState>) -> Json<Value> {
                 "builtins": r.builtins,
                 "allowed_tiers": r.allowed_tiers,
                 "stream": r.stream,
+                "coalesce": r.coalesce,
                 "budget_usd": r.budget_usd,
                 "rate_limit": r.rate_limit,
             })
@@ -1589,6 +1594,7 @@ async fn chat_completions(
         .and_then(|policy| (policy.mode == "exact").then(|| policy.ttl_secs).flatten())
         .map(|ttl_secs| state.cache.effective_ttl(ttl_secs));
     let exact_route = exact_route_ttl.is_some();
+    let route_coalescing = route_profile.map(|profile| profile.coalesce).unwrap_or(false);
     let mut cache_key: Option<String> = None;
     let mut cache_prompt: Option<String> = None;
     let mut semantic_identity: Option<String> = None;
@@ -1619,11 +1625,31 @@ async fn chat_completions(
                 0.0,
                 0,
             );
-            let mut response_json = cached;
-            if let Some(obj) = response_json.as_object_mut() {
-                obj.insert("stoke_cache".into(), json!("hit"));
+            return response_with_cache_marker(cached, "hit");
+        }
+    }
+
+    // Coalescing is deliberately after auth/rate/loop admission and before the
+    // budget reservation. Followers reserve nothing: they either reuse a valid
+    // exact-cache entry after the bounded wait, or continue through one normal
+    // dispatch of their own. The leader guard clears this registration on every
+    // success, error, non-cacheable response, and cancellation path.
+    let mut _coalescing_leader = None;
+    if cache_eligible && exact_route && route_coalescing {
+        if let Some(key) = cache_key.as_deref() {
+            match state.coalescer.claim(key) {
+                Claim::Leader(guard) => _coalescing_leader = Some(guard),
+                Claim::Follower(waiter) => {
+                    if waiter.wait().await {
+                        if let Some(ttl) = exact_route_ttl {
+                            if let Some(cached) = state.cache.get_exact_with_ttl(key, ttl) {
+                                return response_with_cache_marker(cached, "coalesced");
+                            }
+                        }
+                    }
+                }
+                Claim::Bypass => {}
             }
-            return Json(response_json).into_response();
         }
     }
 
@@ -2154,6 +2180,13 @@ async fn chat_completions(
         }
     }
 
+    Json(response_json).into_response()
+}
+
+fn response_with_cache_marker(mut response_json: Value, marker: &str) -> Response {
+    if let Some(obj) = response_json.as_object_mut() {
+        obj.insert("stoke_cache".into(), json!(marker));
+    }
     Json(response_json).into_response()
 }
 #[cfg(test)]

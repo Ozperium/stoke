@@ -138,6 +138,7 @@ tier = "local"
 # Optional response cache policy. `exact` uses the full effective request
 # identity, never semantic lookup/embeddings, and only stores complete text
 # completions. Route retention is min(route ttl, existing global retention).
+# coalesce = true   # optional cold-overlap join; requires mode = "exact"
 # [routes.response_cache]
 # mode = "exact"   # "exact" or "off"
 # ttl_secs = 60     # required and > 0 for exact
