@@ -50,7 +50,7 @@ use budget::{Auth, BudgetGuard};
 use cache::ResponseCache;
 use coalescing::{Claim, Coalescer};
 use futures_util::StreamExt;
-use router::{call_provider_hop, cascade, self_consistency, ProviderResult, SHARED_CLIENT};
+use router::{call_provider_hop_detailed, cascade, self_consistency, ProviderResult, SHARED_CLIENT};
 use ttft::TtftTracker;
 
 fn cache_control_bypasses_response_cache(headers: &axum::http::HeaderMap) -> bool {
@@ -1711,6 +1711,10 @@ async fn chat_completions(
         }
     };
 
+    // Only a proven single-upstream failure may carry upstream retry metadata.
+    // Multi-provider/fusion and local policy errors remain generic.
+    let mut upstream_error: Option<router::UpstreamErrorMetadata> = None;
+
     // Streaming: supported for single routing (direct passthrough) and stream_race.
     // Fusion patterns aggregate multiple responses and can't stream.
     // stream_race: race multiple providers/models, first to connect wins.
@@ -1811,9 +1815,29 @@ async fn chat_completions(
             };
             let win = if let Some((a, b)) = hedge_pair {
                 tracing::info!("hedging {} across {} + {}", model, a.name, b.name);
-                failover::stream_hedged(a, b, &body, &state.nodes, hop).await
+                failover::stream_hedged(a, b, &body, &state.nodes, hop)
+                    .await
+                    .map_err(|error| (StatusCode::BAD_GATEWAY, error))
             } else {
-                failover::stream_with_failover(ranked, &body, &state.nodes, hop).await
+                let single_upstream = ranked.len() == 1;
+                match failover::stream_with_failover_detailed(ranked, &body, &state.nodes, hop).await {
+                    Ok(win) => Ok(win),
+                    Err(error) => {
+                        if single_upstream {
+                            upstream_error = error.upstream.clone();
+                        }
+                        let status = if single_upstream {
+                            error
+                                .upstream
+                                .as_ref()
+                                .map(|upstream| upstream.status)
+                                .unwrap_or(StatusCode::BAD_GATEWAY)
+                        } else {
+                            StatusCode::BAD_GATEWAY
+                        };
+                        Err((status, error.message))
+                    }
+                }
             };
             win.map(|w| {
                 (
@@ -1824,7 +1848,6 @@ async fn chat_completions(
                     model.clone(),
                 )
             })
-            .map_err(|e| (StatusCode::BAD_GATEWAY, e))
         };
 
         match race_result {
@@ -1924,7 +1947,7 @@ async fn chat_completions(
                     0.0,
                     0,
                 );
-                return (code, msg).into_response();
+                return response_with_upstream_hints(code, msg, upstream_error.as_ref());
             }
         }
     }
@@ -2004,7 +2027,7 @@ async fn chat_completions(
                 let mut outcome = None;
                 for provider in ranked.iter().take(3) {
                     let _inflight = state.nodes.begin(&provider.name);
-                    match call_provider_hop(provider, &req, hop).await {
+                    match call_provider_hop_detailed(provider, &req, hop).await {
                         Ok(r) => {
                             state.nodes.record_success(&provider.name, r.elapsed_ms);
                             route_note = Some(json!({
@@ -2015,16 +2038,31 @@ async fn chat_completions(
                             break;
                         }
                         Err(e) => {
-                            let client_error = e.contains(" returned 4");
+                            let client_error = e
+                                .upstream
+                                .as_ref()
+                                .map(|upstream| upstream.status.is_client_error())
+                                .unwrap_or(false);
                             // A pricing refusal says nothing about the node's health —
                             // it was never contacted. Counting it as an error would
                             // demote a perfectly good node for a config omission.
-                            let policy_refusal = cost::is_unpriced_error(&e);
+                            let policy_refusal = cost::is_unpriced_error(&e.message);
                             if !client_error && !policy_refusal {
                                 state.nodes.record_error(&provider.name);
                             }
-                            tracing::warn!("placement: {} failed: {}", provider.name, e);
-                            last_err = (StatusCode::BAD_GATEWAY, e);
+                            tracing::warn!("placement: {} failed: {}", provider.name, e.message);
+                            if ranked.len() == 1 {
+                                upstream_error = e.upstream.clone();
+                            }
+                            let error_status = if ranked.len() == 1 {
+                                e.upstream
+                                    .as_ref()
+                                    .map(|upstream| upstream.status)
+                                    .unwrap_or(StatusCode::BAD_GATEWAY)
+                            } else {
+                                StatusCode::BAD_GATEWAY
+                            };
+                            last_err = (error_status, e.message);
                             if client_error {
                                 break; // deterministic client error — retrying elsewhere just replays it
                             }
@@ -2062,7 +2100,7 @@ async fn chat_completions(
                 0.0,
                 0,
             );
-            return (code, msg).into_response();
+            return response_with_upstream_hints(code, msg, upstream_error.as_ref());
         }
     };
 
@@ -2204,6 +2242,23 @@ async fn chat_completions(
     }
 
     Json(response_json).into_response()
+}
+
+fn response_with_upstream_hints(
+    status: StatusCode,
+    message: String,
+    upstream: Option<&router::UpstreamErrorMetadata>,
+) -> Response {
+    let mut response = Response::builder().status(status);
+    if let Some(upstream) = upstream {
+        if let Some(value) = &upstream.retry_after {
+            response = response.header("Retry-After", value);
+        }
+        if let Some(value) = &upstream.should_retry {
+            response = response.header("x-should-retry", value);
+        }
+    }
+    response.body(axum::body::Body::from(message)).unwrap()
 }
 
 fn response_with_cache_marker(mut response_json: Value, marker: &str) -> Response {

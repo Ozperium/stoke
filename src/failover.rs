@@ -28,12 +28,23 @@ pub async fn stream_with_failover(
     registry: &NodeRegistry,
     hop: u32,
 ) -> Result<StreamWin, String> {
+    stream_with_failover_detailed(providers, body, registry, hop)
+        .await
+        .map_err(|error| error.message)
+}
+
+pub async fn stream_with_failover_detailed(
+    providers: Vec<&ProviderConfig>,
+    body: &Value,
+    registry: &NodeRegistry,
+    hop: u32,
+) -> Result<StreamWin, crate::router::ProviderError> {
     if providers.is_empty() {
-        return Err("No providers for streaming".to_string());
+        return Err(crate::router::ProviderError::local("No providers for streaming"));
     }
 
     let model = body.get("model").and_then(|m| m.as_str()).unwrap_or_default();
-    let mut last_error = String::new();
+    let mut last_error = crate::router::ProviderError::local("no provider attempted");
 
     for (i, provider) in providers.iter().enumerate() {
         // The pricing gate. This path builds its own request rather than going
@@ -42,7 +53,7 @@ pub async fn stream_with_failover(
         // model Stoke cannot price, and streams already accrue no spend.
         if let Err(reason) = crate::cost::global().allows(&provider.tier, model) {
             tracing::warn!("stream_with_failover: skipping {}: {}", provider.name, reason);
-            last_error = reason;
+            last_error = crate::router::ProviderError::local(reason);
             continue;
         }
 
@@ -85,14 +96,32 @@ pub async fn stream_with_failover(
                     });
                 } else {
                     let status = resp.status();
+                    let retry_after = resp
+                        .headers()
+                        .get("retry-after")
+                        .and_then(|value| value.to_str().ok())
+                        .filter(|value| value.len() <= 10 && !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()))
+                        .map(str::to_string);
+                    let should_retry = resp
+                        .headers()
+                        .get("x-should-retry")
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|value| {
+                            if value.eq_ignore_ascii_case("true") { Some("true".to_string()) }
+                            else if value.eq_ignore_ascii_case("false") { Some("false".to_string()) }
+                            else { None }
+                        });
                     let text = resp.text().await.unwrap_or_default();
-                    last_error = format!("Provider {}: {} {}", provider.name, status, text);
+                    last_error = crate::router::ProviderError {
+                        message: format!("Provider {}: {} {}", provider.name, status, text),
+                        upstream: Some(crate::router::UpstreamErrorMetadata { status, retry_after, should_retry }),
+                    };
                     registry.record_error(&provider.name);
                     tracing::warn!("stream_with_failover: provider {} returned {}", provider.name, status);
                 }
             }
             Err(e) => {
-                last_error = format!("Provider {}: {}", provider.name, e);
+                last_error = crate::router::ProviderError::local(format!("Provider {}: {}", provider.name, e));
                 registry.record_error(&provider.name);
                 tracing::warn!("stream_with_failover: provider {} failed: {}", provider.name, e);
             }
@@ -100,7 +129,10 @@ pub async fn stream_with_failover(
         // guard drops here on failure — the attempt is no longer in flight
     }
 
-    Err(format!("All providers failed for streaming: {}", last_error))
+    Err(crate::router::ProviderError {
+        message: format!("All providers failed for streaming: {}", last_error.message),
+        upstream: if providers.len() == 1 { last_error.upstream } else { None },
+    })
 }
 
 /// Hedged dispatch: fire the same streaming request at two nodes, first to
