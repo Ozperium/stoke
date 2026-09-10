@@ -79,6 +79,30 @@ fn response_is_cacheable_text_completion(response: &Value) -> bool {
     })
 }
 
+fn exact_cache_hit(cache: &ResponseCache, key: &str, ttl: Duration) -> Option<Value> {
+    cache.get_exact_with_ttl(key, ttl)
+}
+
+/// Claim only after the initial miss, then close the miss-to-claim race by
+/// checking the exact cache before the caller reserves budget or dispatches.
+fn claim_exact_or_cached(
+    coalescer: &Coalescer,
+    cache: &ResponseCache,
+    key: &str,
+    ttl: Duration,
+) -> Result<Claim, Value> {
+    match coalescer.claim(key) {
+        Claim::Leader(guard) => match exact_cache_hit(cache, key, ttl) {
+            Some(cached) => {
+                drop(guard);
+                Err(cached)
+            }
+            None => Ok(Claim::Leader(guard)),
+        },
+        claim => Ok(claim),
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     config: Arc<Config>,
@@ -1608,7 +1632,7 @@ async fn chat_completions(
     }
     if let Some(ref key) = cache_key {
         let cached = if let Some(ttl) = exact_route_ttl {
-            state.cache.get_exact_with_ttl(key, ttl)
+            exact_cache_hit(&state.cache, key, ttl)
         } else {
             state.cache.get_smart(key, &cache_scope, cache_prompt.as_deref().unwrap_or_default(), semantic_identity.as_deref()).await
                 .map(|(_matched_key, response)| response)
@@ -1636,19 +1660,18 @@ async fn chat_completions(
     // success, error, non-cacheable response, and cancellation path.
     let mut _coalescing_leader = None;
     if cache_eligible && exact_route && route_coalescing {
-        if let Some(key) = cache_key.as_deref() {
-            match state.coalescer.claim(key) {
-                Claim::Leader(guard) => _coalescing_leader = Some(guard),
-                Claim::Follower(waiter) => {
+        if let (Some(key), Some(ttl)) = (cache_key.as_deref(), exact_route_ttl) {
+            match claim_exact_or_cached(&state.coalescer, &state.cache, key, ttl) {
+                Err(cached) => return response_with_cache_marker(cached, "coalesced"),
+                Ok(Claim::Leader(guard)) => _coalescing_leader = Some(guard),
+                Ok(Claim::Follower(waiter)) => {
                     if waiter.wait().await {
-                        if let Some(ttl) = exact_route_ttl {
-                            if let Some(cached) = state.cache.get_exact_with_ttl(key, ttl) {
-                                return response_with_cache_marker(cached, "coalesced");
-                            }
+                        if let Some(cached) = exact_cache_hit(&state.cache, key, ttl) {
+                            return response_with_cache_marker(cached, "coalesced");
                         }
                     }
                 }
-                Claim::Bypass => {}
+                Ok(Claim::Bypass) => {}
             }
         }
     }
@@ -2262,6 +2285,36 @@ mod hold_sizing_tests {
     #[test]
     fn an_empty_vote_list_falls_back_to_the_requested_model() {
         assert!((hold("test_vote", "dear", &[], 1) - 20.0).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn cache_fill_between_initial_miss_and_claim_returns_coalesced_without_dispatch() {
+        use crate::cache::ResponseCache;
+        use crate::coalescing::{Claim, Coalescer};
+        use std::time::Duration;
+
+        let cache = ResponseCache::new(60, 0.92, false);
+        let coalescer = Coalescer::new(8, Duration::from_secs(1));
+        let key = "cache-fill-race";
+        let ttl = Duration::from_secs(60);
+        assert!(super::exact_cache_hit(&cache, key, ttl).is_none());
+
+        let cached = serde_json::json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"already filled"}}]});
+        cache.put_exact(key, "test-scope", cached.clone());
+
+        let (response, dispatches) =
+            match super::claim_exact_or_cached(&coalescer, &cache, key, ttl) {
+                Err(response) => (super::response_with_cache_marker(response, "coalesced"), 0),
+                Ok(_) => panic!("a cache-filled race must not reach dispatch"),
+            };
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["choices"][0]["message"]["content"], "already filled");
+        assert_eq!(body["stoke_cache"], "coalesced");
+        assert_eq!(dispatches, 0);
+        assert!(matches!(coalescer.claim(key), Claim::Leader(_)));
     }
 
     #[test]
