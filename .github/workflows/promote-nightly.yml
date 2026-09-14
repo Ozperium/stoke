@@ -1,0 +1,112 @@
+name: promote nightly
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New stable SemVer tag (for example v0.2.1)"
+        required: true
+        type: string
+      source_sha:
+        description: "Exact current nightly commit SHA"
+        required: true
+        type: string
+      confirm:
+        description: "Type PROMOTE to publish the stable release"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promote-nightly-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: github.ref == 'refs/heads/main'
+    name: promote nightly to production
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify requested nightly candidate
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          REQUESTED_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test "$CONFIRM" = "PROMOTE"
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --force --tags origin
+          NIGHTLY_SHA="$(git rev-parse 'refs/tags/nightly^{commit}')"
+          test "$NIGHTLY_SHA" = "$REQUESTED_SHA"
+          git merge-base --is-ancestor "$REQUESTED_SHA" origin/main
+          if gh release view "$VERSION" >/dev/null 2>&1 || git show-ref --verify --quiet "refs/tags/$VERSION"; then
+            echo "stable version already exists: $VERSION" >&2
+            exit 1
+          fi
+          git checkout --detach "$REQUESTED_SHA"
+          PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "stoke") | .version')"
+          test "v$PACKAGE_VERSION" = "$VERSION"
+          CHECKS="$(gh api "repos/$GITHUB_REPOSITORY/commits/$REQUESTED_SHA/check-runs?per_page=100")"
+          for NAME in "build + test + smoke" "optional Headroom — macOS arm64"; do
+            jq -e --arg name "$NAME" '.check_runs[] | select(.name == $name and .status == "completed" and .conclusion == "success")' >/dev/null <<<"$CHECKS"
+          done
+          echo "SOURCE_SHA=$REQUESTED_SHA" >> "$GITHUB_ENV"
+
+      - name: Download and verify exact nightly assets
+        run: |
+          set -euo pipefail
+          mkdir dist
+          gh release download nightly --dir dist --pattern 'stoke-*' --clobber
+          gh release download nightly --dir dist --pattern release-manifest.json --clobber
+          python3 - "$SOURCE_SHA" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          expected = {
+              "stoke-linux-arm64.tar.gz",
+              "stoke-linux-arm64.tar.gz.sha256",
+              "stoke-linux-x64.tar.gz",
+              "stoke-linux-x64.tar.gz.sha256",
+              "stoke-macos-arm64.tar.gz",
+              "stoke-macos-arm64.tar.gz.sha256",
+              "stoke-macos-x64.tar.gz",
+              "stoke-macos-x64.tar.gz.sha256",
+          }
+          dist = Path("dist")
+          manifest = json.loads((dist / "release-manifest.json").read_text())
+          if manifest != {"schema": 1, "commit": sys.argv[1], "assets": sorted(expected)}:
+              raise SystemExit("nightly manifest does not match the requested candidate")
+          if {path.name for path in dist.iterdir()} != expected | {"release-manifest.json"}:
+              raise SystemExit("nightly download contains an unexpected asset")
+          for sidecar in expected:
+              if not sidecar.endswith(".sha256"):
+                  continue
+              line = (dist / sidecar).read_text().strip()
+              target = sidecar.removesuffix(".sha256")
+              if not re.fullmatch(r"[0-9a-f]{64}  " + re.escape(target), line):
+                  raise SystemExit(f"invalid checksum sidecar: {sidecar}")
+          PY
+          (cd dist && shasum -a 256 -c *.sha256)
+          git fetch --force --tags origin
+          test "$(git rev-parse 'refs/tags/nightly^{commit}')" = "$SOURCE_SHA"
+
+      - name: Create immutable stable tag and release
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f "ref=refs/tags/$VERSION" -f "sha=$SOURCE_SHA"
+          gh release create "$VERSION" dist/* --verify-tag \
+            --title "Stoke $VERSION" --generate-notes

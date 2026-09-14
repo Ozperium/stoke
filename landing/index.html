@@ -311,7 +311,7 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
           <a href="#control-room" class="btn btn-secondary">See it live</a>
           <a data-track="github_clicked" href="https://github.com/Ozperium/stoke" class="btn btn-secondary">★ Star on GitHub</a>
         </div>
-        <p class="hero-note">Works with any OpenAI-compatible agent — point <code>base_url</code> at <code>localhost:8787/v1</code>.<br>Claude Code connects via <code>ANTHROPIC_BASE_URL</code>. <a href="https://github.com/Ozperium/stoke/releases/tag/v0.2.0">v0.2.0</a> · MIT · dogfooded daily.</p>
+        <p class="hero-note">Works with any OpenAI-compatible agent — point <code>base_url</code> at <code>localhost:8787/v1</code>.<br>Claude Code connects via <code>ANTHROPIC_BASE_URL</code>. <a href="https://github.com/Ozperium/stoke/releases/latest">Latest stable</a> · MIT · dogfooded daily.</p>
       </div>
       <div class="hero-demo">
         <div class="term" id="term">
@@ -394,7 +394,7 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
 <span class="comment"># ...</span>
 <span class="err">SPEND FIREWALL SMOKE PASSED</span> (pricing gate, streamed spend, in-flight holds, served-model billing, boot validation, fan-out clamp, full billing, cache isolation)</div>
     <a href="https://github.com/Ozperium/stoke/blob/main/scripts/smoke_spend.sh" class="btn btn-secondary">Read the runnable proof →</a>
-    <div class="compatibility" aria-label="v0.2.0 release controls">
+    <div class="compatibility" aria-label="release controls">
       <div class="compatibility-card"><h3>Gateway-owned Codex auth</h3><p>Native Codex can use the existing <code class="inline">~/.codex/auth.json</code> through Stoke's Responses provider. <code class="inline">STOKE_API_KEYS</code> still authenticates the gateway hop; separate client OAuth remains supported.</p></div>
       <div class="compatibility-card"><h3>Ollama stays separate</h3><p>Ollama model IDs are discovered from your running Ollama and served on Chat Completions. Native Codex Responses stays native — Stoke does not translate the two client paths.</p></div>
       <div class="compatibility-card"><h3>Bounded reuse and retry hints</h3><p>Named routes can opt into exact caching and bounded coalescing for eligible non-streaming requests. Only validated, unambiguous <code class="inline">Retry-After</code> and <code class="inline">x-should-retry</code> values may reach clients; this adds no internal retry policy.</p></div>
@@ -448,8 +448,8 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
         <p class="section-sub">Open source, MIT licensed, and local by default. No hosted control plane or account required.</p>
         <a data-track="github_clicked" href="https://github.com/Ozperium/stoke" class="btn btn-secondary">Read the docs →</a>
       </div>
-      <div class="code-block"><span class="comment"># v0.2.0 prebuilt binary</span>
-<span class="cmd">curl</span> -sSf https://stokegate.com/install | sh -s -- --version v0.2.0
+      <div class="code-block"><span class="comment"># latest stable prebuilt binary</span>
+<span class="cmd">curl</span> -sSf https://stokegate.com/install | sh
 
 <span class="var">OPENAI_BASE_URL</span>=http://localhost:8787/v1
 <span class="var">ANTHROPIC_BASE_URL</span>=http://localhost:8787</div>
