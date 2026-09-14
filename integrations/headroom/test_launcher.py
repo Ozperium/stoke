@@ -156,7 +156,12 @@ class LauncherTests(unittest.TestCase):
             finally:
                 process.terminate()
                 stdout, stderr = process.communicate(timeout=12)
-            self.assertTrue(ready.exists(), f"launcher output:\n{stdout}\n{stderr}")
+            self.assertTrue(
+                ready.exists(),
+                f"launcher output:\n{stdout}\n{stderr}\n"
+                f"env_dump={env_dump.exists()} port_dump={port_dump.exists()} "
+                f"token={stoke_token.exists()}",
+            )
             self.assertEqual(config.read_text(), original)
             self.assertNotIn("OPENAI_API_KEY", env_dump.read_text())
             self.assertGreaterEqual(len(stoke_token.read_text()), 32)
