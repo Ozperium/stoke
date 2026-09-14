@@ -39,4 +39,4 @@
 
 ## Limits
 
-The current stable release is v0.2.0. No published performance, RTK, or general savings claim is made. Optional Headroom is default-off and limited to validated JSON tool-result whitespace compaction before native Responses dispatch; its current worker lock targets macOS arm64 / CPython 3.11. Local capacity costs electricity and hardware; subscription plans have no per-request USD price and cannot be dollar-capped by Stoke.
+Stable releases are tag-published; see https://github.com/Ozperium/stoke/releases/latest. No published performance, RTK, or general savings claim is made. Optional Headroom is default-off and limited to validated JSON tool-result whitespace compaction before native Responses dispatch; its current worker lock targets macOS arm64 / CPython 3.11. Local capacity costs electricity and hardware; subscription plans have no per-request USD price and cannot be dollar-capped by Stoke.

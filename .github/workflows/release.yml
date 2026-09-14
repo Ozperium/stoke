@@ -1,8 +1,9 @@
 name: release
 
 # Two channels:
-#   - tag  v*      -> a real GitHub Release (this is what `latest` resolves to,
-#                     and therefore what the one-line installer downloads)
+#   - workflow_dispatch promotion -> a real GitHub Release (this is what
+#                     `latest` resolves to, and therefore what the one-line
+#                     installer downloads)
 #   - push to main -> a rolling `nightly` prerelease, rebuilt every commit.
 #                     Prereleases are excluded from `latest`, so nightly never
 #                     hijacks the stable install path. Get it with:
@@ -10,7 +11,6 @@ name: release
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -91,21 +91,6 @@ jobs:
             ${{ matrix.name }}.tar.gz
             ${{ matrix.name }}.tar.gz.sha256
 
-  # Tagged builds become the stable release that `latest` points at.
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-          path: dist
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
 
   # Every commit on main refreshes a rolling `nightly` prerelease. The old tag
   # is deleted first so the tag actually moves to the new commit.
@@ -119,6 +104,21 @@ jobs:
         with:
           merge-multiple: true
           path: dist
+      - name: Record nightly source
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          python3 - "$SOURCE_SHA" <<'PY'
+          import json
+          from pathlib import Path
+
+          dist = Path("dist")
+          (dist / "release-manifest.json").write_text(json.dumps({
+              "schema": 1,
+              "commit": __import__("sys").argv[1],
+              "assets": sorted(path.name for path in dist.glob("stoke-*")),
+          }, indent=2) + "\n")
+          PY
       - name: Reset the rolling nightly tag
         env:
           GH_TOKEN: ${{ github.token }}
