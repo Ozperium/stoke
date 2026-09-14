@@ -4,6 +4,7 @@ mod auto_route;
 mod budget;
 mod builtins;
 mod cache;
+mod coalescing;
 mod client_run;
 mod config;
 mod cost;
@@ -47,14 +48,79 @@ use tracing_subscriber;
 
 use budget::{Auth, BudgetGuard};
 use cache::ResponseCache;
+use coalescing::{Claim, Coalescer};
 use futures_util::StreamExt;
-use router::{call_provider_hop, cascade, self_consistency, ProviderResult, SHARED_CLIENT};
+use router::{call_provider_hop_detailed, cascade, self_consistency, ProviderResult, SHARED_CLIENT};
 use ttft::TtftTracker;
+
+fn cache_control_bypasses_response_cache(headers: &axum::http::HeaderMap) -> bool {
+    headers.get_all("cache-control").iter().any(|value| {
+        let Ok(value) = value.to_str() else { return true };
+        value.split(',').any(|directive| {
+            let name = directive.split_once('=').map(|(name, _)| name).unwrap_or(directive);
+            name.trim().eq_ignore_ascii_case("no-store")
+                || name.trim().eq_ignore_ascii_case("no-cache")
+        })
+    })
+}
+
+fn response_is_cacheable_text_completion(response: &Value) -> bool {
+    let Some(object) = response.as_object() else { return false };
+    if object.contains_key("error") { return false; }
+    let Some(choices) = object.get("choices").and_then(Value::as_array) else { return false; };
+    !choices.is_empty() && choices.iter().all(|choice| {
+        let Some(choice) = choice.as_object() else { return false; };
+        if choice.get("finish_reason").and_then(Value::as_str) != Some("stop") { return false; }
+        let Some(message) = choice.get("message").and_then(Value::as_object) else { return false; };
+        message.get("role").and_then(Value::as_str) == Some("assistant")
+            && message.get("content").and_then(Value::as_str).is_some()
+            && !message.contains_key("function_call")
+            && !message.contains_key("tool_calls")
+    })
+}
+
+fn exact_cache_hit(cache: &ResponseCache, key: &str, ttl: Duration) -> Option<Value> {
+    cache.get_exact_with_ttl(key, ttl)
+}
+
+fn record_coalesced_cache_hit(state: &AppState, model: &str, routing: &str) {
+    record_decision(
+        state,
+        dashboard::Outcome::CacheHit,
+        model,
+        routing,
+        "response cache",
+        "Coalesced deterministic response reused",
+        0.0,
+        0,
+    );
+}
+
+/// Claim only after the initial miss, then close the miss-to-claim race by
+/// checking the exact cache before the caller reserves budget or dispatches.
+fn claim_exact_or_cached(
+    coalescer: &Coalescer,
+    cache: &ResponseCache,
+    key: &str,
+    ttl: Duration,
+) -> Result<Claim, Value> {
+    match coalescer.claim(key) {
+        Claim::Leader(guard) => match exact_cache_hit(cache, key, ttl) {
+            Some(cached) => {
+                drop(guard);
+                Err(cached)
+            }
+            None => Ok(Claim::Leader(guard)),
+        },
+        claim => Ok(claim),
+    }
+}
 
 #[derive(Clone)]
 pub struct AppState {
     config: Arc<Config>,
     cache: Arc<ResponseCache>,
+    coalescer: Arc<Coalescer>,
     ttft: Arc<TtftTracker>,
     auth: Arc<Auth>,
     budget: Arc<BudgetGuard>,
@@ -242,6 +308,7 @@ async fn main() {
             0.92,
             std::env::var("STOKE_SEMANTIC_CACHE").is_ok(),
         )),
+        coalescer: Arc::new(Coalescer::default()),
         ttft: Arc::new(TtftTracker::new()),
         auth: Arc::new(Auth::new()),
         budget: Arc::new(budget),
@@ -531,16 +598,7 @@ async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -
     // upstream dispatch (regular paths re-derive the provider credential from
     // config; the subscription path sends only the store Bearer), so the
     // gateway key can never leak as a provider credential.
-    let stoke_key = req
-        .headers()
-        .get("x-stoke-key")
-        .or_else(|| req.headers().get("x-api-key"))
-        .and_then(|h| h.to_str().ok());
-    let auth_header = req
-        .headers()
-        .get("authorization")
-        .and_then(|h| h.to_str().ok());
-    match state.auth.validate_gateway(stoke_key, auth_header) {
+    match state.auth.validate_gateway_headers(req.headers()) {
         Some(key) => {
             let mut req = req;
             req.extensions_mut().insert(key);
@@ -1110,6 +1168,7 @@ async fn list_routes(State(state): State<AppState>) -> Json<Value> {
                 "builtins": r.builtins,
                 "allowed_tiers": r.allowed_tiers,
                 "stream": r.stream,
+                "coalesce": r.coalesce,
                 "budget_usd": r.budget_usd,
                 "rate_limit": r.rate_limit,
             })
@@ -1126,22 +1185,13 @@ async fn chat_completions(
 ) -> Response {
     // Auth check: gateway identity via x-stoke-key / x-api-key alias, or the
     // legacy Bearer form — matching the global middleware gate above.
-    let stoke_key = headers
-        .get("x-stoke-key")
-        .or_else(|| headers.get("x-api-key"))
-        .and_then(|h| h.to_str().ok());
-    let bearer_from_stoke_header = stoke_key.map(|k| format!("Bearer {}", k.trim()));
-    let auth_header = headers
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .map(|s| s.to_string())
-        .or(bearer_from_stoke_header);
-    let api_key = match state.auth.validate(auth_header.as_deref()) {
+    let api_key = match state.auth.validate_gateway_headers(&headers) {
         Some(k) => k,
         None => {
             return (StatusCode::UNAUTHORIZED, "Invalid or missing API key").into_response();
         }
     };
+    let cache_control_bypass = cache_control_bypasses_response_cache(&headers);
 
     // Compute prompt hash for loop detection (model + messages + temp)
     let prompt_text: String = req
@@ -1553,26 +1603,35 @@ async fn chat_completions(
     // Scoped to (api_key, path): a cached response is a response the caller was
     // already authorised to receive, and nobody else.
     let cache_scope = ResponseCache::scope_of(&api_key, path);
-    let cache_key = if routing == "single" && !req.stream.unwrap_or(false) {
-        ResponseCache::cache_key(
-            &cache_scope,
-            &model,
-            &req.messages,
-            req.temperature,
-            req.max_tokens,
-        )
-    } else {
-        None
-    };
-
-    let cache_prompt = ResponseCache::extract_prompt(&req.messages);
-
+    let response_cache_policy = route_profile.and_then(|profile| profile.response_cache.as_ref());
+    let cache_eligible = routing == "single"
+        && !req.stream.unwrap_or(false)
+        && !cache_control_bypass
+        && !matches!(response_cache_policy.map(|p| p.mode.as_str()), Some("off"));
+    let exact_route_ttl = response_cache_policy
+        .and_then(|policy| (policy.mode == "exact").then(|| policy.ttl_secs).flatten())
+        .map(|ttl_secs| state.cache.effective_ttl(ttl_secs));
+    let exact_route = exact_route_ttl.is_some();
+    let route_coalescing = route_profile.map(|profile| profile.coalesce).unwrap_or(false);
+    let mut cache_key: Option<String> = None;
+    let mut cache_prompt: Option<String> = None;
+    let mut semantic_identity: Option<String> = None;
+    if cache_eligible {
+        let cache_request = serde_json::to_value(&req).unwrap_or_default();
+        cache_key = ResponseCache::cache_key(&cache_scope, &model, &cache_request);
+        if !exact_route {
+            cache_prompt = Some(ResponseCache::extract_prompt(&req.messages));
+            semantic_identity = ResponseCache::semantic_identity(&cache_scope, &model, &cache_request);
+        }
+    }
     if let Some(ref key) = cache_key {
-        if let Some((_matched_key, cached)) = state
-            .cache
-            .get_smart(key, &cache_scope, &cache_prompt)
-            .await
-        {
+        let cached = if let Some(ttl) = exact_route_ttl {
+            exact_cache_hit(&state.cache, key, ttl)
+        } else {
+            state.cache.get_smart(key, &cache_scope, cache_prompt.as_deref().unwrap_or_default(), semantic_identity.as_deref()).await
+                .map(|(_matched_key, response)| response)
+        };
+        if let Some(cached) = cached {
             tracing::info!("cache hit: key={}", &key[..8]);
             record_decision(
                 &state,
@@ -1584,11 +1643,34 @@ async fn chat_completions(
                 0.0,
                 0,
             );
-            let mut response_json = cached;
-            if let Some(obj) = response_json.as_object_mut() {
-                obj.insert("stoke_cache".into(), json!("hit"));
+            return response_with_cache_marker(cached, "hit");
+        }
+    }
+
+    // Coalescing is deliberately after auth/rate/loop admission and before the
+    // budget reservation. Followers reserve nothing: they either reuse a valid
+    // exact-cache entry after the bounded wait, or continue through one normal
+    // dispatch of their own. The leader guard clears this registration on every
+    // success, error, non-cacheable response, and cancellation path.
+    let mut _coalescing_leader = None;
+    if cache_eligible && exact_route && route_coalescing {
+        if let (Some(key), Some(ttl)) = (cache_key.as_deref(), exact_route_ttl) {
+            match claim_exact_or_cached(&state.coalescer, &state.cache, key, ttl) {
+                Err(cached) => {
+                    record_coalesced_cache_hit(&state, &model, &routing);
+                    return response_with_cache_marker(cached, "coalesced");
+                }
+                Ok(Claim::Leader(guard)) => _coalescing_leader = Some(guard),
+                Ok(Claim::Follower(waiter)) => {
+                    if waiter.wait().await {
+                        if let Some(cached) = exact_cache_hit(&state.cache, key, ttl) {
+                            record_coalesced_cache_hit(&state, &model, &routing);
+                            return response_with_cache_marker(cached, "coalesced");
+                        }
+                    }
+                }
+                Ok(Claim::Bypass) => {}
             }
-            return Json(response_json).into_response();
         }
     }
 
@@ -1626,6 +1708,10 @@ async fn chat_completions(
             return (StatusCode::TOO_MANY_REQUESTS, reason).into_response();
         }
     };
+
+    // Only a proven single-upstream failure may carry upstream retry metadata.
+    // Multi-provider/fusion and local policy errors remain generic.
+    let mut upstream_error: Option<router::UpstreamErrorMetadata> = None;
 
     // Streaming: supported for single routing (direct passthrough) and stream_race.
     // Fusion patterns aggregate multiple responses and can't stream.
@@ -1727,9 +1813,29 @@ async fn chat_completions(
             };
             let win = if let Some((a, b)) = hedge_pair {
                 tracing::info!("hedging {} across {} + {}", model, a.name, b.name);
-                failover::stream_hedged(a, b, &body, &state.nodes, hop).await
+                failover::stream_hedged(a, b, &body, &state.nodes, hop)
+                    .await
+                    .map_err(|error| (StatusCode::BAD_GATEWAY, error))
             } else {
-                failover::stream_with_failover(ranked, &body, &state.nodes, hop).await
+                let single_upstream = ranked.len() == 1;
+                match failover::stream_with_failover_detailed(ranked, &body, &state.nodes, hop).await {
+                    Ok(win) => Ok(win),
+                    Err(error) => {
+                        if single_upstream {
+                            upstream_error = error.upstream.clone();
+                        }
+                        let status = if single_upstream {
+                            error
+                                .upstream
+                                .as_ref()
+                                .map(|upstream| upstream.status)
+                                .unwrap_or(StatusCode::BAD_GATEWAY)
+                        } else {
+                            StatusCode::BAD_GATEWAY
+                        };
+                        Err((status, error.message))
+                    }
+                }
             };
             win.map(|w| {
                 (
@@ -1740,7 +1846,6 @@ async fn chat_completions(
                     model.clone(),
                 )
             })
-            .map_err(|e| (StatusCode::BAD_GATEWAY, e))
         };
 
         match race_result {
@@ -1840,7 +1945,7 @@ async fn chat_completions(
                     0.0,
                     0,
                 );
-                return (code, msg).into_response();
+                return response_with_upstream_hints(code, msg, upstream_error.as_ref());
             }
         }
     }
@@ -1920,7 +2025,7 @@ async fn chat_completions(
                 let mut outcome = None;
                 for provider in ranked.iter().take(3) {
                     let _inflight = state.nodes.begin(&provider.name);
-                    match call_provider_hop(provider, &req, hop).await {
+                    match call_provider_hop_detailed(provider, &req, hop).await {
                         Ok(r) => {
                             state.nodes.record_success(&provider.name, r.elapsed_ms);
                             route_note = Some(json!({
@@ -1931,16 +2036,31 @@ async fn chat_completions(
                             break;
                         }
                         Err(e) => {
-                            let client_error = e.contains(" returned 4");
+                            let client_error = e
+                                .upstream
+                                .as_ref()
+                                .map(|upstream| upstream.status.is_client_error())
+                                .unwrap_or(false);
                             // A pricing refusal says nothing about the node's health —
                             // it was never contacted. Counting it as an error would
                             // demote a perfectly good node for a config omission.
-                            let policy_refusal = cost::is_unpriced_error(&e);
+                            let policy_refusal = cost::is_unpriced_error(&e.message);
                             if !client_error && !policy_refusal {
                                 state.nodes.record_error(&provider.name);
                             }
-                            tracing::warn!("placement: {} failed: {}", provider.name, e);
-                            last_err = (StatusCode::BAD_GATEWAY, e);
+                            tracing::warn!("placement: {} failed: {}", provider.name, e.message);
+                            if ranked.len() == 1 {
+                                upstream_error = e.upstream.clone();
+                            }
+                            let error_status = if ranked.len() == 1 {
+                                e.upstream
+                                    .as_ref()
+                                    .map(|upstream| upstream.status)
+                                    .unwrap_or(StatusCode::BAD_GATEWAY)
+                            } else {
+                                StatusCode::BAD_GATEWAY
+                            };
+                            last_err = (error_status, e.message);
                             if client_error {
                                 break; // deterministic client error — retrying elsewhere just replays it
                             }
@@ -1978,7 +2098,7 @@ async fn chat_completions(
                 0.0,
                 0,
             );
-            return (code, msg).into_response();
+            return response_with_upstream_hints(code, msg, upstream_error.as_ref());
         }
     };
 
@@ -2109,15 +2229,96 @@ async fn chat_completions(
         },
     );
 
-    // Store in cache if we have a key (single routing, temp=0)
-    // Uses put_with_embedding to generate embedding for semantic cache
-    if let Some(ref key) = cache_key {
-        state
-            .cache
-            .put_with_embedding(key, &cache_scope, response_json.clone(), &cache_prompt)
-            .await;
+    if exact_route && !response_is_cacheable_text_completion(&response_json) {
+        tracing::debug!("exact response cache: response is not a complete text completion");
+    } else if let Some(ref key) = cache_key {
+        if exact_route {
+            state.cache.put_exact(key, &cache_scope, response_json.clone());
+        } else {
+            state.cache.put_with_embedding(key, &cache_scope, response_json.clone(), cache_prompt.as_deref().unwrap_or_default(), semantic_identity.as_deref()).await;
+        }
     }
 
+    Json(response_json).into_response()
+}
+
+fn response_with_upstream_hints(
+    status: StatusCode,
+    message: String,
+    upstream: Option<&router::UpstreamErrorMetadata>,
+) -> Response {
+    let mut response = (status, message).into_response();
+    if let Some(upstream) = upstream {
+        if let Some(value) = &upstream.retry_after {
+            response.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                value.parse().expect("validated Retry-After header"),
+            );
+        }
+        if let Some(value) = &upstream.should_retry {
+            response.headers_mut().insert(
+                axum::http::HeaderName::from_static("x-should-retry"),
+                value.parse().expect("validated x-should-retry header"),
+            );
+        }
+    }
+    response
+}
+
+#[cfg(test)]
+mod upstream_hint_response_tests {
+    use super::{response_with_upstream_hints, router::UpstreamErrorMetadata};
+    use axum::body::to_bytes;
+    use axum::http::StatusCode;
+
+    #[tokio::test]
+    async fn preserves_text_response_semantics_for_local_and_upstream_errors() {
+        let local = response_with_upstream_hints(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "local failure".to_string(),
+            None,
+        );
+        assert_eq!(local.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            local.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
+        assert_eq!(
+            to_bytes(local.into_body(), 1024).await.unwrap().as_ref(),
+            b"local failure"
+        );
+
+        let upstream = UpstreamErrorMetadata {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            retry_after: Some("Tue, 01 Jan 2030 00:00:00 GMT".to_string()),
+            should_retry: Some("false".to_string()),
+        };
+        let hinted = response_with_upstream_hints(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "upstream failure".to_string(),
+            Some(&upstream),
+        );
+        assert_eq!(hinted.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            hinted.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
+        assert_eq!(
+            hinted.headers().get("retry-after").unwrap(),
+            "Tue, 01 Jan 2030 00:00:00 GMT"
+        );
+        assert_eq!(hinted.headers().get("x-should-retry").unwrap(), "false");
+        assert_eq!(
+            to_bytes(hinted.into_body(), 1024).await.unwrap().as_ref(),
+            b"upstream failure"
+        );
+    }
+}
+
+fn response_with_cache_marker(mut response_json: Value, marker: &str) -> Response {
+    if let Some(obj) = response_json.as_object_mut() {
+        obj.insert("stoke_cache".into(), json!(marker));
+    }
     Json(response_json).into_response()
 }
 #[cfg(test)]
@@ -2193,5 +2394,74 @@ mod hold_sizing_tests {
     #[test]
     fn an_empty_vote_list_falls_back_to_the_requested_model() {
         assert!((hold("test_vote", "dear", &[], 1) - 20.0).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn cache_fill_between_initial_miss_and_claim_returns_coalesced_without_dispatch() {
+        use crate::cache::ResponseCache;
+        use crate::coalescing::{Claim, Coalescer};
+        use std::time::Duration;
+
+        let cache = ResponseCache::new(60, 0.92, false);
+        let coalescer = Coalescer::new(8, Duration::from_secs(1));
+        let key = "cache-fill-race";
+        let ttl = Duration::from_secs(60);
+        assert!(super::exact_cache_hit(&cache, key, ttl).is_none());
+
+        let cached = serde_json::json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"already filled"}}]});
+        cache.put_exact(key, "test-scope", cached.clone());
+
+        let (response, dispatches) =
+            match super::claim_exact_or_cached(&coalescer, &cache, key, ttl) {
+                Err(response) => (super::response_with_cache_marker(response, "coalesced"), 0),
+                Ok(_) => panic!("a cache-filled race must not reach dispatch"),
+            };
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["choices"][0]["message"]["content"], "already filled");
+        assert_eq!(body["stoke_cache"], "coalesced");
+        assert_eq!(dispatches, 0);
+        assert!(matches!(coalescer.claim(key), Claim::Leader(_)));
+    }
+
+    #[test]
+    fn response_cache_headers_bypass_all_duplicate_case_insensitive_directives() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.append("cache-control", "max-age=0".parse().unwrap());
+        headers.append("cache-control", "No-Store".parse().unwrap());
+        assert!(super::cache_control_bypasses_response_cache(&headers));
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("cache-control", "public, NO-CACHE".parse().unwrap());
+        assert!(super::cache_control_bypasses_response_cache(&headers));
+    }
+
+    #[test]
+    fn exact_policy_only_stores_complete_text_completions() {
+        let complete = serde_json::json!({"choices": [{"finish_reason":"stop", "message":{"role":"assistant", "content":"ok"}}]});
+        let truncated = serde_json::json!({"choices": [{"finish_reason":"length", "message":{"content":"partial"}}]});
+        let tool_call = serde_json::json!({"choices": [{"finish_reason":"stop", "message":{"role":"assistant", "content":null,"tool_calls":[]}}]});
+        assert!(super::response_is_cacheable_text_completion(&complete));
+        assert!(!super::response_is_cacheable_text_completion(&truncated));
+        assert!(!super::response_is_cacheable_text_completion(&tool_call));
+    }
+
+    #[test]
+    fn exact_policy_rejects_missing_role() {
+        let response = serde_json::json!({"choices": [{"finish_reason":"stop", "message":{"content":"ok"}}]});
+        assert!(!super::response_is_cacheable_text_completion(&response));
+    }
+
+    #[test]
+    fn exact_policy_rejects_non_assistant_role() {
+        let response = serde_json::json!({"choices": [{"finish_reason":"stop", "message":{"role":"user", "content":"ok"}}]});
+        assert!(!super::response_is_cacheable_text_completion(&response));
+    }
+
+    #[test]
+    fn exact_policy_rejects_legacy_function_call() {
+        let response = serde_json::json!({"choices": [{"finish_reason":"stop", "message":{"role":"assistant", "content":"ok", "function_call":{"name":"lookup","arguments":"{}"}}}]});
+        assert!(!super::response_is_cacheable_text_completion(&response));
     }
 }

@@ -1,3 +1,4 @@
+use axum::http::HeaderMap;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -766,6 +767,20 @@ impl Auth {
         }
     }
 
+    /// Validate gateway identity headers without treating malformed explicit
+    /// gateway headers as absent. Authorization remains available for the
+    /// native provider credential when a valid gateway header is sent.
+    pub fn validate_gateway_headers(&self, headers: &HeaderMap) -> Option<String> {
+        let stoke_key = match headers.get("x-stoke-key").or_else(|| headers.get("x-api-key")) {
+            Some(value) => Some(value.to_str().ok()?),
+            None => None,
+        };
+        let authorization = headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok());
+        self.validate_gateway(stoke_key, authorization)
+    }
+
     pub fn is_auth_enabled(&self) -> bool {
         !self.keys.read().unwrap().is_empty()
             || std::env::var("STOKE_DEV").unwrap_or_default() != "1"
@@ -909,6 +924,16 @@ mod tests {
         );
     }
 
+    #[test]
+    fn malformed_explicit_gateway_headers_never_fall_back_to_authorization() {
+        let auth = Auth::with_keys(&["gateway-key"]);
+        for name in ["x-stoke-key", "x-api-key"] {
+            let mut headers = HeaderMap::new();
+            headers.insert("authorization", "Bearer gateway-key".parse().unwrap());
+            headers.insert(name, axum::http::HeaderValue::from_bytes(b"\xff").unwrap());
+            assert!(auth.validate_gateway_headers(&headers).is_none());
+        }
+    }
     #[test]
     fn test_auth_dev_mode() {
         // STOKE_DEV=1 + no keys → anonymous access allowed

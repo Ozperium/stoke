@@ -25,6 +25,12 @@ process environment/configuration: Claude Code receives Stoke as its Anthropic b
 while Codex receives a temporary custom provider using the Responses wire API. Provider
 credentials remain in the separately running gateway process.
 
+## Optional native Responses Headroom
+
+`PluginManager::filter_responses` runs after gateway authentication and admission and before buffered or streaming `/v1/responses` dispatch. The default-off filter sends only eligible `function_call_output.output` strings to a numeric-loopback HTTP worker, authenticated by `STOKE_HEADROOM_TOKEN`; provider and gateway credentials are not sent to that worker. Request and response payloads are bounded at 1 MiB, with at most 128 outputs. Redirects and proxy inheritance are disabled. Missing tokens, timeouts and invalid transformations preserve original outputs; one worker attempt is made. Rust independently validates smaller JSON whitespace/lexeme changes and supported JSON-in-string envelope changes, and computes `x-stoke-headroom`. It does not transform upstream SSE bytes or other protocol paths.
+
+`integrations/headroom/launch.py` starts a single-threaded worker on a child-owned ephemeral port, validates authenticated readiness, and launches Stoke with an owned temporary `STOKE_CONFIG`. The worker has strict JSON/framing checks and read timeouts, but is trusted local code rather than an OS sandbox. The optional macOS arm64 / CPython 3.11 wheel lock and adapter provenance are documented in the [Headroom guide](docs/guides/optional-headroom.md). Core installation does not require Python.
+
 ## Request pipeline
 
 Everything below is the actual order of operations in `chat_completions`
@@ -161,7 +167,14 @@ similar question.
 Lookup is two-layer: exact hash first, then — if `STOKE_SEMANTIC_CACHE` is set — a
 semantic search over cached prompt embeddings (cosine similarity threshold 0.92, TTL
 3600 s; both fixed at construction in `src/main.rs`). A hit returns immediately with
-`"stoke_cache": "hit"` in the response.
+`"stoke_cache": "hit"` in the response. Named routes may opt into
+`response_cache.mode = "exact"` with a positive TTL and may separately enable bounded
+exact coalescing. The route TTL is `min(route_ttl, global_ttl)`; expired entries are
+removed lazily on lookup/write, not securely erased. Coalescing keeps only a bounded
+in-flight notification registry, never response bodies: one leader executes upstream,
+followers wait up to five seconds and re-read exact cache before dispatching normally.
+Coalescing is limited to eligible non-streaming named routes and does not imply Responses
+caching or any provider-native prompt-cache behavior.
 
 ### 7. Placement and the provider call
 
@@ -238,6 +251,26 @@ ignore:
 These fields are added on non-streaming responses. Streaming responses are passed
 through unmodified and carry no `stoke_*` annotations — a stream's placement decision is
 logged, and its live load and latency are visible on `GET /v1/nodes` instead.
+
+### Validated retry hints
+
+Provider error metadata may include `Retry-After` and `x-should-retry` for client
+propagation. Stoke forwards only valid, unambiguous values (including a valid HTTP-date
+for `Retry-After`); duplicate or malformed values are dropped while the upstream status
+and body remain authoritative. These headers inform the client and do not create a new
+internal retry/failover policy.
+
+### Native Codex Responses authentication
+
+The Responses gateway supports Ollama/openai-compatible providers and a named native
+Codex subscription provider without translating the Responses protocol. With gateway
+ownership selected, the credential is read from the existing native Codex login at
+`~/.codex/auth.json` by the Stoke process and is sent only to the exact configured
+first-party Codex destination. `STOKE_API_KEYS` authenticates the client-to-gateway hop;
+the gateway key is never used as the upstream OAuth credential. An explicitly separate
+client OAuth credential remains supported and is forwarded only on the subscription
+route. Subscription traffic bypasses per-token USD metering, but rate limits, loop
+detection, and the provider's own plan limits still apply.
 
 ### 9. Post-processing and accounting
 

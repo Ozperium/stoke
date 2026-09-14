@@ -33,26 +33,37 @@ pub fn validate_oauth_destination(url: &str, allowed_host: &str) -> Result<(), S
 /// The exact Responses endpoint Codex's subscription backend serves.
 pub const CHATGPT_CODEX_BASE: &str = "https://chatgpt.com/backend-api/codex";
 
-/// Test-only escape hatch for deterministic smoke harnesses: `STOKE_TEST_SUBSCRIPTION_BASES`
-/// names the mock base URLs the gateway may accept IN ADDITION to the pinned
-/// first-party hosts. Unset (production) the override does not exist and the
-/// pins are absolute — fail-closed by default.
+/// Test-only escape hatch for deterministic smoke harnesses. In debug builds it
+/// admits only numeric loopback HTTP bases, with no credentials, query, or
+/// fragment. Release builds compile the override out entirely.
+#[cfg(debug_assertions)]
 fn test_allowed_subscription_bases() -> Vec<String> {
-    let raw = std::env::var("STOKE_TEST_SUBSCRIPTION_BASES").unwrap_or_default();
-    let mut out = Vec::new();
-    for entry in raw.split(',') {
-        let base = entry.trim().trim_end_matches('/').to_string();
-        if base.is_empty() {
-            continue;
-        }
-        // The pins are checked against full endpoint URLs too
-        // ("<base>/responses", "<base>/v1/messages"), so the override admits
-        // the same shapes for each allowed mock base.
-        out.push(base.clone());
-        out.push(format!("{base}/responses"));
-        out.push(format!("{base}/v1/messages"));
-    }
-    out
+    std::env::var("STOKE_TEST_SUBSCRIPTION_BASES")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|base| !base.is_empty() && debug_base_is_allowed(base))
+        .flat_map(|base| {
+            let base = base.trim_end_matches('/').to_string();
+            [base.clone(), format!("{base}/responses"), format!("{base}/v1/messages")]
+        })
+        .collect()
+}
+
+#[cfg(debug_assertions)]
+fn debug_base_is_allowed(base: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(base) else { return false };
+    parsed.scheme() == "http"
+        && parsed.host_str().and_then(|host| host.trim_start_matches('[').trim_end_matches(']').parse::<std::net::IpAddr>().ok()).is_some_and(|ip| ip.is_loopback())
+        && parsed.username().is_empty()
+        && parsed.password().is_none()
+        && parsed.query().is_none()
+        && parsed.fragment().is_none()
+}
+
+#[cfg(not(debug_assertions))]
+fn test_allowed_subscription_bases() -> Vec<String> {
+    Vec::new()
 }
 
 /// The single endpoint a `codex_subscription` provider may dispatch to.
@@ -89,14 +100,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_test_base_override_does_not_exist_by_default() {
-        // Fail-closed: production never sets STOKE_TEST_SUBSCRIPTION_BASES, so
-        // the pins stay absolute. Assert the override truly changes nothing
-        // when unset for a non-pinned URL.
-        std::env::remove_var("STOKE_TEST_SUBSCRIPTION_BASES");
+    fn an_unpinned_loopback_url_stays_rejected_without_process_env_mutation() {
         assert!(subscription_responses_endpoint("http://127.0.0.1:1/v1").is_err());
         assert!(claude_subscription_messages_endpoint("http://127.0.0.1:1").is_err());
         assert!(validate_oauth_destination("http://127.0.0.1:1/x", "chatgpt.com").is_err());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_override_accepts_only_numeric_loopback_http_without_url_tricks() {
+        assert!(debug_base_is_allowed("http://127.0.0.1:43123"));
+        assert!(debug_base_is_allowed("http://[::1]:43123"));
+        for hostile in [
+            "https://127.0.0.1:43123",
+            "http://localhost:43123",
+            "http://192.168.1.2:43123",
+            "http://127.0.0.1:43123?x=1",
+            "http://user:pass@127.0.0.1:43123",
+            "http://127.0.0.1:43123#fragment",
+        ] {
+            assert!(!debug_base_is_allowed(hostile), "must reject {hostile}");
+        }
     }
 
     #[tokio::test]

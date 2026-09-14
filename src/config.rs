@@ -313,6 +313,7 @@ impl Config {
     /// let it serve unmetered traffic under a `budget_usd` cap that never trips.
     /// Fail at boot rather than at spend time.
     pub fn validate(&self) -> Result<(), String> {
+        self.plugins.headroom.validate()?;
         for p in &self.providers {
             if !p.is_subscription() {
                 continue;
@@ -384,6 +385,50 @@ impl Config {
                     ));
                 }
             }
+            if let Some(policy) = &route.response_cache {
+                match policy.mode.as_str() {
+                    "off" => {
+                        if policy.ttl_secs.is_some() {
+                            return Err(format!(
+                                "route '{}' response_cache mode 'off' must not set ttl_secs",
+                                route.name
+                            ));
+                        }
+                    }
+                    "exact" => match policy.ttl_secs {
+                        Some(ttl_secs) if ttl_secs > 0 => {}
+                        Some(_) => {
+                            return Err(format!(
+                                "route '{}' response_cache exact ttl_secs must be > 0",
+                                route.name
+                            ));
+                        }
+                        None => {
+                            return Err(format!(
+                                "route '{}' response_cache exact requires ttl_secs",
+                                route.name
+                            ));
+                        }
+                    },
+                    mode => {
+                        return Err(format!(
+                            "route '{}' response_cache mode '{}' is invalid; use off or exact",
+                            route.name, mode
+                        ));
+                    }
+                }
+            }
+            if route.coalesce
+                && !matches!(
+                    route.response_cache.as_ref().map(|policy| policy.mode.as_str()),
+                    Some("exact")
+                )
+            {
+                return Err(format!(
+                    "route '{}' coalesce requires an explicit response_cache mode 'exact'",
+                    route.name
+                ));
+            }
         }
         for p in &self.providers {
             if p.r#type != "claude_subscription" {
@@ -431,7 +476,19 @@ impl Config {
     }
 
     fn find_config_path() -> Result<PathBuf, String> {
-        // Search order: CLI arg (TODO), ./stoke.toml, ~/.config/stoke/stoke.toml
+        if let Some(path) = env::var_os("STOKE_CONFIG") {
+            let path = PathBuf::from(path);
+            return if path.is_file() {
+                Ok(path)
+            } else {
+                Err(format!(
+                    "STOKE_CONFIG points to an invalid config file: {}",
+                    path.display()
+                ))
+            };
+        }
+
+        // Default search: ./stoke.toml, ~/.config/stoke/stoke.toml
         let candidates = [
             PathBuf::from("stoke.toml"),
             dirs::config_dir()
@@ -535,6 +592,64 @@ mod validate_tests {
 host = "127.0.0.1"
 port = 8787
 "#;
+
+    #[test]
+    fn stoke_config_overrides_search_and_invalid_override_does_not_fallback() {
+        let path = std::env::temp_dir().join(format!(
+            "stoke-config-override-{}-{}.toml",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::write(&path, BASE).expect("write config override fixture");
+        let previous = std::env::var_os("STOKE_CONFIG");
+
+        std::env::set_var("STOKE_CONFIG", &path);
+        assert_eq!(Config::find_config_path().unwrap(), path);
+
+        let missing = path.with_extension("missing.toml");
+        std::env::set_var("STOKE_CONFIG", &missing);
+        let error = Config::find_config_path().unwrap_err();
+        assert!(error.contains("STOKE_CONFIG"), "error must identify override: {error}");
+        assert!(error.contains(&missing.display().to_string()));
+
+        match previous {
+            Some(value) => std::env::set_var("STOKE_CONFIG", value),
+            None => std::env::remove_var("STOKE_CONFIG"),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn response_cache_policy_validates_modes_and_exact_ttl() {
+        let exact = cfg(&format!(
+            "{BASE}\n[[routes]]\nname = \"exact\"\npath = \"/v1/exact\"\n\n[routes.response_cache]\nmode = \"exact\"\nttl_secs = 30\n"
+        ));
+        assert!(exact.validate().is_ok());
+
+        for policy in [
+            "mode = \"bogus\"\nttl_secs = 30",
+            "mode = \"exact\"",
+            "mode = \"exact\"\nttl_secs = 0",
+            "mode = \"off\"\nttl_secs = 30",
+        ] {
+            let parsed = toml::from_str::<Config>(&format!(
+                "{BASE}\n[[routes]]\nname = \"route\"\npath = \"/v1/route\"\n\n[routes.response_cache]\n{policy}\n"
+            ));
+            let config = parsed.expect("policy mode cases should parse before validation");
+            assert!(
+                config.validate().is_err(),
+                "accepted invalid policy: {policy}"
+            );
+        }
+
+        let wrong_type = toml::from_str::<Config>(&format!(
+            "{BASE}\n[[routes]]\nname = \"route\"\npath = \"/v1/route\"\n\n[routes.response_cache]\nmode = \"exact\"\nttl_secs = \"30\"\n"
+        ));
+        assert!(
+            wrong_type.is_err(),
+            "wrong ttl type must fail at config load"
+        );
+    }
 
     #[test]
     fn a_provider_without_a_tier_is_rejected_at_boot() {
@@ -802,5 +917,36 @@ tier = "subscription"
              base_url = \"https://api.anthropic.com\"\ntier = \"cloud\"\napi_key_env = \"ANTHROPIC_API_KEY\"\n"
         ));
         assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn route_coalescing_is_off_by_default_and_exact_opt_in_is_valid() {
+        let c = cfg(&format!(
+            "{BASE}\n[[routes]]\nname = \"joined\"\npath = \"/v1/joined/completions\"\nrouting = \"single\"\n\
+             response_cache = {{ mode = \"exact\", ttl_secs = 60 }}\n"
+        ));
+        assert!(!c.routes[0].coalesce);
+
+        let enabled = cfg(&format!(
+            "{BASE}\n[[routes]]\nname = \"joined\"\npath = \"/v1/joined/completions\"\nrouting = \"single\"\ncoalesce = true\n\
+             [routes.response_cache]\nmode = \"exact\"\nttl_secs = 60\n"
+        ));
+        assert!(enabled.validate().is_ok());
+        assert!(enabled.routes[0].coalesce);
+    }
+
+    #[test]
+    fn route_coalescing_requires_explicit_exact_cache_policy() {
+        for policy in [
+            "",
+            "[routes.response_cache]\nmode = \"off\"\n",
+        ] {
+            let c = cfg(&format!(
+                "{BASE}\n[[routes]]\nname = \"joined\"\npath = \"/v1/joined/completions\"\nrouting = \"single\"\ncoalesce = true\n{policy}"
+            ));
+            let err = c.validate().unwrap_err();
+            assert!(err.contains("coalesce"), "unexpected error: {err}");
+            assert!(err.contains("exact"), "unexpected error: {err}");
+        }
     }
 }

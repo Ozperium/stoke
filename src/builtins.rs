@@ -448,6 +448,25 @@ pub struct RouteProfile {
     /// Whether to enable streaming for this profile
     #[serde(default = "default_true")]
     pub stream: bool,
+    /// Optional route-local response cache policy. Omitted preserves the
+    /// gateway's legacy exact+semantic cache behavior.
+    #[serde(default)]
+    pub response_cache: Option<ResponseCachePolicy>,
+    /// Coalesce cold identical requests on this named route. Requires an
+    /// explicit exact response cache policy; disabled by default.
+    #[serde(default)]
+    pub coalesce: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ResponseCachePolicy {
+    /// `off` disables response-cache lookup and storage; `exact` enables only
+    /// full-request identity matching for this route.
+    pub mode: String,
+    /// Required and positive for `exact`. Route retention never extends the
+    /// existing global retention; the effective TTL is their minimum.
+    #[serde(default)]
+    pub ttl_secs: Option<u64>,
 }
 
 fn default_route_pattern() -> String {

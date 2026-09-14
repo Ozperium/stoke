@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="mask-icon" href="/favicon.svg" color="#3bdb78">
+<meta name="theme-color" content="#0a0a0b">
+<title>Named-Route Response Cache Policy — Stoke</title>
+<meta name="description" content="Opt into exact response caching and bounded coalescing on eligible named routes.">
+<link rel="canonical" href="https://stokegate.com/guides/cache-policy/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Named-Route Response Cache Policy">
+<meta property="og:description" content="Opt into exact response caching and bounded coalescing on eligible named routes.">
+<meta property="og:url" content="https://stokegate.com/guides/cache-policy/">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Named-Route Response Cache Policy","description":"Opt into exact response caching and bounded coalescing on eligible named routes.","url":"https://stokegate.com/guides/cache-policy/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-09-14"}</script>
+<script src="/tracking.js" defer></script>
+<style>
+:root{--bg:#0a0a0b;--bg2:#131316;--bg3:#1a1a20;--border:#2a2a32;--text:#e4e4e7;--muted:#8a8a96;--accent:#3bdb78;--red:#ff5454;
+--font:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+nav{border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(10,10,11,.85);backdrop-filter:blur(8px);z-index:10}
+.nav-inner{max-width:860px;margin:0 auto;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.logo{font-weight:700;font-size:17px;color:var(--text)}
+.nav-links{display:flex;gap:20px}.nav-links a{color:var(--muted);font-size:14px}
+main{max-width:760px;margin:0 auto;padding:56px 24px 80px}
+h1{font-size:40px;line-height:1.15;letter-spacing:-.02em;margin-bottom:16px}
+h2{font-size:24px;margin:44px 0 14px;letter-spacing:-.01em;scroll-margin-top:80px}
+h3{font-size:18px;margin:28px 0 10px}
+p{margin:14px 0;color:#c9c9d1}
+ul,ol{margin:14px 0 14px 22px}li{margin:7px 0;color:#c9c9d1}
+code{font-family:var(--mono);font-size:.88em;color:var(--accent);background:var(--bg3);padding:2px 6px;border-radius:5px}
+pre{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;overflow-x:auto;margin:18px 0}
+pre code{background:none;color:#d9d9e3;padding:0;font-size:13.5px;line-height:1.65}
+blockquote{border-left:3px solid var(--accent);background:var(--bg2);padding:12px 18px;margin:18px 0;border-radius:0 8px 8px 0;color:var(--muted)}
+table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14.5px}
+th,td{border:1px solid var(--border);padding:9px 12px;text-align:left}
+th{background:var(--bg2);font-weight:600}
+hr{border:0;border-top:1px solid var(--border);margin:36px 0}
+.lede{color:var(--muted);font-size:18px;margin-bottom:8px}
+.crumb{font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:22px}
+.cta{margin-top:52px;border:1px solid var(--border);background:var(--bg2);border-radius:14px;padding:26px}
+.cta h3{margin-top:0}
+.btn{display:inline-block;background:var(--accent);color:#07120b;font-weight:650;padding:11px 20px;border-radius:9px;margin-top:10px}
+.btn:hover{text-decoration:none;opacity:.92}
+footer{border-top:1px solid var(--border);padding:28px 24px;color:var(--muted);font-size:13.5px;text-align:center}
+@media(max-width:640px){h1{font-size:31px}main{padding:36px 20px 60px}.nav-links{display:none}}
+
+/* syntax tokens (build-time highlighted; no client JS) */
+.tok-com{color:var(--muted);font-style:italic}
+.tok-str{color:#7dd3fc}
+.tok-num{color:#e8b339}
+.tok-kw{color:#3bdb78;font-weight:600}
+.tok-bi{color:#6ee7a8}
+.tok-var{color:#e8b339}
+.tok-key{color:#e4e4e7}
+.tok-sec{color:#3bdb78;font-weight:600}
+.tok-flag{color:#8a8a96}
+
+/* guide index cards */
+.gwrap{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:36px}
+.gcard{display:block;border:1px solid var(--border);background:var(--bg2);border-radius:16px;overflow:hidden;transition:border-color .18s,transform .18s}
+.gcard:hover{border-color:rgba(59,219,120,.45);transform:translateY(-2px);text-decoration:none}
+.gart{height:118px;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 120%,rgba(59,219,120,.14),transparent 68%);border-bottom:1px solid var(--border)}
+.gart svg{width:52px;height:52px;color:var(--accent);opacity:.92}
+.gbody{padding:20px 22px 22px}
+.gchip{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--border);border-radius:99px;padding:3px 9px;margin-bottom:11px}
+.gcard h2{font-size:18px;margin:0 0 7px;color:var(--text);letter-spacing:-.01em;line-height:1.35}
+.gcard p{font-size:14px;color:var(--muted);margin:0 0 14px;line-height:1.6}
+.gcard .go{font-size:13.5px;color:var(--accent);font-weight:600}
+@media(max-width:700px){.gwrap{grid-template-columns:1fr}}
+
+</style>
+</head>
+<body>
+<nav><div class="nav-inner">
+  <a href="/" class="logo">⬡ Stoke</a>
+  <div class="nav-links">
+    <a href="/guides/">Guides</a>
+    <a href="https://github.com/Ozperium/stoke">GitHub</a>
+  </div>
+</div></nav>
+<main>
+<div class="crumb"><a href="/">Stoke</a> / <a href="/guides/">Guides</a></div>
+<h1>Named-route response cache policy</h1>
+<p>A route may opt into a narrow response-cache policy with <code>response_cache</code>:</p>
+<pre><code class="lang-toml"><span class="tok-sec">[[routes]]</span>
+<span class="tok-key">name</span> = <span class="tok-str">"repeatable-work"</span>
+<span class="tok-key">path</span> = <span class="tok-str">"/v1/repeatable/completions"</span>
+<span class="tok-key">model</span> = <span class="tok-str">"your-configured-model"</span>
+<span class="tok-key">routing</span> = <span class="tok-str">"single"</span>
+<span class="tok-key">stream</span> = <span class="tok-kw">false</span>
+<span class="tok-key">coalesce</span> = <span class="tok-kw">true</span>
+<span class="tok-sec">
+[routes.response_cache]</span>
+<span class="tok-key">mode</span> = <span class="tok-str">"exact"</span>
+<span class="tok-key">ttl_secs</span> = <span class="tok-num">60</span></code></pre>
+<p><code>mode = "exact"</code> requires a positive <code>ttl_secs</code> and uses the full A1 request identity (scope, model, and the complete effective request). It does not perform semantic lookup or embedding work. Only successful, complete text completions (<code>finish_reason = "stop"</code>, string message content, and no <code>tool_calls</code>) are stored. <code>mode = "off"</code> disables response-cache lookup and storage for that route. An omitted policy preserves the legacy global exact-plus-semantic cache.</p>
+<p>The route policy is eligible only for the existing <code>routing = "single"</code> and <code>stream = false</code> cache gate. Streaming, fan-out, off-policy, and <code>Cache-Control: no-store</code>/<code>no-cache</code> requests do not serialize or hash the whole request for response caching. All duplicate Cache-Control values and directive case variants are honored. These request directives do not alter provider-native prompt caching.</p>
+<p><code>coalesce</code> is opt-in and valid only with the explicit exact policy above. On a cold overlap, the first admitted request becomes the leader; followers wait at most five seconds, then re-read the existing exact cache and use it only if the complete result is present and still within TTL. A joined response is marked <code>stoke_cache = "coalesced"</code>; a timeout, provider error, canceled leader, or non-cacheable result wakes followers and each may perform its own normal single dispatch once. The bounded in-flight registry stores only notification state, not response bodies, and is bypassed when full.</p>
+<p>The route TTL can shorten the existing global cache retention, never extend it: <code>effective_ttl = min(route.ttl_secs, global_ttl)</code>. The current global retention is 3600 seconds. A TTL larger than that is therefore capped rather than silently claimed as an extension.</p>
+<p>Invalid policy modes, missing/zero exact TTLs, off policies carrying a TTL, and wrong TOML TTL types are rejected during config validation.</p>
+<h2 id="runnable-verification">Runnable verification</h2>
+<p>Build and run the provider-fixture smoke test from the repository root:</p>
+<pre><code class="lang-sh"><span class="tok-kw">cargo</span> build<span class="tok-flag"> --offline</span><span class="tok-flag"> --locked</span>
+<span class="tok-var">STOKE_BIN</span>=target/debug/stoke python3 scripts/smoke_cache_identity.py
+<span class="tok-var">STOKE_BIN</span>=target/debug/stoke python3 scripts/smoke_coalescing.py</code></pre>
+<p>The smoke starts a fresh gateway and mock provider, then verifies legacy exact behavior, exact-route hits, off-route misses, Cache-Control bypass without population, and non-cacheable truncated responses using provider call counts. The coalescing smoke separately uses a delayed cold provider and simultaneous requests to prove one upstream call plus a joined marker; warm-cache hits are not used as evidence. These tests are wire-behavior checks, not inference or savings benchmarks.</p>
+<h2 id="limitations">Limitations</h2>
+<p>The cache remains in-process and global retention remains configured by the existing gateway construction. This package does not add persistence, coalescing, retries, or subscription/prompt-cache accounting changes. A zero-temperature request is only a repeatable-workload opt-in under the existing cache threshold; it is not a mathematical determinism guarantee.</p>
+<div class="cta">
+  <h3>Put a control point in front of your agents</h3>
+  <p>Stoke is a single Rust binary: hard budget caps, a runaway-loop kill switch, and local-first routing — enforced before a provider is ever called. Open source, MIT.</p>
+  <a class="btn" href="https://github.com/Ozperium/stoke">Get Stoke on GitHub</a>
+</div>
+</main>
+<footer>MIT licensed · <a href="https://stokegate.com">stokegate.com</a> · <a href="/security/">Security</a> · <a href="/legal/">Legal</a> · <a href="/contact/">Contact</a> · <a href="https://github.com/Ozperium/stoke">GitHub</a></footer>
+</body>
+</html>

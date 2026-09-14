@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "tested_platform": "macOS arm64, CPython 3.11.15",
+  "artifacts": [
+    {
+      "name": "headroom-ai-0.37.0-cp310-abi3-macosx_11_0_arm64.whl",
+      "source": "https://files.pythonhosted.org/packages/47/21/8a87b66e83498da89404cdba4ced6397e84331047df9e11a9ea6f3510b29/headroom_ai-0.37.0-cp310-abi3-macosx_11_0_arm64.whl",
+      "sha256": "b4392f68a8d02d74c62c1734cf5bf327511dcc72678f01669f44f0612944d59c",
+      "size": 13780628,
+      "provenance": "official PyPI artifact; hash also recorded by the pilot environment's direct_url.json"
+    }
+  ],
+  "reviewed_patch": {
+    "path": "headroom_patches/headroom/transforms/recursive_json.py",
+    "sha256": "587ce9468ce310eca7a9bce98c01031ddf8cd91a48bef16b5eeecad9614b0a42",
+    "bytes": 8306,
+    "published_0_37_0_sha256": "b71cfbc82d72b1df33c098ccb2eb5c1bb7bfabe00b099521c3a17b33e06b9d04",
+    "reviewed_source_sha256": "587ce9468ce310eca7a9bce98c01031ddf8cd91a48bef16b5eeecad9614b0a42",
+    "provenance": "byte-for-byte copy of the reviewed source snapshot; no new patch logic"
+  },
+  "files": {
+    "worker.py": "346f805e2740ba0f15aac9fed25d31fb758666f03701f8ed147c654ff88a0d56",
+    "requirements-optional.txt": "271f24043cc1052ddadc4c9ea4f2bb3f5fb68c2f7853df5daf880cbb38bc52fd",
+    "licenses/INVENTORY.md": "da5348931c5fa1fc42206f361f61a487fa9ac37606bd2a11b36d5c0b904d9733",
+    "licenses/headroom-ai-LICENSE.txt": "f14dd440c8e3152b4d4d324615de8251ddb011dc81f484daad0b6902093539cc",
+    "licenses/headroom-ai-NOTICE.txt": "54134ada2d53b593077422f69031f0ca161a7710b8e2687d777fe6f1690f71f4"
+  }
+}

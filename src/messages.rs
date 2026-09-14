@@ -43,14 +43,7 @@ const SUBSCRIPTION_OAUTH_BETA: &str = "oauth-2025-04-20";
 /// logged or echoed — only the validated key name flows back to the budget
 /// meter.
 pub fn validate_gateway_headers(auth: &crate::budget::Auth, headers: &HeaderMap) -> Option<String> {
-    let stoke_key = headers
-        .get("x-stoke-key")
-        .or_else(|| headers.get("x-api-key"))
-        .and_then(|header| header.to_str().ok());
-    let authorization = headers
-        .get("authorization")
-        .and_then(|header| header.to_str().ok());
-    auth.validate_gateway(stoke_key, authorization)
+    auth.validate_gateway_headers(headers)
 }
 
 /// Subscription admission bypass, decided once for the whole request.
@@ -643,10 +636,17 @@ async fn forward_codex_messages(
     output
 }
 
-fn load_codex_subscription_credential() -> Result<(String, String), String> {
+pub(crate) fn load_codex_subscription_credential() -> Result<(String, String), String> {
     let home = std::env::var_os("HOME")
         .ok_or_else(|| "Codex subscription login is unavailable: HOME is not set".to_string())?;
-    let path = std::path::PathBuf::from(home).join(".codex/auth.json");
+    load_codex_subscription_credential_from_path(
+        &std::path::PathBuf::from(home).join(".codex/auth.json"),
+    )
+}
+
+fn load_codex_subscription_credential_from_path(
+    path: &std::path::Path,
+) -> Result<(String, String), String> {
     let raw = std::fs::read_to_string(path).map_err(|_| {
         "Codex subscription login is unavailable; sign in with the native Codex app first"
             .to_string()
@@ -2546,6 +2546,18 @@ mod tests {
         assert_eq!(out.headers()[BILLING_MODE_HEADER], "chatgpt_subscription");
         assert_eq!(out.headers()["x-stoke-cost"], "0.012500");
         assert_eq!(out.headers()["x-stoke-node"], "ollama");
+    }
+
+    #[test]
+    fn missing_codex_store_returns_honest_non_secret_error() {
+        let error = load_codex_subscription_credential_from_path(std::path::Path::new(
+            "/definitely/missing/stoke-codex-auth.json",
+        ))
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "Codex subscription login is unavailable; sign in with the native Codex app first"
+        );
     }
 
     #[test]

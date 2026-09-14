@@ -305,7 +305,7 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
       <div class="hero-copy">
         <div class="kicker">Enforce, don't just observe.</div>
         <h1>Your agents. Your machines.<br><span class="hl">Your rules.</span></h1>
-        <p class="hero-sub">Route to your own hardware — or approved cloud when you choose. Keep sensitive routes off unapproved providers; redact known credentials before dispatch. Refuse anything over budget. Kill loops in seconds. Run Claude Code on your local models or a flat subscription plan, with disclosed fallback when the plan refuses. One ~5.5&nbsp;MB Rust binary that decides <em>before</em> the money is spent, with an embedded control room at <code>/ui</code>.</p>
+        <p class="hero-sub">Route to your own hardware — or approved cloud when you choose. Keep sensitive routes off unapproved providers; redact known credentials before dispatch. Refuse anything over budget. Kill loops in seconds. Connect native Codex Responses and Ollama Chat Completions through one authenticated gateway, without hiding the provider boundary. One ~5.5&nbsp;MB Rust binary that decides <em>before</em> the money is spent, with an embedded control room at <code>/ui</code>.</p>
         <div class="hero-cta">
           <a data-track="install_cta_clicked" href="#install" class="btn btn-primary">Install in 60 seconds</a>
           <a href="#control-room" class="btn btn-secondary">See it live</a>
@@ -373,7 +373,7 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
           <div class="panel-feed" id="panel-demo-feed">
             <div class="panel-event allowed"><span class="event-state">ALLOWED</span><span class="event-detail">local Ollama node · warm route selected</span></div>
             <div class="panel-event failed"><span class="event-state">FALLBACK</span><span class="event-detail">local node unavailable · next configured node</span></div>
-            <div class="panel-event cache"><span class="event-state">CLOUD ROUTE</span><span class="event-detail">policy permits paid-provider escalation</span></div>
+            <div class="panel-event cache"><span class="event-state">ROUTE</span><span class="event-detail">policy permits approved-provider escalation</span></div>
             <div class="panel-event blocked"><span class="event-state">BLOCKED</span><span class="event-detail">budget cap reached · no upstream call</span></div>
             <div class="panel-event held"><span class="event-state">HOLD</span><span class="event-detail">reservation held for concurrent stream · cap not overshot</span></div>
           </div>
@@ -403,7 +403,7 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
     <div class="section-tag">The local capacity layer</div>
     <h2>One endpoint for the capacity you configure.</h2>
     <div class="compatibility">
-      <div class="compatibility-card"><h3>Clients in front</h3><p>Point OpenAI-compatible clients, Codex, or Claude Code at Stoke. Claude Code can serve from local chat models or a Codex subscription via explicit <code class="inline">claude-stoke-*</code> aliases; flat-plan refusals degrade to your configured capacity, disclosed by response headers.</p></div>
+      <div class="compatibility-card"><h3>Clients in front</h3><p>Point OpenAI-compatible clients, native Codex, Hermes, or Claude Code at Stoke. Responses stays Responses — including reasoning and SSE — while Ollama stays on its separate Chat Completions path. <a href="/guides/use-codex-and-ollama-with-stoke/">Connect Codex and Ollama →</a></p></div>
       <div class="compatibility-card"><h3>Capacity behind it</h3><p>Stoke discovers model inventory and health through <code class="inline">/v1/nodes</code>, then routes across configured Ollama nodes and gateways without manual topology selection.</p></div>
     </div>
     <div class="routing-flow" aria-label="Node discovery and routing flow">
@@ -425,6 +425,7 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
     </div>
     <div class="resource-links">
       <div class="resource-card"><h3><a data-track="local_capacity_cta_clicked" href="/guides/run-ollama-across-two-machines/">Connect local nodes</a></h3><p>See the two-machine Ollama walkthrough.</p></div>
+      <div class="resource-card"><h3><a data-track="guides_clicked" href="/guides/use-codex-and-ollama-with-stoke/">Connect Codex + Ollama</a></h3><p>Use native Codex auth and discovered Ollama IDs without copying OAuth into client config.</p></div>
       <div class="resource-card"><h3><a data-track="guides_clicked" href="/guides/">Guides</a></h3><p>Task-shaped walkthroughs for spend, loops, routing, and security.</p></div>
       <div class="resource-card"><h3><a href="https://github.com/Ozperium/stoke/blob/main/README.md">README</a></h3><p>Configuration, endpoints, and the operational contract.</p></div>
     </div>
@@ -456,8 +457,9 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
     <div class="section-tag">FAQ</div>
     <h2>Short answers.</h2>
     <div class="faq">
+      <details><summary>Can Stoke make tool results smaller?</summary><p>Optional Headroom removes eligible JSON tool-result whitespace before native Responses dispatch, without changing the selected model or reasoning fields. It is off by default; the current worker package targets macOS arm64. This is not streamed-response compression or a general savings guarantee. <a href="/guides/optional-headroom/">Setup and limits.</a></p></details>
       <details><summary>Is Stoke a hosted service?</summary><p>No. Stoke is a self-hosted Rust gateway that runs on infrastructure you control.</p></details>
-      <details><summary>Does it work with my existing OpenAI or Anthropic client?</summary><p>Yes. Stoke accepts OpenAI-compatible clients and the Anthropic Messages API. Point the client at Stoke, then configure the upstream provider or local node.</p></details>
+      <details><summary>Does it work with my existing OpenAI, Codex, Hermes, or Anthropic client?</summary><p>Yes. Stoke accepts OpenAI-compatible Chat Completions, native Codex Responses, and the Anthropic Messages API. Point the client at Stoke, then configure the upstream provider or discovered local node. <a href="/guides/use-codex-and-ollama-with-stoke/">Follow the Codex + Ollama guide.</a></p></details>
       <details><summary>Can I use local models across multiple machines?</summary><p>Yes. Connect and configure the nodes or gateways, then Stoke can route across their discovered model and health state.</p></details>
       <details><summary>Is the panel demo above connected to a real gateway?</summary><p>No. It is a browser-only preview of the panel's event shape. A running gateway exposes the real authenticated panel at <code class="inline">GET /ui</code> and the repeat-request demo at <code class="inline">POST /ui/demo</code>.</p></details>
       <details><summary>Where are the detailed configuration and routing docs?</summary><p>Start with the <a href="/guides/">guides</a>, then read the <a href="https://github.com/Ozperium/stoke/blob/main/README.md">README</a> and <a href="https://github.com/Ozperium/stoke/blob/main/ARCHITECTURE.md">architecture notes</a>.</p></details>

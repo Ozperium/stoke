@@ -26,7 +26,10 @@
     <li>Authentication is fail-closed unless local development mode is explicitly enabled.</li>
     <li>Ollama can remain bound to <code>127.0.0.1</code>; Stoke is the authenticated network door.</li>
     <li>Budget, rate, and loop checks run before a provider call.</li>
+    <li>Native Codex credentials can remain gateway-owned in <code>~/.codex/auth.json</code>; the gateway key in <code>STOKE_API_KEYS</code> is not copied into upstream requests.</li>
+    <li>Cache identity is caller- and route-scoped; cache policy is limited to eligible non-streaming named routes. TTL reuse and lazy cleanup are not secure erasure.</li>
   </ul>
+  <p>For a reproducible setup that keeps native Codex Responses separate from Ollama Chat Completions, read the <a href="/guides/use-codex-and-ollama-with-stoke/">Codex + Ollama guide</a>. Stoke does not claim Responses caching, subscription dollar caps, or provider credential isolation beyond the configured boundary.</p>
   <p>Read the <a data-track="github_clicked" href="https://github.com/Ozperium/stoke/blob/main/ARCHITECTURE.md">architecture</a> and the repository's <a data-track="github_clicked" href="https://github.com/Ozperium/stoke/blob/main/AGENTS.md">security invariants</a>.</p>
 </main>
 <footer>MIT licensed · <a href="https://stokegate.com">stokegate.com</a> · <a data-track="github_clicked" href="https://github.com/Ozperium/stoke">GitHub</a></footer>

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Instant;
 use once_cell::sync::Lazy;
+use axum::http::StatusCode;
 
 use crate::config::ProviderConfig;
 use crate::cost::CostBreakdown;
@@ -56,6 +57,55 @@ pub struct ProviderResult {
     pub cost: CostBreakdown,
 }
 
+/// The small, allowlisted part of an upstream error that clients may need for
+/// their own retry decision. Do not retain or forward the upstream header map.
+#[derive(Debug, Clone)]
+pub struct UpstreamErrorMetadata {
+    pub status: StatusCode,
+    pub retry_after: Option<String>,
+    pub should_retry: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderError {
+    pub message: String,
+    pub upstream: Option<UpstreamErrorMetadata>,
+}
+
+impl ProviderError {
+    pub fn local(message: impl Into<String>) -> Self {
+        Self { message: message.into(), upstream: None }
+    }
+}
+
+fn unique_header_value<'a>(resp: &'a reqwest::Response, name: &str) -> Option<&'a str> {
+    let mut values = resp.headers().get_all(name).iter();
+    let value = values.next()?;
+    if values.next().is_some() {
+        return None;
+    }
+    value.to_str().ok()
+}
+
+fn allowlisted_retry_after_value(value: &str) -> Option<String> {
+    let integer_seconds = !value.is_empty()
+        && value.len() <= 10
+        && value.bytes().all(|byte| byte.is_ascii_digit());
+    let http_date = chrono::DateTime::parse_from_rfc2822(value).is_ok();
+    (integer_seconds || http_date).then(|| value.to_string())
+}
+
+pub(crate) fn capture_upstream_hints(
+    resp: &reqwest::Response,
+) -> (Option<String>, Option<String>) {
+    let retry_after = unique_header_value(resp, "retry-after")
+        .and_then(allowlisted_retry_after_value);
+    let should_retry = unique_header_value(resp, "x-should-retry")
+        .filter(|value| matches!(*value, "true" | "false"))
+        .map(str::to_string);
+    (retry_after, should_retry)
+}
+
 /// Call a single provider with a chat completion request.
 pub async fn call_provider(
     provider: &ProviderConfig,
@@ -72,18 +122,31 @@ pub async fn call_provider_hop(
     request: &ChatCompletionRequest,
     hop: u32,
 ) -> Result<ProviderResult, String> {
+    call_provider_hop_detailed(provider, request, hop)
+        .await
+        .map_err(|error| error.message)
+}
+
+/// Detailed single-provider entry point used only where the gateway can prove
+/// the error came from one upstream attempt. Existing fusion callers continue
+/// to use the String compatibility wrapper above.
+pub async fn call_provider_hop_detailed(
+    provider: &ProviderConfig,
+    request: &ChatCompletionRequest,
+    hop: u32,
+) -> Result<ProviderResult, ProviderError> {
     let pricer = crate::cost::global();
 
     // The dispatch gate. Every routing pattern — single, failover, and each
     // fusion fan-out — funnels through here, so this is the one place that can
     // refuse unmeterable spend while refusing is still free.
-    pricer.allows(&provider.tier, &request.model)?;
+    pricer.allows(&provider.tier, &request.model).map_err(ProviderError::local)?;
 
     let client = &*SHARED_CLIENT;
     let url = format!("{}/chat/completions", provider.base_url.trim_end_matches('/'));
 
     let body = serde_json::to_value(request)
-        .map_err(|e| format!("Failed to serialize request: {}", e))?;
+        .map_err(|e| ProviderError::local(format!("Failed to serialize request: {}", e)))?;
 
     let start = Instant::now();
 
@@ -95,20 +158,24 @@ pub async fn call_provider_hop(
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("Provider {} request failed: {}", provider.name, e))?;
+        .map_err(|e| ProviderError::local(format!("Provider {} request failed: {}", provider.name, e)))?;
 
     let elapsed_ms = start.elapsed().as_millis() as u64;
 
     if !resp.status().is_success() {
         let status = resp.status();
+        let (retry_after, should_retry) = capture_upstream_hints(&resp);
         let text = resp.text().await.unwrap_or_default();
-        return Err(format!("Provider {} returned {}: {}", provider.name, status, text));
+        return Err(ProviderError {
+            message: format!("Provider {} returned {}: {}", provider.name, status, text),
+            upstream: Some(UpstreamErrorMetadata { status, retry_after, should_retry }),
+        });
     }
 
     let response: ChatCompletionResponse = resp
         .json()
         .await
-        .map_err(|e| format!("Failed to parse provider {} response: {}", provider.name, e))?;
+        .map_err(|e| ProviderError::local(format!("Failed to parse provider {} response: {}", provider.name, e)))?;
 
     let cost = pricer.calculate(&request.model, response.usage.as_ref());
 
