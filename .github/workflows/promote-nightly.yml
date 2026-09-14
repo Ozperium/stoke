@@ -29,6 +29,8 @@ jobs:
     name: promote nightly to production
     runs-on: ubuntu-latest
     environment: production
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
