@@ -4,6 +4,7 @@ The provider delay creates a real overlap; the assertion is upstream call count
 plus a distinct `stoke_cache=coalesced` marker, not a warm-cache hit.
 """
 import json
+import base64
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -93,6 +94,27 @@ def get(base, key, path):
         return json.load(response)
 
 
+def read_decision_feed(base, key, events, ready):
+    credentials = base64.b64encode(("stoke:" + key).encode()).decode()
+    req = Request(base + "/ui/events", headers={"Authorization": "Basic " + credentials})
+    try:
+        with urlopen(req, timeout=1) as response:
+            ready.set()
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline:
+                try:
+                    line = response.readline()
+                except TimeoutError:
+                    continue
+                if not line:
+                    return
+                events.append(line.decode(errors="replace"))
+                if "Coalesced deterministic response reused" in events[-1]:
+                    return
+    except (URLError, TimeoutError):
+        return
+
+
 server = ThreadingHTTPServer(("127.0.0.1", 0), Mock)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
@@ -155,13 +177,26 @@ ttl_secs = 60
                     raise RuntimeError("gateway did not become healthy")
 
                 cold = [{"role": "user", "content": "cold overlap"}]
+                feed_events = []
+                feed_ready = threading.Event()
+                feed_thread = threading.Thread(
+                    target=read_decision_feed,
+                    args=(base, key, feed_events, feed_ready),
+                    daemon=True,
+                )
+                feed_thread.start()
+                assert feed_ready.wait(2), "decision feed did not open"
                 with ThreadPoolExecutor(max_workers=2) as pool:
                     futures = [pool.submit(post, base, key, "/v1/joined/completions", cold) for _ in range(2)]
                     assert provider_started.wait(2), "provider barrier was not reached"
                     results = [future.result() for future in futures]
+                feed_thread.join(timeout=2)
                 assert len(provider_calls) == 1, f"cold overlap made {len(provider_calls)} provider calls"
                 assert sum(r.get("stoke_cache") == "coalesced" for r in results) == 1, results
                 assert all(r["choices"][0]["message"]["content"] == "barrier answer" for r in results)
+                feed_text = "".join(feed_events)
+                assert "Cache hit" in feed_text, feed_text
+                assert "Coalesced deterministic response reused" in feed_text, feed_text
                 budget = get(base, key, "/v1/budget")
                 spend = budget["keys"][0]["spend_usd"]
                 assert abs(spend - 0.000002) < 1e-9, f"joined usage charged incorrectly: {budget}"

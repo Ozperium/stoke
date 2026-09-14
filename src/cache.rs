@@ -156,12 +156,13 @@ impl ResponseCache {
     }
 
     fn get_exact_at(&self, key: &str, ttl: Duration, now: Instant) -> Option<Value> {
-        let exact = self.exact.read().unwrap();
+        let mut exact = self.exact.write().unwrap();
         if let Some(entry) = exact.get(key) {
             if now.duration_since(entry.created_at) < ttl {
-                tracing::debug!("cache hit (exact): key={}", &key[..8]);
+                tracing::debug!("cache hit (exact): key={:.8}", key);
                 return Some(entry.response.clone());
             }
+            exact.remove(key);
         }
         None
     }
@@ -173,6 +174,7 @@ impl ResponseCache {
     }
 
     fn put_exact_at(&self, key: &str, scope: &str, response: Value, created_at: Instant) {
+        self.evict();
         let entry = CacheEntry {
             response,
             embedding: Vec::new(),
@@ -258,11 +260,13 @@ impl ResponseCache {
             created_at: Instant::now(),
             hit_count: 0,
         };
+        self.evict();
         self.exact.write().unwrap().insert(key.to_string(), entry);
     }
 
     /// Store a response in the cache (legacy, no embedding).
     pub fn put(&self, key: &str, scope: &str, response: Value, embedding: Vec<f32>) {
+        self.evict();
         let entry = CacheEntry {
             response,
             embedding,
@@ -649,6 +653,22 @@ mod scope_tests {
     }
 
     #[test]
+    fn exact_cache_debug_logging_accepts_short_and_unicode_keys() {
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(std::io::sink)
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            let cache = ResponseCache::new(3600, 0.92, false);
+            for key in ["key", "€€€"] {
+                let response = json!({"answer": "synthetic"});
+                cache.put_exact(key, "scope", response.clone());
+                assert_eq!(cache.get_exact(key), Some(response));
+            }
+        });
+    }
+
+    #[test]
     fn route_exact_ttl_expires_against_injected_instant_without_sleeping() {
         let cache = ResponseCache::new(3600, 0.92, false);
         let scope = ResponseCache::scope_of("key", "/v1/exact");
@@ -666,6 +686,36 @@ mod scope_tests {
             },
         );
         assert!(cache.get_exact_at("key", Duration::from_secs(10), Instant::now()).is_none());
+        assert!(
+            !cache.exact.read().unwrap().contains_key("key"),
+            "an expired exact entry must be removed on lookup"
+        );
+        cache.exact.write().unwrap().insert(
+            "stale".to_string(),
+            CacheEntry {
+                response: json!({"answer": "stale"}),
+                embedding: Vec::new(),
+                prompt_hash: "stale".to_string(),
+                semantic_identity: None,
+                scope: "scope".to_string(),
+                created_at: Instant::now() - Duration::from_secs(3601),
+                hit_count: 0,
+            },
+        );
+        cache.put("fresh", "scope", json!({"answer": "fresh"}), Vec::new());
+        assert_eq!(cache.stats().entries, 1, "writes must prune global-TTL entries");
+        cache.exact.write().unwrap().insert(
+            "key".to_string(),
+            CacheEntry {
+                response: json!({"answer": "recent-enough"}),
+                embedding: Vec::new(),
+                prompt_hash: "key".to_string(),
+                semantic_identity: None,
+                scope: "scope".to_string(),
+                created_at: Instant::now() - Duration::from_secs(11),
+                hit_count: 0,
+            },
+        );
         assert!(cache.get_exact_at("key", Duration::from_secs(12), Instant::now()).is_some());
         assert_eq!(cache.effective_ttl(10), Duration::from_secs(10));
         assert_eq!(cache.effective_ttl(7200), Duration::from_secs(3600));

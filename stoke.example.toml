@@ -117,9 +117,17 @@ tier = "local"
 # prompt_filter = ["http://127.0.0.1:9100/filter"]
 # post_response = ["http://127.0.0.1:9100/post"]
 
+# [plugins.headroom]
+# enabled = true
+# url = "http://127.0.0.1:9100/compress"
+# timeout_ms = 1000
+# Worker auth is read from STOKE_HEADROOM_TOKEN and sent only as Bearer.
+# The worker receives output strings only; request/response are capped at 1 MiB and 128 outputs.
+
 # JS/TS plugins (requires `cargo build --features js-plugins`)
 # [plugins]
 # scripts = ["plugins/pii-redact.js"]
+
 
 # ─── Route profiles (multi-endpoint) ────────────────────────────
 # Each profile is its own POST endpoint with a fixed model and builtins.

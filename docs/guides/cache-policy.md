@@ -1,3 +1,11 @@
+---
+title: Named-Route Response Cache Policy
+description: Opt into exact response caching and bounded coalescing on eligible named routes.
+slug: cache-policy
+category: Cost
+icon: gauge
+---
+
 # Named-route response cache policy
 
 A route may opt into a narrow response-cache policy with `response_cache`:

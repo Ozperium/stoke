@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="mask-icon" href="/favicon.svg" color="#3bdb78">
+<meta name="theme-color" content="#0a0a0b">
+<title>Cache Identity and Scope — Stoke</title>
+<meta name="description" content="Understand the exact request identity and caller scope used by Stoke's response cache.">
+<link rel="canonical" href="https://stokegate.com/guides/cache-identity/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Cache Identity and Scope">
+<meta property="og:description" content="Understand the exact request identity and caller scope used by Stoke's response cache.">
+<meta property="og:url" content="https://stokegate.com/guides/cache-identity/">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Cache Identity and Scope","description":"Understand the exact request identity and caller scope used by Stoke's response cache.","url":"https://stokegate.com/guides/cache-identity/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-09-14"}</script>
+<script src="/tracking.js" defer></script>
+<style>
+:root{--bg:#0a0a0b;--bg2:#131316;--bg3:#1a1a20;--border:#2a2a32;--text:#e4e4e7;--muted:#8a8a96;--accent:#3bdb78;--red:#ff5454;
+--font:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+nav{border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(10,10,11,.85);backdrop-filter:blur(8px);z-index:10}
+.nav-inner{max-width:860px;margin:0 auto;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.logo{font-weight:700;font-size:17px;color:var(--text)}
+.nav-links{display:flex;gap:20px}.nav-links a{color:var(--muted);font-size:14px}
+main{max-width:760px;margin:0 auto;padding:56px 24px 80px}
+h1{font-size:40px;line-height:1.15;letter-spacing:-.02em;margin-bottom:16px}
+h2{font-size:24px;margin:44px 0 14px;letter-spacing:-.01em;scroll-margin-top:80px}
+h3{font-size:18px;margin:28px 0 10px}
+p{margin:14px 0;color:#c9c9d1}
+ul,ol{margin:14px 0 14px 22px}li{margin:7px 0;color:#c9c9d1}
+code{font-family:var(--mono);font-size:.88em;color:var(--accent);background:var(--bg3);padding:2px 6px;border-radius:5px}
+pre{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;overflow-x:auto;margin:18px 0}
+pre code{background:none;color:#d9d9e3;padding:0;font-size:13.5px;line-height:1.65}
+blockquote{border-left:3px solid var(--accent);background:var(--bg2);padding:12px 18px;margin:18px 0;border-radius:0 8px 8px 0;color:var(--muted)}
+table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14.5px}
+th,td{border:1px solid var(--border);padding:9px 12px;text-align:left}
+th{background:var(--bg2);font-weight:600}
+hr{border:0;border-top:1px solid var(--border);margin:36px 0}
+.lede{color:var(--muted);font-size:18px;margin-bottom:8px}
+.crumb{font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:22px}
+.cta{margin-top:52px;border:1px solid var(--border);background:var(--bg2);border-radius:14px;padding:26px}
+.cta h3{margin-top:0}
+.btn{display:inline-block;background:var(--accent);color:#07120b;font-weight:650;padding:11px 20px;border-radius:9px;margin-top:10px}
+.btn:hover{text-decoration:none;opacity:.92}
+footer{border-top:1px solid var(--border);padding:28px 24px;color:var(--muted);font-size:13.5px;text-align:center}
+@media(max-width:640px){h1{font-size:31px}main{padding:36px 20px 60px}.nav-links{display:none}}
+
+/* syntax tokens (build-time highlighted; no client JS) */
+.tok-com{color:var(--muted);font-style:italic}
+.tok-str{color:#7dd3fc}
+.tok-num{color:#e8b339}
+.tok-kw{color:#3bdb78;font-weight:600}
+.tok-bi{color:#6ee7a8}
+.tok-var{color:#e8b339}
+.tok-key{color:#e4e4e7}
+.tok-sec{color:#3bdb78;font-weight:600}
+.tok-flag{color:#8a8a96}
+
+/* guide index cards */
+.gwrap{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:36px}
+.gcard{display:block;border:1px solid var(--border);background:var(--bg2);border-radius:16px;overflow:hidden;transition:border-color .18s,transform .18s}
+.gcard:hover{border-color:rgba(59,219,120,.45);transform:translateY(-2px);text-decoration:none}
+.gart{height:118px;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 120%,rgba(59,219,120,.14),transparent 68%);border-bottom:1px solid var(--border)}
+.gart svg{width:52px;height:52px;color:var(--accent);opacity:.92}
+.gbody{padding:20px 22px 22px}
+.gchip{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--border);border-radius:99px;padding:3px 9px;margin-bottom:11px}
+.gcard h2{font-size:18px;margin:0 0 7px;color:var(--text);letter-spacing:-.01em;line-height:1.35}
+.gcard p{font-size:14px;color:var(--muted);margin:0 0 14px;line-height:1.6}
+.gcard .go{font-size:13.5px;color:var(--accent);font-weight:600}
+@media(max-width:700px){.gwrap{grid-template-columns:1fr}}
+
+</style>
+</head>
+<body>
+<nav><div class="nav-inner">
+  <a href="/" class="logo">⬡ Stoke</a>
+  <div class="nav-links">
+    <a href="/guides/">Guides</a>
+    <a href="https://github.com/Ozperium/stoke">GitHub</a>
+  </div>
+</div></nav>
+<main>
+<div class="crumb"><a href="/">Stoke</a> / <a href="/guides/">Guides</a></div>
+<h1>Cache identity</h1>
+<p>Stoke caches only deterministic, non-streaming <code>single</code> requests. The exact key hashes the caller scope, resolved model, and the complete serialized effective request. Message roles, boundaries, and forwarded request fields therefore stay part of exact identity; changing <code>tools</code>, <code>tool_choice</code>, <code>response_format</code>, <code>reasoning</code>, <code>seed</code>, or <code>max_tokens</code> does not reuse an exact entry.</p>
+<p>The original eligibility gate remains in force: temperature above <code>0.01</code>, a missing/empty <code>messages</code> array, or messages whose extracted text is empty are not cached. This intentionally bypasses all-multimodal/non-text message shapes rather than inventing a lossy prompt identity.</p>
+<p>Semantic matching is opt-in (<code>STOKE_SEMANTIC_CACHE</code> plus <code>STOKE_EMBED_MODEL</code>). Its identity hashes the same request metadata with only string message <code>content</code> removed. The role, message metadata, model, scope, and all other request settings must still match. Unsupported message shapes return <code>None</code> and bypass semantic embedding and matching. Exact lookup always runs first. Embedding generation is gated on a supported semantic identity, so an unsupported request never calls Ollama for an embedding.</p>
+<h2 id="verification-commands">Verification commands</h2>
+<p>From the repository root:</p>
+<pre><code class="lang-sh"><span class="tok-kw">cargo</span> test<span class="tok-flag"> --offline</span><span class="tok-flag"> --locked</span> cache::scope_tests --<span class="tok-flag"> --test-threads</span>=<span class="tok-num">1</span> \
+  &gt; /tmp/cache-identity-focused.log <span class="tok-num">2</span>&gt;&amp;<span class="tok-num">1</span>
+<span class="tok-var">CARGO_BUILD_JOBS</span>=<span class="tok-num">2</span> cargo test<span class="tok-flag"> --offline</span><span class="tok-flag"> --locked</span> \
+  &gt; /tmp/cache-identity-full.log <span class="tok-num">2</span>&gt;&amp;<span class="tok-num">1</span>
+<span class="tok-var">STOKE_BIN</span>=<span class="tok-str">"$PWD/target/debug/stoke"</span> python3 scripts/smoke_cache_identity.py</code></pre>
+<p>The smoke harness uses only a local stdlib mock provider. It checks one identical same-caller hit, distinct role/message-boundary requests, and a <code>max_tokens</code> change. It is a wire identity check, not an inference, cost, or savings benchmark.</p>
+<h2 id="verification-receipt">Verification receipt</h2>
+<ul><li>Focused cache tests: exit <code>0</code>; <code>13 passed</code>, <code>0 failed</code> (other targets were</li></ul>
+<p>  filtered).</p>
+<ul><li>Full suite: exit <code>0</code>; target results were <code>63</code>, <code>245</code>, <code>2</code>, <code>6</code>, and <code>0</code></li></ul>
+<p>  passed, with <code>0 failed</code> in each target.</p>
+<ul><li>Binary smoke: exit <code>0</code>; identical pair produced <code>hit</code> with one provider call,</li></ul>
+<p>  both negative cases bypassed cache, and the final mock provider call count was   <code>4</code>.</p>
+<ul><li>The earlier parent RED collision is recorded separately in</li></ul>
+<p>  <code>/Users/pawloz/projects/stoke-efficiency-1-7/cache-identity-red.log</code>; this   receipt reports only the current focused/full/smoke GREEN results and does not   claim a new RED→GREEN run by this worker.</p>
+<div class="cta">
+  <h3>Put a control point in front of your agents</h3>
+  <p>Stoke is a single Rust binary: hard budget caps, a runaway-loop kill switch, and local-first routing — enforced before a provider is ever called. Open source, MIT.</p>
+  <a class="btn" href="https://github.com/Ozperium/stoke">Get Stoke on GitHub</a>
+</div>
+</main>
+<footer>MIT licensed · <a href="https://stokegate.com">stokegate.com</a> · <a href="/security/">Security</a> · <a href="/legal/">Legal</a> · <a href="/contact/">Contact</a> · <a href="https://github.com/Ozperium/stoke">GitHub</a></footer>
+</body>
+</html>

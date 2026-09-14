@@ -1,0 +1,6 @@
+# Headroom worker runtime, deliberately installed without package extras/dependencies.
+# Target tested here: CPython 3.11 on macOS arm64.
+# The wheel is the official PyPI artifact for headroom-ai 0.37.0.
+--only-binary=:all:
+headroom-ai @ https://files.pythonhosted.org/packages/47/21/8a87b66e83498da89404cdba4ced6397e84331047df9e11a9ea6f3510b29/headroom_ai-0.37.0-cp310-abi3-macosx_11_0_arm64.whl \
+    --hash=sha256:b4392f68a8d02d74c62c1734cf5bf327511dcc72678f01669f44f0612944d59c

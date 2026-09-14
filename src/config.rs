@@ -313,6 +313,7 @@ impl Config {
     /// let it serve unmetered traffic under a `budget_usd` cap that never trips.
     /// Fail at boot rather than at spend time.
     pub fn validate(&self) -> Result<(), String> {
+        self.plugins.headroom.validate()?;
         for p in &self.providers {
             if !p.is_subscription() {
                 continue;
@@ -475,7 +476,19 @@ impl Config {
     }
 
     fn find_config_path() -> Result<PathBuf, String> {
-        // Search order: CLI arg (TODO), ./stoke.toml, ~/.config/stoke/stoke.toml
+        if let Some(path) = env::var_os("STOKE_CONFIG") {
+            let path = PathBuf::from(path);
+            return if path.is_file() {
+                Ok(path)
+            } else {
+                Err(format!(
+                    "STOKE_CONFIG points to an invalid config file: {}",
+                    path.display()
+                ))
+            };
+        }
+
+        // Default search: ./stoke.toml, ~/.config/stoke/stoke.toml
         let candidates = [
             PathBuf::from("stoke.toml"),
             dirs::config_dir()
@@ -579,6 +592,32 @@ mod validate_tests {
 host = "127.0.0.1"
 port = 8787
 "#;
+
+    #[test]
+    fn stoke_config_overrides_search_and_invalid_override_does_not_fallback() {
+        let path = std::env::temp_dir().join(format!(
+            "stoke-config-override-{}-{}.toml",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::write(&path, BASE).expect("write config override fixture");
+        let previous = std::env::var_os("STOKE_CONFIG");
+
+        std::env::set_var("STOKE_CONFIG", &path);
+        assert_eq!(Config::find_config_path().unwrap(), path);
+
+        let missing = path.with_extension("missing.toml");
+        std::env::set_var("STOKE_CONFIG", &missing);
+        let error = Config::find_config_path().unwrap_err();
+        assert!(error.contains("STOKE_CONFIG"), "error must identify override: {error}");
+        assert!(error.contains(&missing.display().to_string()));
+
+        match previous {
+            Some(value) => std::env::set_var("STOKE_CONFIG", value),
+            None => std::env::remove_var("STOKE_CONFIG"),
+        }
+        let _ = std::fs::remove_file(path);
+    }
 
     #[test]
     fn response_cache_policy_validates_modes_and_exact_ttl() {

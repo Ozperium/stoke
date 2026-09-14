@@ -1,3 +1,11 @@
+---
+title: Cache Identity and Scope
+description: Understand the exact request identity and caller scope used by Stoke's response cache.
+slug: cache-identity
+category: Security
+icon: shield
+---
+
 # Cache identity
 
 Stoke caches only deterministic, non-streaming `single` requests. The exact key

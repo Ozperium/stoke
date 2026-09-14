@@ -25,14 +25,7 @@ use crate::AppState;
 /// logged or echoed — only the validated key name flows back to the budget
 /// meter.
 pub fn validate_gateway_headers(auth: &crate::budget::Auth, headers: &HeaderMap) -> Option<String> {
-    let stoke_key = headers
-        .get("x-stoke-key")
-        .or_else(|| headers.get("x-api-key"))
-        .and_then(|header| header.to_str().ok());
-    let authorization = headers
-        .get("authorization")
-        .and_then(|header| header.to_str().ok());
-    auth.validate_gateway(stoke_key, authorization)
+    auth.validate_gateway_headers(headers)
 }
 
 /// Subscription admission bypass, decided once for the whole request.
@@ -64,6 +57,14 @@ pub fn response_emits_cost_header(provider: &ProviderConfig) -> bool {
 /// `x-stoke-cost`.
 pub const BILLING_MODE_HEADER: &str = "x-stoke-billing-mode";
 pub const SUBSCRIPTION_BILLING_MODE: &str = "chatgpt_subscription";
+
+fn with_headroom_status(mut response: Response, status: crate::plugins::HeadroomStatus) -> Response {
+    response.headers_mut().insert(
+        "x-stoke-headroom",
+        HeaderValue::from_static(status.as_str()),
+    );
+    response
+}
 
 /// Record a dashboard decision for a finished `/v1/responses` request.
 ///
@@ -176,6 +177,22 @@ pub async fn responses(
         }
     };
 
+    let codex_credential = if provider.is_subscription() {
+        let url = match dispatch_url(provider) {
+            Ok(url) => url,
+            Err(reason) => return (StatusCode::FORBIDDEN, reason).into_response(),
+        };
+        if let Err(reason) = crate::subscription::validate_oauth_destination(&url, "chatgpt.com") {
+            return (StatusCode::FORBIDDEN, reason).into_response();
+        }
+        match resolve_codex_credential(&api_key, &headers) {
+            Ok(credential) => Some(credential),
+            Err(reason) => return (StatusCode::SERVICE_UNAVAILABLE, reason).into_response(),
+        }
+    } else {
+        None
+    };
+
     if stream {
         return forward_stream(
             &state,
@@ -185,6 +202,7 @@ pub async fn responses(
             &body,
             &headers,
             reservation,
+            codex_credential.as_ref(),
         )
         .await;
     }
@@ -195,11 +213,19 @@ pub async fn responses(
         Ok(url) => url,
         Err(reason) => return (StatusCode::FORBIDDEN, reason).into_response(),
     };
+    let headroom = state.plugins.headroom_filter(&body).await;
+    let headroom_status = headroom.status;
+    let body = headroom.body;
     let request = if provider.is_subscription() {
         if let Err(reason) = crate::subscription::validate_oauth_destination(&url, "chatgpt.com") {
             return (StatusCode::FORBIDDEN, reason).into_response();
         }
-        subscription_request(provider, &url, &body, &headers)
+        build_codex_request(
+            &url,
+            &body,
+            &headers,
+            codex_credential.expect("subscription credential resolved before request"),
+        )
     } else {
         openai_request(provider, &url, &body, &headers)
     };
@@ -215,22 +241,24 @@ pub async fn responses(
                 0.0,
                 started.elapsed().as_millis() as u64,
             );
-            return (
+            let output = (
                 StatusCode::BAD_GATEWAY,
                 format!("Responses request failed: {error}"),
             )
                 .into_response();
+            return with_headroom_status(output, headroom_status);
         }
     };
     let status = response.status();
     let response_body: Value = match response.json().await {
         Ok(value) => value,
         Err(error) => {
-            return (
+            let output = (
                 StatusCode::BAD_GATEWAY,
                 format!("Invalid Responses API response: {error}"),
             )
                 .into_response();
+            return with_headroom_status(output, headroom_status);
         }
     };
     let usage = response_body.get("usage").map(|usage| {
@@ -295,6 +323,10 @@ pub async fn responses(
     if let Ok(value) = provider.name.parse() {
         output.headers_mut().insert("x-stoke-node", value);
     }
+    output.headers_mut().insert(
+        "x-stoke-headroom",
+        HeaderValue::from_static(headroom_status.as_str()),
+    );
     output
 }
 
@@ -338,6 +370,7 @@ async fn forward_stream(
     body: &Value,
     headers: &HeaderMap,
     reservation: Option<crate::budget::SpendReservation>,
+    codex_credential: Option<&CodexCredential>,
 ) -> Response {
     let started = Instant::now();
     let url = match dispatch_url(provider) {
@@ -358,10 +391,20 @@ async fn forward_stream(
             return (StatusCode::FORBIDDEN, reason).into_response();
         }
     }
+    let headroom = state.plugins.headroom_filter(body).await;
+    let headroom_status = headroom.status;
+    let body = headroom.body;
     let request = if provider.is_subscription() {
-        subscription_request(provider, &url, body, headers)
+        build_codex_request(
+            &url,
+            &body,
+            headers,
+            codex_credential
+                .expect("subscription credential resolved before stream")
+                .clone(),
+        )
     } else {
-        openai_request(provider, &url, body, headers)
+        openai_request(provider, &url, &body, headers)
     };
     match request.send().await {
         Ok(response) if response.status().is_success() => {
@@ -385,7 +428,7 @@ async fn forward_stream(
                     api_key: api_key.to_string(),
                     model: model.to_string(),
                     usage: crate::sse::UsageScanner::new(crate::sse::Wire::Responses),
-                    prompt_tokens_est: (extract_prompt_text(body).len() / 4) as u64,
+                    prompt_tokens_est: (extract_prompt_text(&body).len() / 4) as u64,
                     _reservation: reservation.take(),
                 });
             let upstream_content_type = response.headers().get(CONTENT_TYPE).cloned();
@@ -401,6 +444,7 @@ async fn forward_stream(
                     stream_content_type(provider.is_subscription(), upstream_content_type.as_ref()),
                 )
                 .header("cache-control", "no-cache")
+                .header("x-stoke-headroom", headroom_status.as_str())
                 .body(Body::from_stream(stream))
                 .unwrap()
         }
@@ -417,7 +461,8 @@ async fn forward_stream(
                 0.0,
                 started.elapsed().as_millis() as u64,
             );
-            (status, text).into_response()
+            let output = (status, text).into_response();
+            with_headroom_status(output, headroom_status)
         }
         Err(error) => {
             record_metered_decision(
@@ -429,11 +474,12 @@ async fn forward_stream(
                 0.0,
                 started.elapsed().as_millis() as u64,
             );
-            (
+            let output = (
                 StatusCode::BAD_GATEWAY,
                 format!("Responses API stream failed: {error}"),
             )
-                .into_response()
+                .into_response();
+            with_headroom_status(output, headroom_status)
         }
     }
 }
@@ -473,33 +519,119 @@ fn openai_request(
     request
 }
 
-/// Build the upstream request for a `codex_subscription` provider.
-///
-/// Dispatched on `subscription::OAUTH_CLIENT` (redirects disabled) with the
-/// client's own ChatGPT OAuth `Authorization` and `ChatGPT-Account-ID` passed
-/// through unchanged, alongside the Codex feature metadata. The Stoke gateway
-/// key (`x-stoke-key`) never leaves the building, and neither credential is
-/// logged, persisted, hashed, or echoed.
-fn subscription_request(
-    provider: &ProviderConfig,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodexAuthMode {
+    GatewayOwned,
+    ClientOAuth,
+}
+
+/// Select the upstream credential only from the already validated gateway
+/// identity. This deliberately does not inspect token shape (JWT or otherwise).
+fn select_codex_auth_mode(
+    validated_gateway_key: &str,
+    stoke_key: Option<&str>,
+    authorization: Option<&str>,
+) -> CodexAuthMode {
+    let gateway_header_matches = stoke_key.map(str::trim) == Some(validated_gateway_key);
+    let authorization_is_gateway = authorization
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::trim)
+        == Some(validated_gateway_key);
+    if stoke_key.is_none() {
+        if authorization_is_gateway {
+            CodexAuthMode::GatewayOwned
+        } else {
+            CodexAuthMode::ClientOAuth
+        }
+    } else if gateway_header_matches && (authorization.is_none() || authorization_is_gateway) {
+        CodexAuthMode::GatewayOwned
+    } else {
+        CodexAuthMode::ClientOAuth
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+enum CodexCredential {
+    GatewayOwned {
+        access_token: String,
+        account_id: String,
+    },
+    ClientOAuth {
+        authorization: String,
+        account_id: Option<String>,
+    },
+}
+
+fn resolve_codex_credential(
+    validated_gateway_key: &str,
+    inbound: &HeaderMap,
+) -> Result<CodexCredential, String> {
+    let stoke_key = inbound
+        .get("x-stoke-key")
+        .or_else(|| inbound.get("x-api-key"))
+        .and_then(|value| value.to_str().ok());
+    let authorization = inbound
+        .get("authorization")
+        .and_then(|value| value.to_str().ok());
+    match select_codex_auth_mode(validated_gateway_key, stoke_key, authorization) {
+        CodexAuthMode::GatewayOwned => {
+            let (access_token, account_id) = crate::messages::load_codex_subscription_credential()?;
+            Ok(CodexCredential::GatewayOwned {
+                access_token,
+                account_id,
+            })
+        }
+        CodexAuthMode::ClientOAuth => Ok(CodexCredential::ClientOAuth {
+            authorization: authorization
+                .ok_or_else(|| "Codex OAuth credential is missing Authorization".to_string())?
+                .to_string(),
+            account_id: inbound
+                .get("chatgpt-account-id")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string),
+        }),
+    }
+}
+
+fn build_codex_request(
     url: &str,
     body: &Value,
     inbound: &HeaderMap,
+    credential: CodexCredential,
 ) -> reqwest::RequestBuilder {
-    debug_assert!(provider.is_subscription());
     let mut request = (&*crate::subscription::OAUTH_CLIENT)
         .post(url)
         .header("content-type", "application/json")
         .json(body);
-
+    match credential {
+        CodexCredential::GatewayOwned {
+            access_token,
+            account_id,
+        } => {
+            request = request
+                .bearer_auth(access_token)
+                .header("chatgpt-account-id", account_id);
+        }
+        CodexCredential::ClientOAuth {
+            authorization,
+            account_id,
+        } => {
+            request = request.header("authorization", authorization);
+            if let Some(account_id) = account_id {
+                request = request.header("chatgpt-account-id", account_id);
+            }
+        }
+    }
     for (name, value) in inbound {
         let name = name.as_str();
-        if name == "x-stoke-key" {
-            continue;
-        }
         if name == "authorization"
             || name == "chatgpt-account-id"
-            || name.starts_with("openai-")
+            || name == "x-stoke-key"
+            || name == "x-api-key"
+        {
+            continue;
+        }
+        if name.starts_with("openai-")
             || name.starts_with("x-openai-")
             || name.starts_with("x-codex-")
             || name == "originator"
@@ -663,6 +795,76 @@ mod tests {
     }
 
     #[test]
+    fn gateway_only_selection_uses_stored_credentials_for_both_header_forms() {
+        assert_eq!(
+            select_codex_auth_mode("gateway-key", None, Some("Bearer gateway-key")),
+            CodexAuthMode::GatewayOwned
+        );
+        assert_eq!(
+            select_codex_auth_mode("gateway-key", Some("gateway-key"), None),
+            CodexAuthMode::GatewayOwned
+        );
+        assert_eq!(
+            select_codex_auth_mode("gateway-key", None, Some("Bearer   gateway-key ")),
+            CodexAuthMode::GatewayOwned
+        );
+    }
+
+    #[test]
+    fn gateway_owned_builder_ignores_spoofed_client_account_identity() {
+        let mut inbound = HeaderMap::new();
+        inbound.insert("x-stoke-key", "gateway-key".parse().unwrap());
+        inbound.insert("authorization", "Bearer gateway-key".parse().unwrap());
+        inbound.insert("chatgpt-account-id", "spoofed-account".parse().unwrap());
+        let request = build_codex_request(
+            "https://chatgpt.com/backend-api/codex/responses",
+            &json!({"model":"gpt-test","input":"hello"}),
+            &inbound,
+            CodexCredential::GatewayOwned {
+                access_token: "stored-access".into(),
+                account_id: "stored-account".into(),
+            },
+        )
+        .build()
+        .unwrap();
+        assert_eq!(request.headers()["authorization"], "Bearer stored-access");
+        assert_eq!(request.headers()["chatgpt-account-id"], "stored-account");
+        assert!(!request.headers().to_owned().iter().any(|(_, value)| value
+            .to_str()
+            .map(|value| value.contains("spoofed-account"))
+            .unwrap_or(false)));
+    }
+
+    #[test]
+    fn explicit_dual_credentials_preserve_client_oauth_passthrough() {
+        let mut inbound = HeaderMap::new();
+        inbound.insert("x-stoke-key", "gateway-key".parse().unwrap());
+        inbound.insert("authorization", "Bearer client-oauth".parse().unwrap());
+        inbound.insert("chatgpt-account-id", "client-account".parse().unwrap());
+        assert_eq!(
+            select_codex_auth_mode(
+                "gateway-key",
+                Some("gateway-key"),
+                Some("Bearer client-oauth")
+            ),
+            CodexAuthMode::ClientOAuth
+        );
+        let request = build_codex_request(
+            "https://chatgpt.com/backend-api/codex/responses",
+            &json!({"model":"gpt-test","input":"hello"}),
+            &inbound,
+            CodexCredential::ClientOAuth {
+                authorization: "Bearer client-oauth".into(),
+                account_id: Some("client-account".into()),
+            },
+        )
+        .build()
+        .unwrap();
+        assert_eq!(request.headers()["authorization"], "Bearer client-oauth");
+        assert_eq!(request.headers()["chatgpt-account-id"], "client-account");
+    }
+
+    #[test]
     fn live_codex_models_route_to_subscription_but_explicit_models_win() {
         let local = provider("http://127.0.0.1:11434/v1");
         let subscription = subscription_provider();
@@ -703,11 +905,14 @@ mod tests {
         inbound.insert("originator", "codex_desktop".parse().unwrap());
         inbound.insert("version", "1.2.3".parse().unwrap());
 
-        let request = subscription_request(
-            &subscription_provider(),
+        let request = build_codex_request(
             "https://chatgpt.com/backend-api/codex/responses",
             &json!({"model": "gpt-test", "input": "hello"}),
             &inbound,
+            CodexCredential::ClientOAuth {
+                authorization: "Bearer chatgpt-oauth-token".into(),
+                account_id: Some("acct-1".into()),
+            },
         )
         .build()
         .unwrap();
@@ -825,6 +1030,17 @@ mod tests {
                 .filter(|k| !k.is_empty())
                 .collect::<Vec<_>>(),
         )
+    }
+
+    #[test]
+    fn malformed_explicit_gateway_headers_reject_valid_bearer() {
+        let auth = auth_with_keys("gateway-key");
+        for name in ["x-stoke-key", "x-api-key"] {
+            let mut headers = HeaderMap::new();
+            headers.insert("authorization", "Bearer gateway-key".parse().unwrap());
+            headers.insert(name, HeaderValue::from_bytes(b"\xff").unwrap());
+            assert!(validate_gateway_headers(&auth, &headers).is_none());
+        }
     }
 
     #[test]
@@ -950,6 +1166,16 @@ mod tests {
         assert_eq!(regular_event.route, "responses");
         assert_eq!(regular_event.provider, "openai");
         assert_eq!(regular_event.cost_usd, 0.25);
+    }
+
+    #[test]
+    fn headroom_error_status_header_is_computed_not_client_supplied() {
+        let response = with_headroom_status(
+            (StatusCode::BAD_GATEWAY, "upstream failed").into_response(),
+            crate::plugins::HeadroomStatus::Unavailable,
+        );
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(response.headers()["x-stoke-headroom"], "unavailable");
     }
 
     fn metered_decision_for_test(

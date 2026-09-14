@@ -83,6 +83,19 @@ fn exact_cache_hit(cache: &ResponseCache, key: &str, ttl: Duration) -> Option<Va
     cache.get_exact_with_ttl(key, ttl)
 }
 
+fn record_coalesced_cache_hit(state: &AppState, model: &str, routing: &str) {
+    record_decision(
+        state,
+        dashboard::Outcome::CacheHit,
+        model,
+        routing,
+        "response cache",
+        "Coalesced deterministic response reused",
+        0.0,
+        0,
+    );
+}
+
 /// Claim only after the initial miss, then close the miss-to-claim race by
 /// checking the exact cache before the caller reserves budget or dispatches.
 fn claim_exact_or_cached(
@@ -585,16 +598,7 @@ async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -
     // upstream dispatch (regular paths re-derive the provider credential from
     // config; the subscription path sends only the store Bearer), so the
     // gateway key can never leak as a provider credential.
-    let stoke_key = req
-        .headers()
-        .get("x-stoke-key")
-        .or_else(|| req.headers().get("x-api-key"))
-        .and_then(|h| h.to_str().ok());
-    let auth_header = req
-        .headers()
-        .get("authorization")
-        .and_then(|h| h.to_str().ok());
-    match state.auth.validate_gateway(stoke_key, auth_header) {
+    match state.auth.validate_gateway_headers(req.headers()) {
         Some(key) => {
             let mut req = req;
             req.extensions_mut().insert(key);
@@ -1181,17 +1185,7 @@ async fn chat_completions(
 ) -> Response {
     // Auth check: gateway identity via x-stoke-key / x-api-key alias, or the
     // legacy Bearer form — matching the global middleware gate above.
-    let stoke_key = headers
-        .get("x-stoke-key")
-        .or_else(|| headers.get("x-api-key"))
-        .and_then(|h| h.to_str().ok());
-    let bearer_from_stoke_header = stoke_key.map(|k| format!("Bearer {}", k.trim()));
-    let auth_header = headers
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .map(|s| s.to_string())
-        .or(bearer_from_stoke_header);
-    let api_key = match state.auth.validate(auth_header.as_deref()) {
+    let api_key = match state.auth.validate_gateway_headers(&headers) {
         Some(k) => k,
         None => {
             return (StatusCode::UNAUTHORIZED, "Invalid or missing API key").into_response();
@@ -1662,11 +1656,15 @@ async fn chat_completions(
     if cache_eligible && exact_route && route_coalescing {
         if let (Some(key), Some(ttl)) = (cache_key.as_deref(), exact_route_ttl) {
             match claim_exact_or_cached(&state.coalescer, &state.cache, key, ttl) {
-                Err(cached) => return response_with_cache_marker(cached, "coalesced"),
+                Err(cached) => {
+                    record_coalesced_cache_hit(&state, &model, &routing);
+                    return response_with_cache_marker(cached, "coalesced");
+                }
                 Ok(Claim::Leader(guard)) => _coalescing_leader = Some(guard),
                 Ok(Claim::Follower(waiter)) => {
                     if waiter.wait().await {
                         if let Some(cached) = exact_cache_hit(&state.cache, key, ttl) {
+                            record_coalesced_cache_hit(&state, &model, &routing);
                             return response_with_cache_marker(cached, "coalesced");
                         }
                     }

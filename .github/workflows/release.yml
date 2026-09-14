@@ -21,7 +21,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: verify
     name: build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -73,6 +77,10 @@ jobs:
           mkdir "$dir"
           cp "target/${{ matrix.target }}/release/stoke" "target/${{ matrix.target }}/release/stoke-cli" "$dir/"
           cp README.md LICENSE stoke.example.toml "$dir/"
+          if [ "${{ matrix.name }}" = "stoke-macos-arm64" ]; then
+            mkdir -p "$dir/integrations"
+            cp -R integrations/headroom "$dir/integrations/"
+          fi
           tar czf "${{ matrix.name }}.tar.gz" "$dir"
           shasum -a 256 "${{ matrix.name }}.tar.gz" > "${{ matrix.name }}.tar.gz.sha256"
 

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="mask-icon" href="/favicon.svg" color="#3bdb78">
+<meta name="theme-color" content="#0a0a0b">
+<title>Connect Codex and Ollama Through Stoke — Stoke</title>
+<meta name="description" content="Use native Codex Responses traffic and discovered Ollama models behind one authenticated Stoke gateway.">
+<link rel="canonical" href="https://stokegate.com/guides/use-codex-and-ollama-with-stoke/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Connect Codex and Ollama Through Stoke">
+<meta property="og:description" content="Use native Codex Responses traffic and discovered Ollama models behind one authenticated Stoke gateway.">
+<meta property="og:url" content="https://stokegate.com/guides/use-codex-and-ollama-with-stoke/">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Connect Codex and Ollama Through Stoke","description":"Use native Codex Responses traffic and discovered Ollama models behind one authenticated Stoke gateway.","url":"https://stokegate.com/guides/use-codex-and-ollama-with-stoke/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-09-14"}</script>
+<script src="/tracking.js" defer></script>
+<style>
+:root{--bg:#0a0a0b;--bg2:#131316;--bg3:#1a1a20;--border:#2a2a32;--text:#e4e4e7;--muted:#8a8a96;--accent:#3bdb78;--red:#ff5454;
+--font:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+nav{border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(10,10,11,.85);backdrop-filter:blur(8px);z-index:10}
+.nav-inner{max-width:860px;margin:0 auto;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.logo{font-weight:700;font-size:17px;color:var(--text)}
+.nav-links{display:flex;gap:20px}.nav-links a{color:var(--muted);font-size:14px}
+main{max-width:760px;margin:0 auto;padding:56px 24px 80px}
+h1{font-size:40px;line-height:1.15;letter-spacing:-.02em;margin-bottom:16px}
+h2{font-size:24px;margin:44px 0 14px;letter-spacing:-.01em;scroll-margin-top:80px}
+h3{font-size:18px;margin:28px 0 10px}
+p{margin:14px 0;color:#c9c9d1}
+ul,ol{margin:14px 0 14px 22px}li{margin:7px 0;color:#c9c9d1}
+code{font-family:var(--mono);font-size:.88em;color:var(--accent);background:var(--bg3);padding:2px 6px;border-radius:5px}
+pre{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;overflow-x:auto;margin:18px 0}
+pre code{background:none;color:#d9d9e3;padding:0;font-size:13.5px;line-height:1.65}
+blockquote{border-left:3px solid var(--accent);background:var(--bg2);padding:12px 18px;margin:18px 0;border-radius:0 8px 8px 0;color:var(--muted)}
+table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14.5px}
+th,td{border:1px solid var(--border);padding:9px 12px;text-align:left}
+th{background:var(--bg2);font-weight:600}
+hr{border:0;border-top:1px solid var(--border);margin:36px 0}
+.lede{color:var(--muted);font-size:18px;margin-bottom:8px}
+.crumb{font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:22px}
+.cta{margin-top:52px;border:1px solid var(--border);background:var(--bg2);border-radius:14px;padding:26px}
+.cta h3{margin-top:0}
+.btn{display:inline-block;background:var(--accent);color:#07120b;font-weight:650;padding:11px 20px;border-radius:9px;margin-top:10px}
+.btn:hover{text-decoration:none;opacity:.92}
+footer{border-top:1px solid var(--border);padding:28px 24px;color:var(--muted);font-size:13.5px;text-align:center}
+@media(max-width:640px){h1{font-size:31px}main{padding:36px 20px 60px}.nav-links{display:none}}
+
+/* syntax tokens (build-time highlighted; no client JS) */
+.tok-com{color:var(--muted);font-style:italic}
+.tok-str{color:#7dd3fc}
+.tok-num{color:#e8b339}
+.tok-kw{color:#3bdb78;font-weight:600}
+.tok-bi{color:#6ee7a8}
+.tok-var{color:#e8b339}
+.tok-key{color:#e4e4e7}
+.tok-sec{color:#3bdb78;font-weight:600}
+.tok-flag{color:#8a8a96}
+
+/* guide index cards */
+.gwrap{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:36px}
+.gcard{display:block;border:1px solid var(--border);background:var(--bg2);border-radius:16px;overflow:hidden;transition:border-color .18s,transform .18s}
+.gcard:hover{border-color:rgba(59,219,120,.45);transform:translateY(-2px);text-decoration:none}
+.gart{height:118px;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 120%,rgba(59,219,120,.14),transparent 68%);border-bottom:1px solid var(--border)}
+.gart svg{width:52px;height:52px;color:var(--accent);opacity:.92}
+.gbody{padding:20px 22px 22px}
+.gchip{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--border);border-radius:99px;padding:3px 9px;margin-bottom:11px}
+.gcard h2{font-size:18px;margin:0 0 7px;color:var(--text);letter-spacing:-.01em;line-height:1.35}
+.gcard p{font-size:14px;color:var(--muted);margin:0 0 14px;line-height:1.6}
+.gcard .go{font-size:13.5px;color:var(--accent);font-weight:600}
+@media(max-width:700px){.gwrap{grid-template-columns:1fr}}
+
+</style>
+</head>
+<body>
+<nav><div class="nav-inner">
+  <a href="/" class="logo">⬡ Stoke</a>
+  <div class="nav-links">
+    <a href="/guides/">Guides</a>
+    <a href="https://github.com/Ozperium/stoke">GitHub</a>
+  </div>
+</div></nav>
+<main>
+<div class="crumb"><a href="/">Stoke</a> / <a href="/guides/">Guides</a></div>
+<h1>Connect Codex and Ollama Through Stoke</h1>
+<p>Use one local gateway for two different paths: native Codex Responses traffic and Ollama Chat Completions traffic. Stoke authenticates the client hop with <code>STOKE_API_KEYS</code>, keeps the two provider protocols native, and makes the route decision before dispatch.</p>
+<p>This guide uses an existing native Codex login. It does not create, refresh, print, or copy OAuth credentials. Stoke reads the native store at <code>~/.codex/auth.json</code> only for the named Codex subscription provider. Ollama model IDs are discovered from your running Ollama; no model ID is a Stoke default.</p>
+<h2 id="1-check-the-two-prerequisites">1. Check the two prerequisites</h2>
+<p>Install or build Stoke using the repository's normal path. Start Ollama using your existing installation, then inspect the models already on that machine:</p>
+<pre><code class="lang-bash"><span class="tok-kw">ollama</span> list</code></pre>
+<p>Choose an exact ID from that output for the test request. Do not substitute a model name from an example or assume Stoke ships one.</p>
+<p>Use your existing native Codex sign-in. The gateway process must be able to read the native store without making it part of any client configuration:</p>
+<pre><code class="lang-bash">test<span class="tok-flag"> -r</span> <span class="tok-str">"$HOME/.codex/auth.json"</span> &amp;&amp; echo <span class="tok-str">"native Codex store is readable"</span>
+stat<span class="tok-flag"> -f</span> <span class="tok-str">'%Sp %Su %N'</span> <span class="tok-str">"$HOME/.codex/auth.json"</span> <span class="tok-num">2</span>&gt;/dev/null || stat<span class="tok-flag"> -c</span> <span class="tok-str">'%A %U %n'</span> <span class="tok-str">"$HOME/.codex/auth.json"</span></code></pre>
+<p>Do not paste the file contents into a config, shell command, issue, or Hermes provider. If the file is absent, use the native Codex app/CLI's normal sign-in flow; Stoke does not invent a login or refresh command.</p>
+<h2 id="2-configure-ollama-and-native-codex-capacity">2. Configure Ollama and native Codex capacity</h2>
+<p>Create <code>stoke.toml</code> with the Ollama provider and the named native Codex provider. Replace <code>&lt;ollama-model-id&gt;</code> with the exact ID from <code>ollama list</code>; replace no other endpoint with a guessed model name.</p>
+<pre><code class="lang-toml"><span class="tok-key">routing</span> = <span class="tok-str">"single"</span>
+<span class="tok-key">default_model</span> = <span class="tok-str">"&lt;ollama-model-id&gt;"</span>
+<span class="tok-sec">
+[server]</span>
+<span class="tok-key">host</span> = <span class="tok-str">"127.0.0.1"</span>
+<span class="tok-key">port</span> = <span class="tok-num">8787</span>
+<span class="tok-sec">
+[[providers]]</span>
+<span class="tok-key">name</span> = <span class="tok-str">"ollama"</span>
+<span class="tok-key">type</span> = <span class="tok-str">"openai_compatible"</span>
+<span class="tok-key">base_url</span> = <span class="tok-str">"http://127.0.0.1:11434/v1"</span>
+<span class="tok-key">tier</span> = <span class="tok-str">"local"</span>
+
+<span class="tok-com"># Native Codex subscription path. No api_key/api_key_env: Stoke reads</span>
+<span class="tok-com"># the existing native login from ~/.codex/auth.json.</span>
+<span class="tok-sec">[[providers]]</span>
+<span class="tok-key">name</span> = <span class="tok-str">"codex-subscription"</span>
+<span class="tok-key">type</span> = <span class="tok-str">"codex_subscription"</span>
+<span class="tok-key">base_url</span> = <span class="tok-str">"https://chatgpt.com/backend-api/codex"</span>
+<span class="tok-key">tier</span> = <span class="tok-str">"subscription"</span>
+<span class="tok-key">models</span> = [<span class="tok-str">"&lt;exact-codex-model-id&gt;"</span>]</code></pre>
+<p>The Codex model list is intentionally explicit: discover the ID accepted by your current native Codex account and put that exact value in <code>models</code>. Stoke ships no model catalogue or provider credits.</p>
+<p>Start the gateway with a client key. Keep this key separate from the native Codex credential:</p>
+<pre><code class="lang-bash"><span class="tok-kw">export</span> STOKE_API_KEY=<span class="tok-str">"$(openssl rand -hex 32)"</span>
+<span class="tok-kw">export</span> STOKE_API_KEYS=<span class="tok-str">"$STOKE_API_KEY"</span>
+<span class="tok-kw">stoke</span>-cli serve</code></pre>
+<p>The server-side credential boundary is now clear: <code>STOKE_API_KEYS</code> authenticates callers to Stoke; <code>~/.codex/auth.json</code> is owned and read by Stoke for the subscription provider; Ollama receives neither credential.</p>
+<h2 id="3-verify-the-gateway-and-ollama-route">3. Verify the gateway and Ollama route</h2>
+<p>Health is unauthenticated; the inventory endpoint is protected:</p>
+<pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -s</span> http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/health
+<span class="tok-kw">curl</span><span class="tok-flag"> -s</span> http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/v1/nodes \
+ <span class="tok-flag"> -H</span> <span class="tok-str">"Authorization: Bearer $STOKE_API_KEY"</span></code></pre>
+<p>The node response should show the Ollama node and the discovered model. Values such as health, warm state, load, and latency are runtime observations, not shipped defaults or performance promises.</p>
+<p>Send an Ollama Chat Completions request with the exact discovered model:</p>
+<pre><code class="lang-bash"><span class="tok-var">OLLAMA_MODEL</span>=<span class="tok-str">"&lt;ollama-model-id&gt;"</span>
+<span class="tok-kw">curl</span><span class="tok-flag"> -s</span> http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/v1/chat/completions \
+ <span class="tok-flag"> -H</span> <span class="tok-str">"Authorization: Bearer $STOKE_API_KEY"</span> \
+ <span class="tok-flag"> -H</span> <span class="tok-str">'Content-Type: application/json'</span> \
+ <span class="tok-flag"> -d</span> <span class="tok-str">"{\"model\":\"$OLLAMA_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with one short sentence.\"}]}"</span></code></pre>
+<p>This is the Ollama <code>chat_completions</code> path. It is separate from native Codex Responses and does not translate one protocol into the other.</p>
+<p>This example assumes the selected Ollama model runs locally. Ollama can also serve cloud-backed models: a loopback endpoint alone does not prove local inference. Set provider tiers to match the actual backend; tier declarations are operator configuration, not a network firewall.</p>
+<h2 id="4-connect-native-codex-or-hermes">4. Connect native Codex or Hermes</h2>
+<p>For the supported native Codex launcher, pass only the gateway key:</p>
+<pre><code class="lang-bash"><span class="tok-kw">stoke</span> run codex</code></pre>
+<p>The launcher points Codex at Stoke's native <code>/v1/responses</code> endpoint. Responses JSON, reasoning fields, tool calls, and SSE events remain native. The gateway loads the subscription credential from <code>~/.codex/auth.json</code> and sends it only to the exact first-party Codex destination.</p>
+<p>For Hermes, add a <strong>named custom provider</strong> with <code>api_mode: codex_responses</code>; <code>codex_responses</code> is the wire mode, not the provider name. Keep the gateway key in the client environment or its owner-only <code>.env</code>, referenced by <code>key_env</code>:</p>
+<pre><code class="lang-yaml">providers:
+  stoke-codex:
+    name: Stoke · Codex subscription
+    base_url: http://127.0.0.1:8787/v1
+    api_mode: codex_responses
+    key_env: STOKE_API_KEY
+    discover_models: false
+    models:
+      "&lt;exact-codex-model-id&gt;": {}
+  stoke-ollama:
+    name: Stoke · Ollama
+    base_url: http://127.0.0.1:8787/v1
+    api_mode: chat_completions
+    key_env: STOKE_API_KEY
+    discover_models: false
+    models:
+      "&lt;ollama-model-id&gt;": {}</code></pre>
+<p>Merge these entries into your existing providers rather than replacing the whole config. Select <code>custom:stoke-codex</code> or <code>custom:stoke-ollama</code> in Hermes; adding them does not change your default. See the <a href="https://hermes-agent.nousresearch.com/docs/user-guide/configuration/">Hermes configuration reference</a> for configuration locations.</p>
+<p>Do not copy OAuth into Hermes, Ollama, shell aliases, or client config. Explicit separate client OAuth remains supported for clients that send it deliberately; it is not required for the gateway-owned native path.</p>
+<h2 id="what-is-enforced-and-what-is-not">What is enforced, and what is not</h2>
+<ul><li><code>STOKE_API_KEYS</code> is required for the client-to-gateway request in normal operation; the gateway remains fail-closed.</li><li>Native Responses and Ollama Chat Completions keep their own wire formats, including Responses reasoning and SSE.</li><li>Subscription traffic bypasses per-token USD metering because it has no per-request API price. Rate limits, loop detection, and the provider's own plan limits still apply. This is not a subscription hard-dollar cap or quota-savings claim.</li><li>The cache policy applies only to eligible non-streaming named routes; this guide does not claim Responses caching. TTL reuse and lazy cleanup are not secure erasure.</li><li>Exact coalescing is opt-in and bounded. Concurrent identical eligible requests can count as one provider execution, while decision-feed followers and dispatch-level receipts remain distinct accounting concepts.</li><li>Validated retry headers are client propagation only. They do not add an internal retry or failover policy.</li></ul>
+<h2 id="troubleshooting-without-exposing-credentials">Troubleshooting without exposing credentials</h2>
+<p>If Codex traffic is unavailable, check that the native store exists and is readable by the running Stoke user, that the provider URL is exactly <code>https://chatgpt.com/backend-api/codex</code>, and that the configured model ID is accepted by the current account. Do not print or upload <code>auth.json</code>.</p>
+<p>If Ollama traffic is unavailable, run <code>ollama list</code>, use an exact discovered model ID, and check that Ollama is listening on <code>127.0.0.1:11434</code>. The two paths use different provider types and do not share credentials.</p>
+<div class="cta">
+  <h3>Put a control point in front of your agents</h3>
+  <p>Stoke is a single Rust binary: hard budget caps, a runaway-loop kill switch, and local-first routing — enforced before a provider is ever called. Open source, MIT.</p>
+  <a class="btn" href="https://github.com/Ozperium/stoke">Get Stoke on GitHub</a>
+</div>
+</main>
+<footer>MIT licensed · <a href="https://stokegate.com">stokegate.com</a> · <a href="/security/">Security</a> · <a href="/legal/">Legal</a> · <a href="/contact/">Contact</a> · <a href="https://github.com/Ozperium/stoke">GitHub</a></footer>
+</body>
+</html>

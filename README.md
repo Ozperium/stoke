@@ -135,7 +135,9 @@ Because prompts route to your own machines by default, they never leave your inf
 
 ### Also in the box
 
-- **Response cache** — exact-match plus semantic (semantic is opt-in via `STOKE_SEMANTIC_CACHE`).
+- **Response cache** — exact identity is scoped to the caller and named route, and includes the resolved model plus the complete effective request. The release policy applies only to eligible non-streaming `single` routes; route TTL is capped by the existing global retention and expired entries are lazily removed. It is reuse, not secure erasure, and is not a claim about Responses caching.
+- **Bounded exact coalescing** — an explicitly enabled named route can let concurrent identical cold requests share one provider execution. The registry stores notification state, not response bodies; followers wait at most five seconds, then re-read the cache or dispatch normally. A coalesced decision has follower visibility, while budget/cost receipts remain at dispatch level.
+- **Validated retry hints** — eligible upstream `Retry-After` and `x-should-retry` values are propagated to clients only when their syntax is valid and unambiguous. This is client-facing metadata, not a new internal failover policy.
 - **Cost tracking** — non-streaming responses carry a `stoke_cost` field, and both streamed and non-streamed responses record their spend per key, including every call a fan-out pattern makes. Streamed spend is read from the provider's own usage report as the stream passes; if a metered provider reports none, Stoke bills an estimate and says so (`estimated_usd` in `/v1/budget`) rather than booking $0. Prices come from `[pricing.models]` in your config — Stoke ships none, and refuses to serve a model it cannot price on a metered provider rather than meter it at $0. Before dispatching, Stoke holds the most a request could cost against the key's cap and refuses it if the hold would not fit, so concurrent streams cannot overshoot while none of them has been charged yet. `/v1/budget` shows per-key spend, held money, and the configured prices are at `/v1/pricing`.
 - **Route profiles** — multiple endpoints, each with its own model, routing pattern, plugin chain, and optional `allowed_tiers` egress allowlist. A route set to `["local", "remote"]` refuses cloud fallback before any provider is called.
 - **Plugins** — webhook hooks (`pre_request`, `prompt_filter`, `post_response`) in any language; JS/TS plugins behind a compile-time feature flag (`--features js-plugins`); built-in PII redaction and JSONL audit log.
@@ -263,7 +265,7 @@ STOKE_API_KEY=stk-mykey stoke run codex
 STOKE_API_KEY=stk-mykey stoke run codex -- exec "Review this repository"
 ```
 
-The launcher injects a temporary Codex custom provider with `wire_api = "responses"`, points it at Stoke, disables the WebSocket transport, and keeps the client key in `STOKE_API_KEY` rather than argv. Stoke forwards `POST /v1/responses` without translating its request, response, tool-call, or SSE event shapes. This path uses the API credential held by the Stoke server; it does not proxy ChatGPT subscription/OAuth billing.
+The launcher injects a temporary Codex custom provider with `wire_api = "responses"`, points it at Stoke, disables the WebSocket transport, and keeps the client key in `STOKE_API_KEY` rather than argv. Stoke forwards `POST /v1/responses` without translating its request, response, reasoning, tool-call, or SSE event shapes. For native Codex subscription traffic, Stoke can own the credential loaded from the native login at `~/.codex/auth.json` and send it only to the configured first-party Codex endpoint; see the reproducible [Codex + Ollama guide](docs/guides/use-codex-and-ollama-with-stoke.md). Explicit client OAuth remains supported when the client sends it separately. This path does not turn a subscription into per-token USD spend or imply a plan-limit bypass.
 
 **Native ChatGPT/Codex desktop app (macOS).** The desktop app (`ChatGPT.app`, bundle `com.openai.codex`) reads the same `~/.codex/config.toml` as the Codex CLI, so one config serves both — the workflow below is app-first. In `stoke.toml`, add the commented `codex_subscription` provider shown in [`stoke.example.toml`](stoke.example.toml), then put this in `~/.codex/config.toml`:
 
@@ -339,6 +341,10 @@ The registry polls both nodes and places each request on whichever machine has t
 ## Scope: what Stoke cannot do
 
 Subscription traffic (e.g. Claude Max/Pro seats) is quota-world, not dollar-world — there is no per-request price to meter, so Stoke cannot dollar-cap it. It can still rate-limit it and kill loops in it. Budget caps in USD apply to metered API traffic, where a request has a price.
+
+## Release v0.2.0
+
+This v0.2.0 release documents cache identity/policy, bounded exact coalescing, validated client retry hints, and native Responses gateway-owned Codex authentication alongside Ollama. Model IDs are discovered or explicitly configured; Stoke ships no model defaults. Hermes is one verified client path, not a hardcoded product dependency. Optional Headroom is included in the release, disabled by default. See the [optional Headroom guide](docs/guides/optional-headroom.md) for the macOS arm64 dependency lock, authenticated worker, off switch and protocol limits. It compacts eligible JSON tool-result whitespace before native Responses dispatch; it does not compress streamed responses or promise general savings.
 
 ## Verification
 

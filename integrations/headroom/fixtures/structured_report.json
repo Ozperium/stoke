@@ -1,0 +1,1575 @@
+{
+  "report_id": "diag-2026-09-13-001",
+  "schema": "structured-diagnostic-v1",
+  "status": "complete",
+  "metadata": {
+    "release": "2026.09",
+    "runner": "synthetic-hermes-headroom-comparison",
+    "workspace": "/tmp/headroom-live-comparison-fixture",
+    "units": "milliseconds",
+    "row_count": 96
+  },
+  "rows": [
+    {
+      "row_id": 1,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 41,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 01; retain for audit.",
+        "payload_digest": "row-001-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 2,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 58,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 02; retain for audit.",
+        "payload_digest": "row-002-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 3,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 32,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 03; retain for audit.",
+        "payload_digest": "row-003-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 4,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 49,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 04; retain for audit.",
+        "payload_digest": "row-004-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 5,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 66,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 05; retain for audit.",
+        "payload_digest": "row-005-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 6,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 40,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 06; retain for audit.",
+        "payload_digest": "row-006-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 7,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 57,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 07; retain for audit.",
+        "payload_digest": "row-007-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 8,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 31,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 08; retain for audit.",
+        "payload_digest": "row-008-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 9,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 48,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 09; retain for audit.",
+        "payload_digest": "row-009-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 10,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 65,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 10; retain for audit.",
+        "payload_digest": "row-010-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 11,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 39,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 11; retain for audit.",
+        "payload_digest": "row-011-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 12,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 56,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 12; retain for audit.",
+        "payload_digest": "row-012-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 13,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 30,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 13; retain for audit.",
+        "payload_digest": "row-013-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 14,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 47,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 14; retain for audit.",
+        "payload_digest": "row-014-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 15,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 64,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 15; retain for audit.",
+        "payload_digest": "row-015-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 16,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 38,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 16; retain for audit.",
+        "payload_digest": "row-016-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 17,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 55,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 17; retain for audit.",
+        "payload_digest": "row-017-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 18,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 29,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 18; retain for audit.",
+        "payload_digest": "row-018-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 19,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 46,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 19; retain for audit.",
+        "payload_digest": "row-019-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 20,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 63,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 20; retain for audit.",
+        "payload_digest": "row-020-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 21,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 37,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 21; retain for audit.",
+        "payload_digest": "row-021-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 22,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 54,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 22; retain for audit.",
+        "payload_digest": "row-022-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 23,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 28,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 23; retain for audit.",
+        "payload_digest": "row-023-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 24,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 45,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 24; retain for audit.",
+        "payload_digest": "row-024-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 25,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 62,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 25; retain for audit.",
+        "payload_digest": "row-025-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 26,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 36,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 26; retain for audit.",
+        "payload_digest": "row-026-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 27,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 53,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 27; retain for audit.",
+        "payload_digest": "row-027-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 28,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 27,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 28; retain for audit.",
+        "payload_digest": "row-028-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 29,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 44,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 29; retain for audit.",
+        "payload_digest": "row-029-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 30,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 61,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 30; retain for audit.",
+        "payload_digest": "row-030-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 31,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 35,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 31; retain for audit.",
+        "payload_digest": "row-031-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 32,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 52,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 32; retain for audit.",
+        "payload_digest": "row-032-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 33,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 26,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 33; retain for audit.",
+        "payload_digest": "row-033-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 34,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 43,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 34; retain for audit.",
+        "payload_digest": "row-034-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 35,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 60,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 35; retain for audit.",
+        "payload_digest": "row-035-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 36,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 34,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 36; retain for audit.",
+        "payload_digest": "row-036-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 37,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 51,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 37; retain for audit.",
+        "payload_digest": "row-037-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 38,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 25,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 38; retain for audit.",
+        "payload_digest": "row-038-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 39,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 42,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 39; retain for audit.",
+        "payload_digest": "row-039-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 40,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 59,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 40; retain for audit.",
+        "payload_digest": "row-040-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 41,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 33,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 41; retain for audit.",
+        "payload_digest": "row-041-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 42,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 50,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 42; retain for audit.",
+        "payload_digest": "row-042-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 43,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 24,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 43; retain for audit.",
+        "payload_digest": "row-043-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 44,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 41,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 44; retain for audit.",
+        "payload_digest": "row-044-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 45,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 58,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 45; retain for audit.",
+        "payload_digest": "row-045-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 46,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 32,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 46; retain for audit.",
+        "payload_digest": "row-046-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 47,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 49,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 47; retain for audit.",
+        "payload_digest": "row-047-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 48,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 66,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 48; retain for audit.",
+        "payload_digest": "row-048-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 49,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 40,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 49; retain for audit.",
+        "payload_digest": "row-049-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 50,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 57,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 50; retain for audit.",
+        "payload_digest": "row-050-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 51,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 31,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 51; retain for audit.",
+        "payload_digest": "row-051-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 52,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 48,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 52; retain for audit.",
+        "payload_digest": "row-052-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 53,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 65,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 53; retain for audit.",
+        "payload_digest": "row-053-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 54,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 39,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 54; retain for audit.",
+        "payload_digest": "row-054-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 55,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 56,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 55; retain for audit.",
+        "payload_digest": "row-055-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 56,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 30,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 56; retain for audit.",
+        "payload_digest": "row-056-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 57,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 47,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 57; retain for audit.",
+        "payload_digest": "row-057-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 58,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 64,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 58; retain for audit.",
+        "payload_digest": "row-058-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 59,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 38,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 59; retain for audit.",
+        "payload_digest": "row-059-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 60,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 55,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 60; retain for audit.",
+        "payload_digest": "row-060-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 61,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 29,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 61; retain for audit.",
+        "payload_digest": "row-061-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 62,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 46,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 62; retain for audit.",
+        "payload_digest": "row-062-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 63,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 63,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 63; retain for audit.",
+        "payload_digest": "row-063-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 64,
+      "phase": "integration",
+      "status": "passed",
+      "duration_ms": 37,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 64; retain for audit.",
+        "payload_digest": "row-064-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 65,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 54,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 65; retain for audit.",
+        "payload_digest": "row-065-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 66,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 28,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 66; retain for audit.",
+        "payload_digest": "row-066-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 67,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 45,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 67; retain for audit.",
+        "payload_digest": "row-067-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 68,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 62,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 68; retain for audit.",
+        "payload_digest": "row-068-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 69,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 36,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 69; retain for audit.",
+        "payload_digest": "row-069-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 70,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 53,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 70; retain for audit.",
+        "payload_digest": "row-070-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 71,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 27,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 71; retain for audit.",
+        "payload_digest": "row-071-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 72,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 44,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 72; retain for audit.",
+        "payload_digest": "row-072-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 73,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 61,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 73; retain for audit.",
+        "payload_digest": "row-073-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 74,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 35,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 74; retain for audit.",
+        "payload_digest": "row-074-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 75,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 52,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 75; retain for audit.",
+        "payload_digest": "row-075-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 76,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 26,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 76; retain for audit.",
+        "payload_digest": "row-076-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 77,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 43,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 77; retain for audit.",
+        "payload_digest": "row-077-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 78,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 60,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 78; retain for audit.",
+        "payload_digest": "row-078-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 79,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 34,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 79; retain for audit.",
+        "payload_digest": "row-079-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 80,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 51,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 80; retain for audit.",
+        "payload_digest": "row-080-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 81,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 25,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 81; retain for audit.",
+        "payload_digest": "row-081-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 82,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 42,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 82; retain for audit.",
+        "payload_digest": "row-082-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 83,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 59,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 83; retain for audit.",
+        "payload_digest": "row-083-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 84,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 33,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 84; retain for audit.",
+        "payload_digest": "row-084-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 85,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 50,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 85; retain for audit.",
+        "payload_digest": "row-085-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 86,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 24,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 86; retain for audit.",
+        "payload_digest": "row-086-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 87,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 41,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 87; retain for audit.",
+        "payload_digest": "row-087-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 88,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 58,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 88; retain for audit.",
+        "payload_digest": "row-088-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 89,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 32,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 89; retain for audit.",
+        "payload_digest": "row-089-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 90,
+      "phase": "recovery",
+      "status": "passed",
+      "duration_ms": 49,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 90; retain for audit.",
+        "payload_digest": "row-090-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 91,
+      "phase": "finalization",
+      "status": "degraded",
+      "duration_ms": 1847,
+      "attempt": 3,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded",
+          "telemetry_consistent"
+        ],
+        "note": "Outlier: upstream timeout recovered on the third attempt; retain all diagnostic fields.",
+        "sample_keys": [
+          "row_id",
+          "status",
+          "duration_ms",
+          "region"
+        ],
+        "payload_digest": "row-091-digest-outlier-2b9c4e70",
+        "error_code": "UPSTREAM_TIMEOUT",
+        "retry_count": 2,
+        "error_rate": 0.17
+      }
+    },
+    {
+      "row_id": 92,
+      "phase": "finalization",
+      "status": "passed",
+      "duration_ms": 40,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 92; retain for audit.",
+        "payload_digest": "row-092-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 93,
+      "phase": "finalization",
+      "status": "passed",
+      "duration_ms": 57,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 93; retain for audit.",
+        "payload_digest": "row-093-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 94,
+      "phase": "finalization",
+      "status": "passed",
+      "duration_ms": 31,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 94; retain for audit.",
+        "payload_digest": "row-094-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 95,
+      "phase": "finalization",
+      "status": "passed",
+      "duration_ms": 48,
+      "attempt": 1,
+      "region": "eu-central-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded"
+        ],
+        "note": "Deterministic row 95; retain for audit.",
+        "payload_digest": "row-095-digest-7f3c9a21"
+      }
+    },
+    {
+      "row_id": 96,
+      "phase": "finalization",
+      "status": "passed",
+      "duration_ms": 31,
+      "attempt": 1,
+      "region": "us-east-1",
+      "details": {
+        "assertions": [
+          "schema_present",
+          "result_recorded",
+          "telemetry_consistent",
+          "late_row_retained"
+        ],
+        "note": "Late-row acceptance evidence; this row must not be dropped by context handling.",
+        "sample_keys": [
+          "row_id",
+          "status",
+          "duration_ms",
+          "region"
+        ],
+        "payload_digest": "row-096-digest-late-91d6a0c4",
+        "release": "2026.09.13",
+        "commit": "diag-7f3c9a21",
+        "evidence": {
+          "source": "synthetic-finalization-check",
+          "assertion": "late_row_96_present",
+          "checksum": "late-96-checksum-5e8d11b2"
+        }
+      }
+    }
+  ]
+}
