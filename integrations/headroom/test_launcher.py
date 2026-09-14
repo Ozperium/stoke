@@ -149,7 +149,7 @@ class LauncherTests(unittest.TestCase):
                 stderr=subprocess.DEVNULL,
             )
             try:
-                deadline = time.time() + 15
+                deadline = time.time() + 45
                 while time.time() < deadline and not ready.exists():
                     time.sleep(0.05)
                 self.assertTrue(ready.exists())

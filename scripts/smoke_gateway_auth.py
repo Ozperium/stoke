@@ -51,6 +51,7 @@ def malformed_request(port):
 
 
 def verify_release(binary):
+    binary = os.path.abspath(binary)
     with tempfile.TemporaryDirectory(prefix="stoke-release-pin-") as d:
         cfg=os.path.join(d,"stoke.toml")
         open(cfg,"w").write('''[server]\nhost="127.0.0.1"\nport=0\n[[providers]]\nname="bad"\ntype="codex_subscription"\nbase_url="http://203.0.113.7:43123"\ntier="subscription"\n''')
@@ -66,6 +67,7 @@ def verify_release(binary):
         print("release pin verification: ok")
 
 def smoke(binary):
+    binary = os.path.abspath(binary)
     with tempfile.TemporaryDirectory(prefix="stoke-auth-smoke-") as d:
         provider=ThreadingHTTPServer(("127.0.0.1",0), Mock); threading.Thread(target=provider.serve_forever,daemon=True).start(); pp=provider.server_address[1]
         port=pp+1
