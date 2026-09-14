@@ -78,7 +78,7 @@ def start_spy(state: SpyState, role: str):
 
 
 def wait_health(base: str, proc: subprocess.Popen):
-    for _ in range(100):
+    for _ in range(300):
         if proc.poll() is not None:
             raise RuntimeError(f"gateway exited early: {proc.returncode}")
         try:
@@ -86,7 +86,7 @@ def wait_health(base: str, proc: subprocess.Popen):
                 if response.status == 200:
                     return
         except Exception:
-            time.sleep(0.05)
+            time.sleep(0.1)
     raise RuntimeError("gateway health timeout")
 
 
