@@ -7,7 +7,7 @@
 - Default listen address: `127.0.0.1:8787`; config is TOML.
 - Fail-closed: without `STOKE_API_KEYS` and without `STOKE_DEV=1`, every endpoint except `GET /health` rejects requests.
 - OpenAI Chat Completions clients: `OPENAI_BASE_URL=http://127.0.0.1:8787/v1`.
-- Native Codex: `STOKE_API_KEY=... stoke run codex`; native Responses JSON, reasoning, tool calls, and SSE remain un-translated.
+- Native Codex: `STOKE_API_KEY=... stoke run codex`; Stoke can read the existing native login at `~/.codex/auth.json` for the gateway-owned subscription path while `STOKE_API_KEYS` authenticates the gateway hop. Responses JSON, reasoning, tool calls, and SSE remain un-translated.
 - Ollama: configure an `openai_compatible` provider at its loopback `/v1` endpoint; discover exact model IDs from `ollama list` or `/v1/nodes`.
 - Hermes is one verified client. A Hermes custom provider can be named `codex_responses` with Responses wire and `key_env = "STOKE_API_KEY"`; keep Ollama on its separate `chat_completions` provider. See the [Hermes docs](https://hermes-agent.nousresearch.com/docs) for the authoritative client schema.
 
@@ -17,6 +17,7 @@
 - Opt-in bounded exact coalescing can make identical cold eligible requests share one provider execution. Followers wait for a bounded interval and receipts remain dispatch-level.
 - Validated `Retry-After` and `x-should-retry` values can be propagated to clients; this is not a new internal retry policy.
 - Native Codex subscription auth may be gateway-owned from the existing `~/.codex/auth.json`; `STOKE_API_KEYS` remains gateway auth. Explicit separate client OAuth is supported. Subscription traffic bypasses per-token USD metering, but provider plan limits and Stoke rate/loop controls still apply.
+- Optional Headroom is default-off and local. Before native Responses dispatch it accepts only a smaller, validated, lossless JSON-whitespace transformation for eligible tool-result strings; rejected or unavailable work retains the original outputs. The current worker lock targets macOS arm64 / CPython 3.11, with bounded request and batch sizes. It is not streamed-response compression or a universal token/billing-savings claim.
 
 ## Endpoints
 

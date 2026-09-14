@@ -305,13 +305,13 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
       <div class="hero-copy">
         <div class="kicker">Enforce, don't just observe.</div>
         <h1>Your agents. Your machines.<br><span class="hl">Your rules.</span></h1>
-        <p class="hero-sub">Route to your own hardware — or approved cloud when you choose. Keep sensitive routes off unapproved providers; redact known credentials before dispatch. Refuse anything over budget. Kill loops in seconds. Connect native Codex Responses and Ollama Chat Completions through one authenticated gateway, without hiding the provider boundary. One ~5.5&nbsp;MB Rust binary that decides <em>before</em> the money is spent, with an embedded control room at <code>/ui</code>.</p>
+        <p class="hero-sub">Route to your own hardware — or approved cloud when you choose. Keep sensitive routes off unapproved providers; redact known credentials before dispatch. Refuse anything over budget. Kill loops in seconds. Connect native Codex Responses with gateway-owned auth and keep Ollama on its separate Chat Completions path, without hiding the provider boundary. One ~5.5&nbsp;MB Rust binary that decides <em>before</em> the money is spent, with an embedded control room at <code>/ui</code>.</p>
         <div class="hero-cta">
           <a data-track="install_cta_clicked" href="#install" class="btn btn-primary">Install in 60 seconds</a>
           <a href="#control-room" class="btn btn-secondary">See it live</a>
           <a data-track="github_clicked" href="https://github.com/Ozperium/stoke" class="btn btn-secondary">★ Star on GitHub</a>
         </div>
-        <p class="hero-note">Works with any OpenAI-compatible agent — point <code>base_url</code> at <code>localhost:8787/v1</code>.<br>Claude Code connects via <code>ANTHROPIC_BASE_URL</code>. Pre-release · MIT · dogfooded daily.</p>
+        <p class="hero-note">Works with any OpenAI-compatible agent — point <code>base_url</code> at <code>localhost:8787/v1</code>.<br>Claude Code connects via <code>ANTHROPIC_BASE_URL</code>. <a href="https://github.com/Ozperium/stoke/releases/tag/v0.2.0">v0.2.0</a> · MIT · dogfooded daily.</p>
       </div>
       <div class="hero-demo">
         <div class="term" id="term">
@@ -388,12 +388,18 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
   <div class="container">
     <div class="section-tag">Verify it yourself</div>
     <h2>Run the failure proof, not a simulation.</h2>
-    <p class="section-sub">The repository smoke test exercises the pricing gate, PII redaction, loop refusal, streamed spend, in-flight holds, fan-out clamp, cache isolation, and fail-closed boot validation against local mock providers.</p>
+    <p class="section-sub">The repository checks exercise the pricing gate, PII redaction, loop refusal, streamed spend, in-flight holds, fan-out clamp, cache isolation, native Responses passthrough, gateway auth, and fail-closed boot validation against local mock providers. These are wire-behavior checks, not savings benchmarks.</p>
     <div class="code-block"><span class="cmd">./scripts/smoke_spend.sh</span>
 
 <span class="comment"># ...</span>
 <span class="err">SPEND FIREWALL SMOKE PASSED</span> (pricing gate, streamed spend, in-flight holds, served-model billing, boot validation, fan-out clamp, full billing, cache isolation)</div>
     <a href="https://github.com/Ozperium/stoke/blob/main/scripts/smoke_spend.sh" class="btn btn-secondary">Read the runnable proof →</a>
+    <div class="compatibility" aria-label="v0.2.0 release controls">
+      <div class="compatibility-card"><h3>Gateway-owned Codex auth</h3><p>Native Codex can use the existing <code class="inline">~/.codex/auth.json</code> through Stoke's Responses provider. <code class="inline">STOKE_API_KEYS</code> still authenticates the gateway hop; separate client OAuth remains supported.</p></div>
+      <div class="compatibility-card"><h3>Ollama stays separate</h3><p>Ollama model IDs are discovered from your running Ollama and served on Chat Completions. Native Codex Responses stays native — Stoke does not translate the two client paths.</p></div>
+      <div class="compatibility-card"><h3>Bounded reuse and retry hints</h3><p>Named routes can opt into exact caching and bounded coalescing for eligible non-streaming requests. Only validated, unambiguous <code class="inline">Retry-After</code> and <code class="inline">x-should-retry</code> values may reach clients; this adds no internal retry policy.</p></div>
+      <div class="compatibility-card"><h3>Optional local Headroom</h3><p>Default-off Headroom accepts only a smaller, validated, lossless JSON-whitespace transformation before native Responses dispatch. Unsupported, unavailable, or rejected work keeps the original outputs; the local worker has documented size and platform limits.</p></div>
+    </div>
   </div>
 </section>
 
@@ -403,8 +409,8 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
     <div class="section-tag">The local capacity layer</div>
     <h2>One endpoint for the capacity you configure.</h2>
     <div class="compatibility">
-      <div class="compatibility-card"><h3>Clients in front</h3><p>Point OpenAI-compatible clients, native Codex, Hermes, or Claude Code at Stoke. Responses stays Responses — including reasoning and SSE — while Ollama stays on its separate Chat Completions path. <a href="/guides/use-codex-and-ollama-with-stoke/">Connect Codex and Ollama →</a></p></div>
-      <div class="compatibility-card"><h3>Capacity behind it</h3><p>Stoke discovers model inventory and health through <code class="inline">/v1/nodes</code>, then routes across configured Ollama nodes and gateways without manual topology selection.</p></div>
+      <div class="compatibility-card"><h3>Clients in front</h3><p>Point OpenAI-compatible clients, native Codex, Hermes, or Claude Code at Stoke. Native Codex can use the gateway-owned login from <code class="inline">~/.codex/auth.json</code>, while <code class="inline">STOKE_API_KEYS</code> authenticates the client hop. Responses stays Responses — including reasoning and SSE — while Ollama stays on its separate Chat Completions path. <a href="/guides/use-codex-and-ollama-with-stoke/">Connect Codex and Ollama →</a></p></div>
+      <div class="compatibility-card"><h3>Capacity behind it</h3><p>Stoke discovers exact Ollama model IDs, inventory, and health through the running provider and protected <code class="inline">/v1/nodes</code>, then routes across configured Ollama nodes and gateways without manual topology selection. Stoke ships no model catalogue.</p></div>
     </div>
     <div class="routing-flow" aria-label="Node discovery and routing flow">
       <div class="flow-row"><div class="flow-num">1</div><div class="flow-content"><h3>GET /v1/nodes</h3><p>Poll each configured Ollama or federated Stoke node for discovered models, warm state, health, and load.</p></div></div>
@@ -442,8 +448,8 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
         <p class="section-sub">Open source, MIT licensed, and local by default. No hosted control plane or account required.</p>
         <a data-track="github_clicked" href="https://github.com/Ozperium/stoke" class="btn btn-secondary">Read the docs →</a>
       </div>
-      <div class="code-block"><span class="comment"># rolling prebuilt binary</span>
-<span class="cmd">curl</span> -sSf https://stokegate.com/install | sh -s -- --version nightly
+      <div class="code-block"><span class="comment"># v0.2.0 prebuilt binary</span>
+<span class="cmd">curl</span> -sSf https://stokegate.com/install | sh -s -- --version v0.2.0
 
 <span class="var">OPENAI_BASE_URL</span>=http://localhost:8787/v1
 <span class="var">ANTHROPIC_BASE_URL</span>=http://localhost:8787</div>
@@ -457,7 +463,9 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
     <div class="section-tag">FAQ</div>
     <h2>Short answers.</h2>
     <div class="faq">
-      <details><summary>Can Stoke make tool results smaller?</summary><p>Optional Headroom removes eligible JSON tool-result whitespace before native Responses dispatch, without changing the selected model or reasoning fields. It is off by default; the current worker package targets macOS arm64. This is not streamed-response compression or a general savings guarantee. <a href="/guides/optional-headroom/">Setup and limits.</a></p></details>
+      <details><summary>Can Stoke make tool results smaller?</summary><p>Optional, default-off Headroom accepts only a smaller, validated, lossless JSON-whitespace transformation before native Responses dispatch; it does not summarize, change the model, or rewrite reasoning. If the worker is unavailable or rejects a transformation, Stoke retains the original outputs. Buffered and streaming requests are supported before dispatch, but upstream SSE is not compressed. The current worker lock targets macOS arm64 with CPython 3.11, with bounded 1 MiB requests and 128 outputs per batch. <a href="/guides/optional-headroom/">Setup and limits.</a></p></details>
+      <details><summary>What does v0.2.0 cache?</summary><p>Only eligible non-streaming named routes can use the exact cache policy. The identity includes caller scope, resolved model, and the complete effective request; exact coalescing is opt-in and bounded, and followers wait at most five seconds. Route TTL can shorten the global retention but not extend it. This is not a Responses caching claim, and reuse is not secure erasure. <a href="/guides/cache-policy/">Cache policy details.</a></p></details>
+      <details><summary>Does Stoke add its own retry policy?</summary><p>No. Stoke propagates only valid, unambiguous upstream <code class="inline">Retry-After</code> and <code class="inline">x-should-retry</code> hints when eligible. That is client-facing metadata, not a new internal retry or failover policy.</p></details>
       <details><summary>Is Stoke a hosted service?</summary><p>No. Stoke is a self-hosted Rust gateway that runs on infrastructure you control.</p></details>
       <details><summary>Does it work with my existing OpenAI, Codex, Hermes, or Anthropic client?</summary><p>Yes. Stoke accepts OpenAI-compatible Chat Completions, native Codex Responses, and the Anthropic Messages API. Point the client at Stoke, then configure the upstream provider or discovered local node. <a href="/guides/use-codex-and-ollama-with-stoke/">Follow the Codex + Ollama guide.</a></p></details>
       <details><summary>Can I use local models across multiple machines?</summary><p>Yes. Connect and configure the nodes or gateways, then Stoke can route across their discovered model and health state.</p></details>
