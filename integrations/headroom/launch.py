@@ -48,7 +48,7 @@ def _validate_worker_python(python: Path) -> Path:
 
 
 def _read_ready(proc: subprocess.Popen[bytes], ready_fd: int) -> int:
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + 60
     data = bytearray()
     try:
         while time.monotonic() < deadline:
@@ -81,7 +81,7 @@ def _read_ready(proc: subprocess.Popen[bytes], ready_fd: int) -> int:
 
 
 def _wait_health(proc: subprocess.Popen[bytes], port: int, token: str) -> None:
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + 60
     url = f"http://127.0.0.1:{port}/health"
     last: Exception | None = None
     while time.monotonic() < deadline:
