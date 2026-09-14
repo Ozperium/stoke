@@ -86,6 +86,7 @@ class LauncherTests(unittest.TestCase):
             ready = directory / "ready"
             env_dump = directory / "worker-env"
             port_dump = directory / "worker-port"
+            worker_error = directory / "worker-error"
             stoke_token = directory / "stoke-token"
             fake = directory / "fake-stoke.py"
             fake.write_text(
@@ -124,13 +125,18 @@ class LauncherTests(unittest.TestCase):
                 "        self.wfile.write(b'{\"status\":\"ok\"}')\n"
                 "    def log_message(self, *_args): pass\n"
                 f"Path({str(env_dump)!r}).write_text('\\n'.join(sorted(os.environ)))\n"
-                "ready_fd = int(sys.argv[sys.argv.index('--ready-fd') + 1])\n"
-                "server = HTTPServer(('127.0.0.1', 0), Handler)\n"
-                f"Path({str(port_dump)!r}).write_text(str(server.server_port))\n"
-                "with os.fdopen(ready_fd, 'w') as ready:\n"
-                "    ready.write(json.dumps({'port': server.server_port}) + '\\n')\n"
-                "    ready.flush()\n"
-                "server.serve_forever()\n"
+                "try:\n"
+                "    ready_fd = int(sys.argv[sys.argv.index('--ready-fd') + 1])\n"
+                "    server = HTTPServer(('127.0.0.1', 0), Handler)\n"
+                f"    Path({str(port_dump)!r}).write_text(str(server.server_port))\n"
+                "    with os.fdopen(ready_fd, 'w') as ready:\n"
+                "        ready.write(json.dumps({'port': server.server_port}) + '\\n')\n"
+                "        ready.flush()\n"
+                "    server.serve_forever()\n"
+                "except BaseException:\n"
+                "    import traceback\n"
+                f"    Path({str(worker_error)!r}).write_text(traceback.format_exc())\n"
+                "    raise\n"
             )
             worker_python.write_text(
                 "#!/bin/sh\n"
@@ -160,7 +166,8 @@ class LauncherTests(unittest.TestCase):
                 ready.exists(),
                 f"launcher output:\n{stdout}\n{stderr}\n"
                 f"env_dump={env_dump.exists()} port_dump={port_dump.exists()} "
-                f"token={stoke_token.exists()}",
+                f"token={stoke_token.exists()} worker_error="
+                f"{worker_error.read_text() if worker_error.exists() else ''}",
             )
             self.assertEqual(config.read_text(), original)
             self.assertNotIn("OPENAI_API_KEY", env_dump.read_text())
