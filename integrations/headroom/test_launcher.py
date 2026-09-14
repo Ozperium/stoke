@@ -145,20 +145,21 @@ class LauncherTests(unittest.TestCase):
                 [sys.executable, str(LAUNCHER), "--worker-python", str(worker_python),
                  "--stoke-bin", str(fake), "--config", str(config)],
                 env={**os.environ, "OPENAI_API_KEY": "must-not-reach-worker"},
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
             try:
                 deadline = time.time() + 45
                 while time.time() < deadline and not ready.exists():
                     time.sleep(0.05)
-                self.assertTrue(ready.exists())
-                self.assertEqual(config.read_text(), original)
-                self.assertNotIn("OPENAI_API_KEY", env_dump.read_text())
-                self.assertGreaterEqual(len(stoke_token.read_text()), 32)
             finally:
                 process.terminate()
-                process.wait(timeout=12)
+                stdout, stderr = process.communicate(timeout=12)
+            self.assertTrue(ready.exists(), f"launcher output:\n{stdout}\n{stderr}")
+            self.assertEqual(config.read_text(), original)
+            self.assertNotIn("OPENAI_API_KEY", env_dump.read_text())
+            self.assertGreaterEqual(len(stoke_token.read_text()), 32)
             port = int(port_dump.read_text())
             with self.assertRaises(OSError):
                 socket.create_connection(("127.0.0.1", port), timeout=1)
