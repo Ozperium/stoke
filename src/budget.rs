@@ -528,7 +528,7 @@ impl BudgetGuard {
             // reservation insert in one IMMEDIATE transaction.
             if !ledger.reserve_if_within_limit(&key_id, amount, limit)? {
                 return Err(format!(
-                    "Budget exceeded (durable ledger): this request exceeds ${:.4} for key_id {}",
+                    "Budget exceeded (durable ledger): committed spend plus hold for this request exceeds ${:.4} for key_id {}",
                     limit,
                     &key_id[..12.min(key_id.len())]
                 ));
