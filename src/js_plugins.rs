@@ -23,13 +23,11 @@ enum JsCommand {
         model: String,
         routing: String,
         messages: Vec<Value>,
-        api_key: String,
         reply: std::sync::mpsc::Sender<String>, // serialized result or error
     },
     PromptFilter {
         messages: Vec<Value>,
         model: String,
-        api_key: String,
         reply: std::sync::mpsc::Sender<String>,
     },
     PostResponse {
@@ -37,12 +35,12 @@ enum JsCommand {
         response: Value,
         cost_usd: f64,
         elapsed_ms: u64,
-        api_key: String,
         reply: std::sync::mpsc::Sender<String>,
     },
     IsEmpty {
         reply: std::sync::mpsc::Sender<bool>,
     },
+    Shutdown,
 }
 
 struct JsPlugin {
@@ -78,7 +76,7 @@ globalThis.__stoke_run = function(hookType, dataJson) {
         return JSON.stringify({ __blocked: true, reason: result.block });
       }
       if (result) {
-        data = result;
+        data = { ...data, ...result };
       }
     } catch (e) {
       console.error('Plugin ' + hookType + ' error: ' + (e.message || e));
@@ -132,33 +130,77 @@ impl JsPlugins {
 
             while let Ok(cmd) = rx.recv() {
                 match cmd {
+                    JsCommand::Shutdown => break,
                     JsCommand::IsEmpty { reply } => {
                         let _ = reply.send(plugins.is_empty());
                     }
-                    JsCommand::PreRequest { model, routing, messages, api_key, reply } => {
-                        let result = Self::handle_pre_request(&mut plugins, &model, &routing, &messages, &api_key);
-                        let _ = reply.send(serde_json::to_string(&Self::encode_pre_request(result)).unwrap_or_default());
+                    JsCommand::PreRequest {
+                        model,
+                        routing,
+                        messages,
+                        reply,
+                    } => {
+                        let result =
+                            Self::handle_pre_request(&mut plugins, &model, &routing, &messages, "");
+                        let _ = reply.send(
+                            serde_json::to_string(&Self::encode_pre_request(result))
+                                .unwrap_or_default(),
+                        );
                     }
-                    JsCommand::PromptFilter { messages, model, api_key, reply } => {
-                        let result = Self::handle_prompt_filter(&mut plugins, &messages, &model, &api_key);
-                        let _ = reply.send(serde_json::to_string(&Self::encode_prompt_filter(result)).unwrap_or_default());
+                    JsCommand::PromptFilter {
+                        messages,
+                        model,
+                        reply,
+                    } => {
+                        let result =
+                            Self::handle_prompt_filter(&mut plugins, &messages, &model, "");
+                        let _ = reply.send(
+                            serde_json::to_string(&Self::encode_prompt_filter(result))
+                                .unwrap_or_default(),
+                        );
                     }
-                    JsCommand::PostResponse { model, response, cost_usd, elapsed_ms, api_key, reply } => {
-                        let result = Self::handle_post_response(&mut plugins, &model, &response, cost_usd, elapsed_ms, &api_key);
-                        let _ = reply.send(serde_json::to_string(&Self::encode_post_response(result)).unwrap_or_default());
+                    JsCommand::PostResponse {
+                        model,
+                        response,
+                        cost_usd,
+                        elapsed_ms,
+                        reply,
+                    } => {
+                        let result = Self::handle_post_response(
+                            &mut plugins,
+                            &model,
+                            &response,
+                            cost_usd,
+                            elapsed_ms,
+                            "",
+                        );
+                        let _ = reply.send(
+                            serde_json::to_string(&Self::encode_post_response(result))
+                                .unwrap_or_default(),
+                        );
                     }
                 }
+            }
+
+            // V8 isolates are entered on creation and must be dropped LIFO.
+            while let Some(plugin) = plugins.pop() {
+                drop(plugin);
             }
         });
 
         // Wait for the JS thread to finish loading plugins before returning.
         barrier.wait();
 
-        Ok(Self { tx, handle: Some(handle) })
+        Ok(Self {
+            tx,
+            handle: Some(handle),
+        })
     }
 
     fn create_plugin(name: &str, user_code: &str) -> Result<JsPlugin, String> {
-        let mut runtime = JsRuntime::new(RuntimeOptions { ..Default::default() });
+        let mut runtime = JsRuntime::new(RuntimeOptions {
+            ..Default::default()
+        });
 
         runtime
             .execute_script("runtime.js", RUNTIME_JS.to_string())
@@ -181,15 +223,24 @@ impl JsPlugins {
             .execute_script("plugin.js", wrapper)
             .map_err(|e| format!("Failed to load JS plugin {}: {}", name, e))?;
 
-        Ok(JsPlugin { name: name.to_string(), runtime })
+        Ok(JsPlugin {
+            name: name.to_string(),
+            runtime,
+        })
     }
 
     fn run_hook(plugin: &mut JsPlugin, hook_type: &str, input: &Value) -> Result<String, String> {
         let input_json = serde_json::to_string(input)
             .map_err(|e| format!("Failed to serialize plugin input: {}", e))?;
 
-        let escaped_json = input_json.replace('\\', "\\\\").replace('\'', "\\'").replace('\n', "\\n");
-        let code = format!("globalThis.__stoke_run('{}', '{}');", hook_type, escaped_json);
+        let escaped_json = input_json
+            .replace('\\', "\\\\")
+            .replace('\'', "\\'")
+            .replace('\n', "\\n");
+        let code = format!(
+            "globalThis.__stoke_run('{}', '{}');",
+            hook_type, escaped_json
+        );
 
         let global = plugin
             .runtime
@@ -209,68 +260,131 @@ impl JsPlugins {
 
     // --- Internal handlers (run on JS thread) ---
 
-    fn handle_pre_request(plugins: &mut [JsPlugin], model: &str, routing: &str, messages: &[Value], api_key: &str) -> Result<(Option<String>, Option<String>, Option<Vec<String>>, Option<String>), String> {
-        let input = json!({ "model": model, "routing": routing, "messages": messages, "api_key": api_key });
+    fn handle_pre_request(
+        plugins: &mut [JsPlugin],
+        model: &str,
+        routing: &str,
+        messages: &[Value],
+        _api_key: &str,
+    ) -> Result<
+        (
+            Option<String>,
+            Option<String>,
+            Option<Vec<String>>,
+            Option<String>,
+        ),
+        String,
+    > {
+        let original_model = model.to_string();
+        let original_routing = routing.to_string();
+        let mut input = json!({ "model": model, "routing": routing, "messages": messages });
         for plugin in plugins {
             let result_str = Self::run_hook(plugin, "pre_request", &input)?;
             let result: Value = serde_json::from_str(&result_str)
                 .map_err(|e| format!("JS plugin returned invalid JSON: {}", e))?;
-
-            if let Some(block) = result.get("__blocked").and_then(|v| v.as_str()) {
-                return Ok((None, None, None, Some(block.to_string())));
+            if result.get("__blocked").and_then(Value::as_bool) == Some(true) {
+                let reason = result
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or("blocked");
+                return Ok((None, None, None, Some(reason.to_string())));
             }
-
-            return Ok((
-                result.get("model").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                result.get("routing").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                result.get("vote_models").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()),
-                result.get("block").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            ));
+            input = result;
         }
-        Ok((None, None, None, None))
+        Ok((
+            input
+                .get("model")
+                .and_then(Value::as_str)
+                .filter(|v| *v != original_model)
+                .map(str::to_owned),
+            input
+                .get("routing")
+                .and_then(Value::as_str)
+                .filter(|v| *v != original_routing)
+                .map(str::to_owned),
+            input.get("vote_models").and_then(Value::as_array).map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            }),
+            input
+                .get("block")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        ))
     }
 
-    fn handle_prompt_filter(plugins: &mut [JsPlugin], messages: &[Value], model: &str, api_key: &str) -> Result<(Option<Vec<Value>>, Option<String>), String> {
-        let input = json!({ "messages": messages, "model": model, "api_key": api_key });
-        let mut current_messages = None;
-
+    fn handle_prompt_filter(
+        plugins: &mut [JsPlugin],
+        messages: &[Value],
+        model: &str,
+        _api_key: &str,
+    ) -> Result<(Option<Vec<Value>>, Option<String>), String> {
+        let original = json!(messages);
+        let mut input = json!({ "messages": messages, "model": model });
         for plugin in plugins {
             let result_str = Self::run_hook(plugin, "prompt_filter", &input)?;
             let result: Value = serde_json::from_str(&result_str)
                 .map_err(|e| format!("JS plugin returned invalid JSON: {}", e))?;
-
-            if let Some(block) = result.get("__blocked").and_then(|v| v.as_str()) {
-                return Ok((current_messages, Some(block.to_string())));
+            if result.get("__blocked").and_then(Value::as_bool) == Some(true) {
+                let reason = result
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or("blocked");
+                return Ok((
+                    input.get("messages").and_then(Value::as_array).cloned(),
+                    Some(reason.to_string()),
+                ));
             }
-            if let Some(msgs) = result.get("messages").and_then(|v| v.as_array()) {
-                current_messages = Some(msgs.clone());
+            if let Some(block) = result.get("block").and_then(Value::as_str) {
+                return Ok((
+                    input.get("messages").and_then(Value::as_array).cloned(),
+                    Some(block.to_string()),
+                ));
             }
-            if let Some(block) = result.get("block").and_then(|v| v.as_str()) {
-                return Ok((current_messages, Some(block.to_string())));
-            }
+            input = result;
         }
-        Ok((current_messages, None))
+        let changed = input.get("messages") != Some(&original);
+        Ok((
+            input
+                .get("messages")
+                .and_then(Value::as_array)
+                .cloned()
+                .filter(|_| changed),
+            None,
+        ))
     }
 
-    fn handle_post_response(plugins: &mut [JsPlugin], model: &str, response: &Value, cost_usd: f64, elapsed_ms: u64, api_key: &str) -> Result<Option<Value>, String> {
-        let input = json!({ "model": model, "response": response, "cost_usd": cost_usd, "elapsed_ms": elapsed_ms, "api_key": api_key });
-        let mut current = None;
-
+    fn handle_post_response(
+        plugins: &mut [JsPlugin],
+        model: &str,
+        response: &Value,
+        cost_usd: f64,
+        elapsed_ms: u64,
+        _api_key: &str,
+    ) -> Result<Option<Value>, String> {
+        let mut input = json!({ "model": model, "response": response, "cost_usd": cost_usd, "elapsed_ms": elapsed_ms });
         for plugin in plugins {
             let result_str = Self::run_hook(plugin, "post_response", &input)?;
-            let result: Value = serde_json::from_str(&result_str)
+            input = serde_json::from_str(&result_str)
                 .map_err(|e| format!("JS plugin returned invalid JSON: {}", e))?;
-
-            if let Some(resp) = result.get("response") {
-                current = Some(resp.clone());
-            }
         }
-        Ok(current)
+        Ok(input.get("response").filter(|v| *v != response).cloned())
     }
 
     // --- Encoders for channel serialization ---
 
-    fn encode_pre_request(r: Result<(Option<String>, Option<String>, Option<Vec<String>>, Option<String>), String>) -> Value {
+    fn encode_pre_request(
+        r: Result<
+            (
+                Option<String>,
+                Option<String>,
+                Option<Vec<String>>,
+                Option<String>,
+            ),
+            String,
+        >,
+    ) -> Value {
         match r {
             Ok((model, routing, vote_models, block)) => json!({
                 "ok": true,
@@ -311,69 +425,141 @@ impl JsPlugins {
         rx.recv().unwrap_or(true)
     }
 
-    pub fn pre_request(&self, model: &str, routing: &str, messages: &[Value], api_key: &str) -> Result<(Option<String>, Option<String>, Option<Vec<String>>, Option<String>), String> {
+    pub fn pre_request(
+        &self,
+        model: &str,
+        routing: &str,
+        messages: &[Value],
+        api_key: &str,
+    ) -> Result<
+        (
+            Option<String>,
+            Option<String>,
+            Option<Vec<String>>,
+            Option<String>,
+        ),
+        String,
+    > {
         let (tx, rx) = channel();
-        self.tx.send(JsCommand::PreRequest {
-            model: model.to_string(),
-            routing: routing.to_string(),
-            messages: messages.to_vec(),
-            api_key: api_key.to_string(),
-            reply: tx,
-        }).map_err(|e| format!("JS thread channel error: {}", e))?;
+        self.tx
+            .send(JsCommand::PreRequest {
+                model: model.to_string(),
+                routing: routing.to_string(),
+                messages: messages.to_vec(),
+                reply: tx,
+            })
+            .map_err(|e| format!("JS thread channel error: {}", e))?;
 
-        let result_str = rx.recv().map_err(|e| format!("JS thread reply error: {}", e))?;
-        let result: Value = serde_json::from_str(&result_str).map_err(|e| format!("Invalid reply: {}", e))?;
+        let result_str = rx
+            .recv()
+            .map_err(|e| format!("JS thread reply error: {}", e))?;
+        let result: Value =
+            serde_json::from_str(&result_str).map_err(|e| format!("Invalid reply: {}", e))?;
 
         if result.get("ok").and_then(|v| v.as_bool()) == Some(false) {
-            return Err(result.get("error").and_then(|v| v.as_str()).unwrap_or("unknown").to_string());
+            return Err(result
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string());
         }
 
         Ok((
-            result.get("model").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            result.get("routing").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            result.get("vote_models").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()),
-            result.get("block").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            result
+                .get("model")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            result
+                .get("routing")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            result
+                .get("vote_models")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                }),
+            result
+                .get("block")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
         ))
     }
 
-    pub fn prompt_filter(&self, messages: &[Value], model: &str, api_key: &str) -> Result<(Option<Vec<Value>>, Option<String>), String> {
+    pub fn prompt_filter(
+        &self,
+        messages: &[Value],
+        model: &str,
+        api_key: &str,
+    ) -> Result<(Option<Vec<Value>>, Option<String>), String> {
         let (tx, rx) = channel();
-        self.tx.send(JsCommand::PromptFilter {
-            messages: messages.to_vec(),
-            model: model.to_string(),
-            api_key: api_key.to_string(),
-            reply: tx,
-        }).map_err(|e| format!("JS thread channel error: {}", e))?;
+        self.tx
+            .send(JsCommand::PromptFilter {
+                messages: messages.to_vec(),
+                model: model.to_string(),
+                reply: tx,
+            })
+            .map_err(|e| format!("JS thread channel error: {}", e))?;
 
-        let result_str = rx.recv().map_err(|e| format!("JS thread reply error: {}", e))?;
-        let result: Value = serde_json::from_str(&result_str).map_err(|e| format!("Invalid reply: {}", e))?;
+        let result_str = rx
+            .recv()
+            .map_err(|e| format!("JS thread reply error: {}", e))?;
+        let result: Value =
+            serde_json::from_str(&result_str).map_err(|e| format!("Invalid reply: {}", e))?;
 
         if result.get("ok").and_then(|v| v.as_bool()) == Some(false) {
-            return Err(result.get("error").and_then(|v| v.as_str()).unwrap_or("unknown").to_string());
+            return Err(result
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string());
         }
 
         Ok((
-            result.get("messages").and_then(|v| v.as_array()).map(|a| a.clone()),
-            result.get("block").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            result
+                .get("messages")
+                .and_then(|v| v.as_array())
+                .map(|a| a.clone()),
+            result
+                .get("block")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
         ))
     }
 
-    pub fn post_response(&self, model: &str, response: &Value, cost_usd: f64, elapsed_ms: u64, api_key: &str) -> Result<Option<Value>, String> {
+    pub fn post_response(
+        &self,
+        model: &str,
+        response: &Value,
+        cost_usd: f64,
+        elapsed_ms: u64,
+        api_key: &str,
+    ) -> Result<Option<Value>, String> {
         let (tx, rx) = channel();
-        self.tx.send(JsCommand::PostResponse {
-            model: model.to_string(),
-            response: response.clone(),
-            cost_usd,
-            elapsed_ms,
-            api_key: api_key.to_string(),
-            reply: tx,
-        }).map_err(|e| format!("JS thread channel error: {}", e))?;
+        self.tx
+            .send(JsCommand::PostResponse {
+                model: model.to_string(),
+                response: response.clone(),
+                cost_usd,
+                elapsed_ms,
+                reply: tx,
+            })
+            .map_err(|e| format!("JS thread channel error: {}", e))?;
 
-        let result_str = rx.recv().map_err(|e| format!("JS thread reply error: {}", e))?;
-        let result: Value = serde_json::from_str(&result_str).map_err(|e| format!("Invalid reply: {}", e))?;
+        let result_str = rx
+            .recv()
+            .map_err(|e| format!("JS thread reply error: {}", e))?;
+        let result: Value =
+            serde_json::from_str(&result_str).map_err(|e| format!("Invalid reply: {}", e))?;
 
         if result.get("ok").and_then(|v| v.as_bool()) == Some(false) {
-            return Err(result.get("error").and_then(|v| v.as_str()).unwrap_or("unknown").to_string());
+            return Err(result
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string());
         }
 
         Ok(result.get("response").cloned())
@@ -382,18 +568,97 @@ impl JsPlugins {
 
 impl Drop for JsPlugins {
     fn drop(&mut self) {
-        drop(self.handle.take());
+        let _ = self.tx.send(JsCommand::Shutdown);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_PLUGIN_TEST: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn test_load_empty() {
         let plugins = JsPlugins::load(&[]);
         assert!(plugins.is_ok());
         assert!(plugins.unwrap().is_empty());
+    }
+
+    fn load_plugins(codes: &[&str]) -> JsPlugins {
+        let id = NEXT_PLUGIN_TEST.fetch_add(1, Ordering::Relaxed);
+        let base = std::env::temp_dir().join(format!("stoke-js-{}-{id}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let paths: Vec<String> = codes
+            .iter()
+            .enumerate()
+            .map(|(i, code)| {
+                let p = base.join(format!("{i}.js"));
+                std::fs::write(&p, code).unwrap();
+                p.to_string_lossy().into_owned()
+            })
+            .collect();
+        let result = JsPlugins::load(&paths).unwrap();
+        for p in paths {
+            let _ = std::fs::remove_file(p);
+        }
+        let _ = std::fs::remove_dir(base);
+        result
+    }
+
+    #[test]
+    fn two_plugins_compose_each_hook() {
+        let p=load_plugins(&[
+            "module.exports={pre_request:()=>({model:'one'}),prompt_filter:c=>({messages:[...c.messages,{content:'one'}]}),post_response:c=>({response:{...c.response,one:true}})};",
+            "module.exports={pre_request:c=>({routing:c.model,vote_models:[c.model]}),prompt_filter:c=>({messages:[...c.messages,{content:c.messages[0].content}]}),post_response:c=>({response:{...c.response,two:c.response.one}})};"
+        ]);
+        let r = p
+            .pre_request("original", "route", &[], "gateway-secret")
+            .unwrap();
+        assert_eq!(r.0.as_deref(), Some("one"));
+        assert_eq!(r.1.as_deref(), Some("one"));
+        assert_eq!(r.2, Some(vec!["one".into()]));
+        let (m, b) = p.prompt_filter(&[], "m", "gateway-secret").unwrap();
+        assert_eq!(b, None);
+        assert_eq!(m.unwrap().len(), 2);
+        let out = p
+            .post_response("m", &json!({}), 0.0, 1, "gateway-secret")
+            .unwrap()
+            .unwrap();
+        assert_eq!(out["two"], true);
+    }
+
+    #[test]
+    fn gateway_key_is_not_in_js_context() {
+        let p = load_plugins(&[
+            "module.exports={pre_request:c=>('api_key' in c?{block:'leaked'}:{model:'safe'})};",
+        ]);
+        assert_eq!(
+            p.pre_request("m", "r", &[], "gateway-secret").unwrap().3,
+            None
+        );
+    }
+
+    #[test]
+    fn block_reason_stops_pre_request_and_prompt_filter_chains() {
+        let p = load_plugins(&[
+            "module.exports={pre_request:()=>({block:'pre blocked'}),prompt_filter:()=>({block:'prompt blocked'})};",
+            "module.exports={pre_request:()=>({model:'too late'}),prompt_filter:c=>({messages:[...c.messages,{content:'too late'}]})};",
+        ]);
+
+        assert_eq!(
+            p.pre_request("m", "r", &[], "gateway-secret")
+                .unwrap()
+                .3
+                .as_deref(),
+            Some("pre blocked")
+        );
+        let (messages, block) = p.prompt_filter(&[], "m", "gateway-secret").unwrap();
+        assert_eq!(messages, Some(vec![]));
+        assert_eq!(block.as_deref(), Some("prompt blocked"));
     }
 }
