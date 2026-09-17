@@ -24,9 +24,14 @@ Stoke sends:
 {
   "messages": [{"role": "user", "content": "..."}],
   "model": "<model-id-from-your-Ollama>",
-  "api_key": "the-caller-key"
+  "key_id": "sha256:<opaque-caller-identifier>"
 }
 ```
+
+`key_id` is a stable SHA-256-derived identifier for the authenticated caller.
+The raw gateway credential is intentionally never included in webhook JSON.
+This is a contract migration: webhook consumers that used `api_key` must use
+`key_id` instead, and must not expect to authenticate requests with that value.
 
 Your endpoint returns one of three things:
 

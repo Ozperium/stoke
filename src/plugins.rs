@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use futures_util::StreamExt;
+use sha2::{Digest, Sha256};
 use std::time::Duration;
 
 pub const HEADROOM_MAX_BYTES: usize = 1024 * 1024;
@@ -114,7 +115,8 @@ pub struct PreRequestContext<'a> {
     pub model: &'a str,
     pub routing: &'a str,
     pub messages: &'a [Value],
-    pub api_key: &'a str,
+    /// Stable opaque identifier for the caller; the credential is never sent.
+    pub key_id: String,
     pub metadata: Value,
 }
 
@@ -143,7 +145,8 @@ pub struct PreRequestResult {
 pub struct PromptFilterContext<'a> {
     pub messages: &'a [Value],
     pub model: &'a str,
-    pub api_key: &'a str,
+    /// Stable opaque identifier for the caller; the credential is never sent.
+    pub key_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -163,7 +166,8 @@ pub struct PostResponseContext<'a> {
     pub response: &'a Value,
     pub cost_usd: f64,
     pub elapsed_ms: u64,
-    pub api_key: &'a str,
+    /// Stable opaque identifier for the caller; the credential is never sent.
+    pub key_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -184,6 +188,7 @@ impl Plugins {
     pub fn new(config: PluginConfig) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap_or_default();
         let headroom_token = std::env::var(HEADROOM_TOKEN_ENV)
@@ -293,7 +298,7 @@ impl Plugins {
                 model: &current_model,
                 routing: &current_routing,
                 messages,
-                api_key,
+                key_id: key_id(api_key),
                 metadata: metadata.clone(),
             };
             let resp = self
@@ -359,7 +364,7 @@ impl Plugins {
             let ctx = PromptFilterContext {
                 messages: &current_messages,
                 model,
-                api_key,
+                key_id: key_id(api_key),
             };
             let resp = self
                 .client
@@ -410,7 +415,7 @@ impl Plugins {
                 response: &current_response,
                 cost_usd,
                 elapsed_ms,
-                api_key,
+                key_id: key_id(api_key),
             };
             match self.client.post(url).json(&ctx).send().await {
                 Ok(resp) if resp.status().is_success() => {
@@ -427,6 +432,83 @@ impl Plugins {
         }
 
         current_response
+    }
+}
+
+fn key_id(api_key: &str) -> String {
+    let digest = Sha256::digest(api_key.as_bytes());
+    format!("sha256:{}", hex::encode(digest))
+}
+
+#[cfg(test)]
+mod webhook_security_tests {
+    use super::*;
+    use serde_json::json;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+    use std::thread;
+    use std::time::Instant;
+
+    #[test]
+    fn webhook_contexts_expose_only_a_stable_opaque_key_id() {
+        let secret = "gateway-secret-that-must-not-cross-the-boundary";
+        let messages = vec![json!({"role": "user", "content": "hello"})];
+        let response = json!({"choices": [{"message": {"content": "hi"}}]});
+        let pre = serde_json::to_value(PreRequestContext {
+            model: "model", routing: "single", messages: &messages,
+            key_id: key_id(secret), metadata: json!({}),
+        }).unwrap();
+        let filter = serde_json::to_value(PromptFilterContext {
+            messages: &messages, model: "model", key_id: key_id(secret),
+        }).unwrap();
+        let post = serde_json::to_value(PostResponseContext {
+            model: "model", response: &response, cost_usd: 0.1, elapsed_ms: 5,
+            key_id: key_id(secret),
+        }).unwrap();
+        for context in [pre, filter, post] {
+            assert!(!context.to_string().contains(secret));
+            assert!(context.get("api_key").is_none());
+            let id = context["key_id"].as_str().unwrap();
+            assert!(id.starts_with("sha256:") && id.len() == 71);
+            assert!(id.chars().skip(7).all(|c| c.is_ascii_hexdigit()));
+        }
+        assert_eq!(key_id(secret), key_id(secret));
+        assert_ne!(key_id(secret), key_id("different-secret"));
+    }
+
+    #[tokio::test]
+    async fn webhook_client_never_follows_redirects() {
+        let target = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let target_addr = target.local_addr().unwrap();
+        target.set_nonblocking(true).unwrap();
+        let reached = Arc::new(AtomicBool::new(false));
+        let target_reached = Arc::clone(&reached);
+        let target_thread = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_millis(500);
+            while Instant::now() < deadline {
+                match target.accept() {
+                    Ok(_) => { target_reached.store(true, Ordering::SeqCst); return; }
+                    Err(_) => thread::sleep(Duration::from_millis(10)),
+                }
+            }
+        });
+        let redirect_url = format!("http://{target_addr}/final");
+        let redirector = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let redirect_addr = redirector.local_addr().unwrap();
+        let redirect_thread = thread::spawn(move || {
+            let (mut stream, _) = redirector.accept().unwrap();
+            let mut request = [0_u8; 2048];
+            let _ = stream.read(&mut request);
+            write!(stream, "HTTP/1.1 302 Found\r\nLocation: {redirect_url}\r\nContent-Length: 2\r\n\r\n{{}}\r\n").unwrap();
+        });
+        let plugins = Plugins::new(PluginConfig {
+            pre_request: vec![format!("http://{redirect_addr}/start")], ..Default::default()
+        });
+        assert!(plugins.pre_request("model", "single", &[], "secret").await.is_err());
+        redirect_thread.join().unwrap();
+        target_thread.join().unwrap();
+        assert!(!reached.load(Ordering::SeqCst));
     }
 }
 
