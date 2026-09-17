@@ -51,7 +51,7 @@ until curl -fsS "http://127.0.0.1:$PROVIDER_PORT/health" >/dev/null 2>&1; do
 done
 (
     cd "$TMP"
-    STOKE_LEDGER_PATH="${TMP}/ledger.db" STOKE_API_KEYS=test-key OPENAI_API_KEY=upstream-key "$BIN" >"$TMP/stoke.log" 2>&1
+    exec env STOKE_LEDGER_PATH="${TMP}/ledger.db" STOKE_API_KEYS=test-key OPENAI_API_KEY=upstream-key "$BIN" >"$TMP/stoke.log" 2>&1
 ) &
 STOKE_PID=$!
 
@@ -88,7 +88,7 @@ assert capture["originator"] == "codex_cli_rs", capture
 assert capture["body"]["input"] == "hello", capture
 PY
 
-curl -fsSN \
+curl -fsSN -D "$TMP/stream.headers" \
     -H 'authorization: Bearer test-key' \
     -H 'content-type: application/json' \
     -H 'openai-beta: responses=experimental' \
@@ -96,18 +96,22 @@ curl -fsSN \
     -d '{"model":"gpt-test","input":"stream me","stream":true}' \
     "http://127.0.0.1:$STOKE_PORT/v1/responses" > "$TMP/stream.txt"
 
-python3 - "$TMP/stream.txt" "$TMP/capture.json" <<'PY'
+python3 - "$TMP/stream.txt" "$TMP/capture.json" "$TMP/stream.headers" <<'PY'
 import json
 import sys
 
 stream = open(sys.argv[1], encoding="utf-8").read()
 capture = json.load(open(sys.argv[2], encoding="utf-8"))
+headers = open(sys.argv[3], encoding="utf-8").read().lower()
 assert "event: response.output_text.delta" in stream, stream
 assert '"delta": "mock stream"' in stream, stream
 assert "event: response.completed" in stream, stream
 assert '"input_tokens": 13' in stream, stream
 assert capture["body"]["stream"] is True, capture
 assert capture["authorization"] == "Bearer upstream-key", capture
+assert "x-stoke-node: openai-test" in headers, headers
+assert "x-stoke-billing-mode:" not in headers, headers
+assert "x-stoke-cost:" not in headers, headers
 PY
 
 curl -fsS \
@@ -125,4 +129,71 @@ assert abs(key["spend_usd"] - expected) < 1e-9, (key, expected)
 assert abs(key["reserved_usd"]) < 1e-9, key
 PY
 
-printf 'responses non-stream + stream smoke: ok\n'
+# Subscription streaming uses a separate response builder and must disclose
+# flat-plan billing without fabricating a dollar cost.
+kill "$STOKE_PID" 2>/dev/null || true
+wait "$STOKE_PID" 2>/dev/null || true
+STOKE_PID=
+
+mkdir -p "$TMP/home/.codex"
+cat > "$TMP/home/.codex/auth.json" <<'EOF'
+{"tokens":{"access_token":"fixture-codex-token","account_id":"fixture-account","refresh_token":"fixture-refresh"}}
+EOF
+
+cat > "$TMP/stoke.toml" <<EOF
+[server]
+host = "127.0.0.1"
+port = $STOKE_PORT
+
+routing = "single"
+default_model = "gpt-test"
+
+[[providers]]
+name = "codex-test"
+type = "codex_subscription"
+base_url = "http://127.0.0.1:$PROVIDER_PORT/v1"
+tier = "subscription"
+models = ["gpt-test"]
+
+[[keys]]
+key = "test-key"
+budget_usd = 1.0
+EOF
+
+(
+    cd "$TMP"
+    exec env HOME="$TMP/home" STOKE_LEDGER_PATH="${TMP}/ledger-subscription.db" \
+        STOKE_API_KEYS=test-key \
+        STOKE_TEST_SUBSCRIPTION_BASES="http://127.0.0.1:$PROVIDER_PORT/v1" \
+        "$BIN" >"$TMP/stoke-subscription.log" 2>&1
+) &
+STOKE_PID=$!
+
+attempt=0
+until curl -fsS "http://127.0.0.1:$STOKE_PORT/health" >/dev/null 2>&1; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 50 ]; then
+        cat "$TMP/stoke-subscription.log" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+
+curl -fsSN -D "$TMP/subscription-stream.headers" \
+    -H 'authorization: Bearer test-key' \
+    -H 'content-type: application/json' \
+    -d '{"model":"gpt-test","input":"subscription stream","stream":true}' \
+    "http://127.0.0.1:$STOKE_PORT/v1/responses" > "$TMP/subscription-stream.txt"
+
+python3 - "$TMP/subscription-stream.txt" "$TMP/subscription-stream.headers" <<'PY'
+import sys
+
+stream = open(sys.argv[1], encoding="utf-8").read()
+headers = open(sys.argv[2], encoding="utf-8").read().lower()
+assert "event: response.completed" in stream, stream
+assert "x-stoke-node: codex-test" in headers, headers
+assert "x-stoke-billing-mode: chatgpt_subscription" in headers, headers
+assert "x-stoke-cost:" not in headers, headers
+PY
+
+printf 'responses non-stream + stream disclosure smoke: ok\n'

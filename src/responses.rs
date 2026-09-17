@@ -438,7 +438,7 @@ async fn forward_stream(
                 }
                 chunk
             });
-            Response::builder()
+            let mut output = Response::builder()
                 .header(
                     "content-type",
                     stream_content_type(provider.is_subscription(), upstream_content_type.as_ref()),
@@ -446,7 +446,11 @@ async fn forward_stream(
                 .header("cache-control", "no-cache")
                 .header("x-stoke-headroom", headroom_status.as_str())
                 .body(Body::from_stream(stream))
-                .unwrap()
+                .unwrap();
+            output
+                .headers_mut()
+                .extend(successful_stream_disclosure_headers(provider));
+            output
         }
         Ok(response) => {
             let status =
@@ -688,6 +692,20 @@ fn stream_content_type(is_subscription: bool, upstream: Option<&HeaderValue>) ->
     } else {
         HeaderValue::from_static("text/event-stream")
     }
+}
+
+fn successful_stream_disclosure_headers(provider: &ProviderConfig) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    if let Ok(value) = provider.name.parse() {
+        headers.insert("x-stoke-node", value);
+    }
+    if !response_emits_cost_header(provider) {
+        headers.insert(
+            BILLING_MODE_HEADER,
+            HeaderValue::from_static(SUBSCRIPTION_BILLING_MODE),
+        );
+    }
+    headers
 }
 
 fn responses_url(provider: &ProviderConfig) -> String {
@@ -1176,6 +1194,22 @@ mod tests {
         );
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
         assert_eq!(response.headers()["x-stoke-headroom"], "unavailable");
+    }
+
+    #[test]
+    fn streaming_success_discloses_node_and_subscription_billing_mode() {
+        let sub = subscription_provider();
+        let regular = provider("https://api.openai.com");
+
+        let sub_headers = successful_stream_disclosure_headers(&sub);
+        assert_eq!(sub_headers["x-stoke-node"], sub.name);
+        assert_eq!(sub_headers[BILLING_MODE_HEADER], SUBSCRIPTION_BILLING_MODE);
+        assert!(!sub_headers.contains_key("x-stoke-cost"));
+
+        let regular_headers = successful_stream_disclosure_headers(&regular);
+        assert_eq!(regular_headers["x-stoke-node"], regular.name);
+        assert!(!regular_headers.contains_key(BILLING_MODE_HEADER));
+        assert!(!regular_headers.contains_key("x-stoke-cost"));
     }
 
     fn metered_decision_for_test(
