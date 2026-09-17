@@ -68,16 +68,23 @@ replace_binaries() {
   src="$1"; mkdir -p "$INSTALL_DIR" || return 1
   [ -f "$src/stoke" ] && [ -f "$src/stoke-cli" ] || return 1
   chmod +x "$src/stoke" "$src/stoke-cli" || return 1
-  for binary in stoke stoke-cli; do
-    if [ -e "$INSTALL_DIR/$binary" ]; then
-      rm -f "$INSTALL_DIR/$binary.stoke-backup"
-      mv "$INSTALL_DIR/$binary" "$INSTALL_DIR/$binary.stoke-backup" || return 1
+  backed_up_stoke=0; backed_up_cli=0
+  if [ -e "$INSTALL_DIR/stoke" ]; then
+    rm -f "$INSTALL_DIR/stoke.stoke-backup" || return 1
+    mv "$INSTALL_DIR/stoke" "$INSTALL_DIR/stoke.stoke-backup" || return 1
+    backed_up_stoke=1
+  fi
+  if [ -e "$INSTALL_DIR/stoke-cli" ]; then
+    if ! rm -f "$INSTALL_DIR/stoke-cli.stoke-backup" || ! mv "$INSTALL_DIR/stoke-cli" "$INSTALL_DIR/stoke-cli.stoke-backup"; then
+      [ "$backed_up_stoke" = "1" ] && mv "$INSTALL_DIR/stoke.stoke-backup" "$INSTALL_DIR/stoke"
+      return 1
     fi
-  done
+    backed_up_cli=1
+  fi
   if ! mv "$src/stoke" "$INSTALL_DIR/stoke" || ! mv "$src/stoke-cli" "$INSTALL_DIR/stoke-cli"; then
     rm -f "$INSTALL_DIR/stoke" "$INSTALL_DIR/stoke-cli"
-    [ -f "$INSTALL_DIR/stoke.stoke-backup" ] && mv "$INSTALL_DIR/stoke.stoke-backup" "$INSTALL_DIR/stoke"
-    [ -f "$INSTALL_DIR/stoke-cli.stoke-backup" ] && mv "$INSTALL_DIR/stoke-cli.stoke-backup" "$INSTALL_DIR/stoke-cli"
+    [ "$backed_up_stoke" = "1" ] && mv "$INSTALL_DIR/stoke.stoke-backup" "$INSTALL_DIR/stoke"
+    [ "$backed_up_cli" = "1" ] && mv "$INSTALL_DIR/stoke-cli.stoke-backup" "$INSTALL_DIR/stoke-cli"
     return 1
   fi
 }

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 pub const HEADROOM_MAX_BYTES: usize = 1024 * 1024;
@@ -20,6 +21,22 @@ pub const HEADROOM_TOKEN_ENV: &str = "STOKE_HEADROOM_TOKEN";
 /// fat-fingered config: cloud instance-metadata endpoints (never a legitimate
 /// plugin target, and the classic credential-theft pivot), the unspecified
 /// address, and anything that isn't plain HTTP(S).
+fn is_metadata_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.octets() == [169, 254, 169, 254]
+                || v4.octets() == [169, 254, 170, 2]
+                || v4.is_unspecified()
+        }
+        IpAddr::V6(v6) => {
+            v6.is_unspecified()
+                || v6.is_multicast()
+                || v6.segments()[0] == 0xfd00
+                || v6.to_ipv4_mapped().is_some_and(|v4| is_metadata_ip(IpAddr::V4(v4)))
+        }
+    }
+}
+
 fn is_forbidden_url(url_str: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(url_str) else {
         return true; // Invalid URL → refuse
@@ -33,30 +50,46 @@ fn is_forbidden_url(url_str: &str) -> bool {
         return true; // No file://, gopher://, etc.
     }
 
-    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        match ip {
-            std::net::IpAddr::V4(v4) => {
-                // 169.254.169.254 (AWS/GCP/Azure) and 169.254.170.2 (ECS task role)
-                let is_metadata = v4.octets() == [169, 254, 169, 254]
-                    || v4.octets() == [169, 254, 170, 2];
-                if is_metadata || v4.is_unspecified() {
-                    return true;
-                }
-            }
-            std::net::IpAddr::V6(v6) => {
-                // fd00:ec2::254 is the AWS IMDS IPv6 endpoint
-                if v6.is_unspecified() || v6.is_multicast() || v6.segments()[0] == 0xfd00 {
-                    return true;
-                }
-            }
+    let host_ip = host.strip_prefix('[').and_then(|value| value.strip_suffix(']')).unwrap_or(host);
+    if let Ok(ip) = host_ip.parse::<IpAddr>() {
+        if is_metadata_ip(ip) {
+            return true;
         }
     } else {
         let blocked_hosts = ["metadata.google.internal", "metadata"];
-        if blocked_hosts.iter().any(|h| host.eq_ignore_ascii_case(h)) {
+        let normalized = host.trim_end_matches('.');
+        if blocked_hosts.iter().any(|h| normalized.eq_ignore_ascii_case(h)) {
             return true;
         }
     }
     false
+}
+
+async fn webhook_client(url_str: &str) -> Result<reqwest::Client, String> {
+    if is_forbidden_url(url_str) {
+        return Err("forbidden webhook URL (metadata endpoint or non-HTTP scheme)".to_string());
+    }
+    let url = reqwest::Url::parse(url_str).map_err(|error| error.to_string())?;
+    let mut builder = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy();
+    if let Some(host) = url.domain() {
+        let port = url.port_or_known_default().ok_or_else(|| "webhook URL has no usable port".to_string())?;
+        let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|error| format!("could not resolve webhook host: {}", error))?
+            .collect();
+        if addrs.is_empty() {
+            return Err("webhook host resolved to no addresses".to_string());
+        }
+        if addrs.iter().any(|addr| is_metadata_ip(addr.ip())) {
+            return Err("webhook host resolves to a metadata endpoint".to_string());
+        }
+        // Pin the validated addresses so a second DNS lookup cannot rebind the request.
+        builder = builder.resolve_to_addrs(host, &addrs);
+    }
+    builder.build().map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -81,7 +114,9 @@ mod url_tests {
         assert!(is_forbidden_url("http://169.254.169.254/latest/meta-data/"));
         assert!(is_forbidden_url("http://169.254.170.2/v2/credentials"));
         assert!(is_forbidden_url("http://metadata.google.internal/computeMetadata/v1/"));
+        assert!(is_forbidden_url("http://metadata.google.internal./computeMetadata/v1/"));
         assert!(is_forbidden_url("http://METADATA/computeMetadata"));
+        assert!(is_forbidden_url("http://[::ffff:169.254.169.254]/latest/meta-data/"));
         assert!(is_forbidden_url("http://0.0.0.0:9100/"));
         assert!(is_forbidden_url("file:///etc/passwd"));
         assert!(is_forbidden_url("gopher://evil/"));
@@ -179,18 +214,12 @@ pub struct PostResponseResult {
 
 pub struct Plugins {
     config: PluginConfig,
-    client: reqwest::Client,
     headroom_client: Option<reqwest::Client>,
     headroom_token: Option<String>,
 }
 
 impl Plugins {
     pub fn new(config: PluginConfig) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap_or_default();
         let headroom_token = std::env::var(HEADROOM_TOKEN_ENV)
             .ok()
             .filter(|token| !token.is_empty());
@@ -207,7 +236,7 @@ impl Plugins {
         } else {
             None
         };
-        Self { config, client, headroom_client, headroom_token }
+        Self { config, headroom_client, headroom_token }
     }
 
     pub fn has_pre_request(&self) -> bool {
@@ -301,8 +330,10 @@ impl Plugins {
                 key_id: key_id(api_key),
                 metadata: metadata.clone(),
             };
-            let resp = self
-                .client
+            let client = webhook_client(url)
+                .await
+                .map_err(|e| format!("plugin {} refused: {}", url, e))?;
+            let resp = client
                 .post(url)
                 .json(&ctx)
                 .send()
@@ -366,8 +397,10 @@ impl Plugins {
                 model,
                 key_id: key_id(api_key),
             };
-            let resp = self
-                .client
+            let client = webhook_client(url)
+                .await
+                .map_err(|e| format!("filter {} refused: {}", url, e))?;
+            let resp = client
                 .post(url)
                 .json(&ctx)
                 .send()
@@ -417,7 +450,14 @@ impl Plugins {
                 elapsed_ms,
                 key_id: key_id(api_key),
             };
-            match self.client.post(url).json(&ctx).send().await {
+            let client = match webhook_client(url).await {
+                Ok(client) => client,
+                Err(error) => {
+                    tracing::warn!("post_response plugin {} refused: {}", url, error);
+                    continue;
+                }
+            };
+            match client.post(url).json(&ctx).send().await {
                 Ok(resp) if resp.status().is_success() => {
                     if let Ok(result) = resp.json::<PostResponseResult>().await {
                         if let Some(ref r) = result.response {

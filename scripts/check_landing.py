@@ -3,7 +3,10 @@
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
+import os
 import re
+import subprocess
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -107,4 +110,24 @@ handler = (ROOT / "functions" / "events.js").read_text()
 assert "INSERT INTO events" in handler and "panel_demo_clicked" in handler
 wrangler = (ROOT / "wrangler.toml").read_text()
 assert "d1_databases" in wrangler and "c04effbf-1293-4b35-84d3-9fb47519ed73" in wrangler
+
+# A failed second backup must restore the first installed binary.
+installer = (LANDING / "install.sh").read_text()
+replace_fn = installer[installer.index("replace_binaries() {"):installer.index("\nrollback_binaries()")]
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    staged, installed, fake_bin = root / "staged", root / "installed", root / "bin"
+    staged.mkdir(); installed.mkdir(); fake_bin.mkdir()
+    for name, value in (("stoke", "new-stoke"), ("stoke-cli", "new-cli")):
+        (staged / name).write_text(value)
+        (installed / name).write_text(value.replace("new", "old"))
+    fake_mv = fake_bin / "mv"
+    fake_mv.write_text("#!/bin/sh\ncase \"$1:$2\" in *'/installed/stoke-cli:'*'/installed/stoke-cli.stoke-backup') exit 1;; esac\nexec /bin/mv \"$@\"\n")
+    fake_mv.chmod(0o755)
+    probe = root / "probe.sh"
+    probe.write_text(f"{replace_fn}\nreplace_binaries \"$1\" || true\ntest \"$(cat \"$INSTALL_DIR/stoke\")\" = old-stoke\ntest \"$(cat \"$INSTALL_DIR/stoke-cli\")\" = old-cli\n")
+    env = os.environ.copy()
+    env.update({"PATH": f"{fake_bin}:{env['PATH']}", "INSTALL_DIR": str(installed)})
+    subprocess.run(["sh", str(probe), str(staged)], env=env, check=True)
+
 print(f"landing checks passed: {len(route_paths)} routes, 24 capabilities, {len(urls)} sitemap URLs")

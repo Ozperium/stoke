@@ -450,14 +450,21 @@ fn generate_api_key() -> Result<String, String> {
     Ok(hex::encode(bytes))
 }
 
-fn write_owner_file(path: &std::path::Path, content: &str) -> Result<(), String> {
-    std::fs::write(path, content)
-        .map_err(|error| format!("could not write {}: {}", path.display(), error))?;
+fn write_new_owner_file(path: &std::path::Path, content: &str) -> Result<(), String> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|error| format!("could not protect {}: {}", path.display(), error))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)
+        .map_err(|error| format!("could not create {}: {}", path.display(), error))?;
+    if let Err(error) = file.write_all(content.as_bytes()) {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err(format!("could not write {}: {}", path.display(), error));
     }
     Ok(())
 }
@@ -470,12 +477,12 @@ fn write_setup_files(config_path: &std::path::Path, config: &str, env_path: &std
             env_path.display()
         ));
     }
-    let suffix = format!(".stoke-setup-{}", std::process::id());
+    let suffix = format!(".stoke-setup-{}", generate_api_key()?);
     let name = |p: &std::path::Path| p.file_name().unwrap_or_default().to_string_lossy().into_owned();
     let ct = config_path.with_file_name(format!(".{}{}", name(config_path), suffix));
     let et = env_path.with_file_name(format!(".{}{}", name(env_path), suffix));
-    write_owner_file(&ct, config)?;
-    if let Err(e) = write_owner_file(&et, env) {
+    write_new_owner_file(&ct, config)?;
+    if let Err(e) = write_new_owner_file(&et, env) {
         let _ = std::fs::remove_file(&ct);
         return Err(e);
     }
@@ -940,6 +947,22 @@ mod tests {
         let env = root.join("missing").join(".env");
         assert!(write_setup_files(&config, "config", &env, "secret", false).is_err());
         assert!(!config.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn setup_temp_write_refuses_symlinks() {
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir().join(format!("stoke-setup-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("captured-secret");
+        let link = root.join("predictable-temp");
+        std::fs::write(&target, "unchanged").unwrap();
+        symlink(&target, &link).unwrap();
+        assert!(write_new_owner_file(&link, "secret").is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "unchanged");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
