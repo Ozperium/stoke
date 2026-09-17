@@ -1,6 +1,6 @@
 ---
 name: stoke
-description: Put a coding agent behind Stoke — a gateway that enforces hard budget caps, rate limits, and a runaway-loop kill switch before any model API is called. Use when the user wants to cap what an agent can spend, stop a runaway/looping agent, route agent traffic to local models, or asks to install or configure Stoke.
+description: Put a coding agent behind Stoke with fail-closed auth, hard caps, rate limits, and loop protection before provider calls. Use when configuring, installing, or routing an agent through Stoke.
 ---
 
 Install and configure Stoke so that every model call this agent makes passes through a budget cap and a loop breaker first. Requests over the cap, or caught in a retry loop, are refused with `429` before a provider is contacted.
@@ -13,7 +13,7 @@ Work through the steps in order. Verify each one before moving on — an enforce
 curl -sSf https://stokegate.com/install | sh -s -- --version nightly
 ```
 
-This downloads a checksum-verified static binary (macOS arm64/x64, Linux x64/arm64) and falls back to compiling from source on other platforms. It installs `stoke` and `stoke-cli` to `~/.local/bin`. Confirm:
+The public stable release is `v0.2.1` at commit `403c884`; `nightly` tracks newer main builds and is not stable. The package has two binaries: `stoke` is the server and owns `run claude|codex`; `stoke-cli` owns setup, init, serve, inspection, login, and ledger commands. Verify the downloaded artifact and checksum before deployment. Confirm:
 
 ```sh
 stoke-cli version
@@ -72,9 +72,9 @@ STOKE_API_KEY=<gateway-key> stoke run claude
 STOKE_API_KEY=<gateway-key> stoke run codex
 ```
 
-Claude Code requires an `anthropic` provider and uses native `/v1/messages` passthrough. Codex requires an OpenAI-compatible provider and uses native `/v1/responses` passthrough. Neither path translates protocols onto local models, and Codex uses the gateway's metered API credential rather than ChatGPT subscription/OAuth billing.
+Claude Code requires an `anthropic` provider and uses native `/v1/messages` passthrough. Codex uses native `/v1/responses` passthrough. A gateway-owned ChatGPT route instead uses `type = "codex_subscription"`, the exact `https://chatgpt.com/backend-api/codex` endpoint, no static provider key, and the native `~/.codex/auth.json` credential. Subscription traffic is not dollar-metered, but gateway auth, rate limits, loop detection, and provider plan limits still apply. This is distinct from a metered `openai_compatible` provider.
 
-Send the key as `Authorization: Bearer agent-key`.
+Send the key with `x-stoke-key: gateway-key` or `Authorization: Bearer gateway-key`.
 
 ## 6. Prove enforcement actually works
 

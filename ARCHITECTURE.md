@@ -1,6 +1,7 @@
 # Stoke Architecture
 
-Stoke is a single Rust binary (release build ~5.5 MB, zero runtime dependencies) that sits
+Stoke's server is a Rust binary (the referenced release build is ~5.5 MB; `stoke-cli` is a
+separate companion binary) that sits
 between AI agents and model providers. It exposes OpenAI Chat Completions
 (`/v1/chat/completions`), OpenAI Responses (`/v1/responses`), and Anthropic Messages
 (`/v1/messages`) endpoints, including native SSE and tool-call passthrough, and enforces
@@ -15,10 +16,10 @@ Two binaries build from this crate (`Cargo.toml`):
 | `stoke` | `src/main.rs` | The gateway server (default port 8787), plus `run claude` / `run codex` client launchers |
 | `stoke-cli` | `src/cli.rs` | Companion CLI: `init`, `serve`, `route`, `bench`, `models`, `pricing`, `routes`, `version` |
 
-Install options: build from a clone with `cargo build --release`, download prebuilt
-`stoke`/`stoke-cli` binaries from GitHub Releases (published on tagged builds by CI,
-`.github/workflows/release.yml`), or build the static Docker image from the included
-`Dockerfile`.
+The public stable release is `v0.2.1` at commit `403c884`; this document describes the
+newer main/nightly checkout unless a section says otherwise. Install options are a source
+build, a verified release artifact, or the included Dockerfile; do not treat nightly as
+stable.
 
 The launchers are implemented in `src/client_run.rs`. They change only the child
 process environment/configuration: Claude Code receives Stoke as its Anthropic base URL,
@@ -54,7 +55,7 @@ inside the protected surface — model inventory and live load are reconnaissanc
 The rules (`Auth` in `src/budget.rs`):
 
 - `STOKE_API_KEYS` set (comma-separated): requests must carry a matching
-  `Authorization: Bearer <key>` header.
+  `Authorization: Bearer <gateway-key>` header (or the accepted equivalent Stoke key header).
 - No keys configured and `STOKE_DEV` is not `1`: **all requests are rejected** (401).
   There is no accidentally-open state; you must opt into dev mode explicitly.
 - `STOKE_DEV=1` with no keys: requests run as the `anonymous` identity (local dev only).
@@ -390,7 +391,7 @@ Config is TOML, searched at `./stoke.toml` then `~/.config/stoke/stoke.toml`
 
 ```toml
 routing = "single"         # optional default routing mode; top-level, above [server]
-default_model = "qwen3:8b" # optional; top-level keys must precede the first [section]
+default_model = "<model-id-from-your-provider>" # optional; illustrative placeholder only
 
 [server]
 host = "0.0.0.0"   # default 127.0.0.1
@@ -403,7 +404,7 @@ base_url = "http://127.0.0.1:11434/v1"
 api_key = "ollama-local"             # inline key, or:
 # api_key_env = "OPENROUTER_API_KEY" # preferred — resolve from environment
 tier = "local"                       # "local" | "remote" | "cloud"
-# models = ["qwen3:8b", "phi4-mini"] # optional; Ollama nodes are auto-discovered by polling
+# models = ["your-model:tag"] # optional; Ollama nodes are auto-discovered by polling
 
 # A second Stoke gateway as a provider (federation)
 # [[providers]]
@@ -477,20 +478,30 @@ Environment variables (server):
 | `OLLAMA_BASE_URL` | Where embeddings are generated (default `http://127.0.0.1:11434`) |
 | `STOKE_NODE_POLL_SECS` | Node registry poll interval in seconds (default 10) |
 
-## HTTP surface
+## HTTP surface and CLI
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
 | `GET /health` | open | Liveness probe |
 | `POST /v1/chat/completions` | required | OpenAI-compatible chat, SSE streaming, `tool_calls` passthrough |
-| `POST /v1/messages` | required | Anthropic Messages API — same enforcement, then passthrough to an `anthropic`-type provider (`src/messages.rs`); cost in the `x-stoke-cost` header. Claude Code via `ANTHROPIC_BASE_URL` |
+| `POST /v1/messages` | required | Anthropic Messages native passthrough, plus explicitly selected local Chat/Codex bridge aliases; native provider/translation feature limits apply |
+| `POST /v1/responses` | required | Native OpenAI Responses JSON/SSE passthrough; metered usage is charged from `response.completed`; subscription traffic is not dollar-metered |
 | `POST <route profile paths>` | required | Same handler with the profile's pinned defaults |
-| `GET /v1/models` | required | Models known from config |
-| `GET /v1/nodes` | required | Live node registry snapshot |
+| `GET /ui` | required | Embedded control-room UI; browser Basic Auth uses a Stoke API key as password |
+| `POST /ui/demo` | required | Five-request enforcement demo |
+| `GET /ui/summary`, `/ui/events`, `/ui/demo` | required | Dashboard summary, SSE event feed, and demo action |
+| `GET /v1/models` | required | Actually routable configured/discovered model catalogue |
+| `GET /v1/nodes` | required | Live node registry; `models_meta` may contain model metadata/performance |
 | `GET /v1/budget` | required | Per-key spend, limits, recent request counts, and the receipts ledger (zero-marginal share + cloud list-price counterfactual, estimates) |
 | `GET /v1/pricing` | required | The configured prices behind `stoke_cost` |
 | `GET /v1/cache` | required | Cache entry/hit counts |
 | `GET /v1/routes` | required | Configured route profiles |
+| `GET /v1/ttft` | required | Legacy tracker surface; not fed by the main request path, so do not treat it as populated provider telemetry |
+
+CLI commands are split by binary: `stoke` serves the gateway and launches `stoke run
+claude|codex`; `stoke-cli` provides `setup`, `init`, `serve`, `route`, `bench`, `models`,
+`pricing`, `routes`, `login-claude`, `ledger`, and `version`. `stoke login-claude` is not
+the implemented command; use the binary that owns the command (`stoke-cli login-claude`).
 
 ## Failure semantics
 
@@ -527,16 +538,22 @@ against real processes:
   inventory import over `/v1/nodes`, cross-gateway routing, the hop guard, and cycle
   safety.
 
-## Roadmap (not built yet)
+## Remaining work (not built or not evidenced as published)
 
 These do not exist in the code today and nothing above claims them:
 
-- Anthropic Messages API endpoint (`/v1/messages`) for native Claude Code support.
-- Homebrew formula and a published container image (a `Dockerfile` builds one today,
-  but nothing is pushed to a registry yet).
+- General alias/model-mapping UX beyond explicit discovered/configured aliases, and broader
+  server-tool coverage. The Messages endpoint and narrow bridges are shipped.
+- Homebrew formula and a published container image (a `Dockerfile` builds one today, but
+  publication is not evidenced here).
 - Per-key loop-detection thresholds via config (per-key budgets and rate limits already
   ship in the `[[keys]]` table; loop thresholds are still global constants).
 - Quota-aware cloud escalation and degrade-to-local policy actions.
 - Per-tenant usage entitlement enforcement.
 - Published enforcement benchmarks (overhead, time-to-trip, false-positive rate).
 - OpenTelemetry traces and Prometheus metrics.
+
+For the complete activation/auth/provider/gate/proof matrix, see
+[`docs/capability-matrix.md`](docs/capability-matrix.md). The source contains helper
+implementations that are not gateway capabilities: `parallel_vote` and `deliberation` are
+not selected by main dispatch; `test_vote` and `cascade_test` are explicitly refused.

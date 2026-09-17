@@ -1,6 +1,8 @@
 # Smart Routing Design
 
-Status: v0 (node registry + placement) + v1 (streaming in-flight, federation) implemented · July 2026
+Status: node registry, placement, streaming in-flight, federation, auto-routing, and
+hedging are implemented in the audited main checkout. Stable `v0.2.1` is commit
+`403c884`; this document's newer behavior is main/nightly until promoted.
 
 ## The core insight
 
@@ -121,18 +123,18 @@ prefill wins, the loser's connection drops. Duplicate local compute buys tail
 latency. Hop headers ride on both attempts, so hedging across a federated
 gateway is loop-safe. Covered by `scripts/smoke.sh`.
 
-### 2. Model aliases (next)
+### 2. Explicit model aliases (implemented narrowly)
 
-Policy-defined names (`coder`, `fast`, `heavy`) in TOML mapping to preference-ordered
-model lists with an optional gated cloud escalation target. Pinned real model names
-bypass aliasing entirely — passthrough stays honest.
+Messages aliases are implemented for routable local/remote OpenAI-compatible providers
+and named Codex subscription providers. See `docs/capability-matrix.md`. General
+policy-defined alias UX (`coder`, `fast`, `heavy`) and broader mapping remain future work.
 
-### 3. Escalation ladder with gates (next)
+### 3. Subscription fallback (implemented, opt-in)
 
-Per alias/class, an ordered chain local → remote → cloud where moving **up** is gated
-(task class allowed to spend quota ∧ cloud not in 429-cooldown ∧ per-key budget OK)
-and falling **down** is automatic (429 → provider cooldown + degrade to local; timeouts
-and connection failures → next rung). Cloud is a scarce resource spent deliberately.
+Claude subscription fallback can target a named Codex subscription provider and, when
+explicitly allowed, local/remote OpenAI-compatible providers. It is off by default and
+only admits qualified subscription limit/rate/overload refusals. It is not a general
+cloud escalation ladder; provider/model changes and billing are disclosed.
 
 ### 4. Classification (demoted)
 

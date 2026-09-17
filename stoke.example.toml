@@ -3,14 +3,14 @@
 # Stoke rejects all requests without auth: set STOKE_API_KEYS=key1,key2
 # (or STOKE_DEV=1 for local-only development).
 
-[server]
-host = "127.0.0.1"   # use 0.0.0.0 to serve other machines on your LAN (auth required)
-port = 8787
-
 # Top-level defaults (must sit above the first [section] header)
 routing = "single"        # "single" (node-aware placement) or "auto" (classify then route)
 # Run `stoke-cli init` to fill this in from the models on your own Ollama.
 default_model = "your-model:tag"
+
+[server]
+host = "127.0.0.1"   # use 0.0.0.0 to serve other machines on your LAN (auth required)
+port = 8787
 
 # ─── Providers ──────────────────────────────────────────────────
 
@@ -124,8 +124,8 @@ tier = "local"
 # Worker auth is read from STOKE_HEADROOM_TOKEN and sent only as Bearer.
 # The worker receives output strings only; request/response are capped at 1 MiB and 128 outputs.
 
-# JS/TS plugins (requires `cargo build --features js-plugins`)
-# [plugins]
+# JS/TS plugins (requires `cargo build --features js-plugins`; keep under the
+# same [plugins] table as the webhook settings above)
 # scripts = ["plugins/pii-redact.js"]
 
 

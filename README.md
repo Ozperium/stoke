@@ -1,8 +1,8 @@
 # Stoke
 
-**The kill switch for runaway AI. Hard budget caps, loop detection, local-first routing — in one Rust binary.**
+**A self-hosted gateway for controlling model traffic: hard budget caps, loop detection, and local-first routing.**
 
-Status: pre-release, built in the open, dogfooded daily by the author on a real two-Mac + Ollama Cloud setup. MIT licensed. EU-based project.
+Status: public source is newer than stable `v0.2.1`. The stable tag is commit `403c884`; this checkout is main/nightly work after that tag. MIT licensed. Stoke ships no models or provider credits.
 
 ## Why
 
@@ -12,7 +12,7 @@ Enforce, don't just observe.
 
 ## What it does today
 
-Everything below is in the code now, covered by tests or the shipped smoke scripts. Anything not yet true lives under [Roadmap](#roadmap).
+Everything below is implemented in this checkout; the proof column in the capability matrix records the relevant source/tests/smokes. Runtime availability still depends on your provider configuration. Anything not implemented or not gateway-selectable is explicitly marked.
 
 ### Enforcement primitives
 
@@ -22,7 +22,7 @@ Everything below is in the code now, covered by tests or the shipped smoke scrip
 
 ### Node-aware routing
 
-A background registry polls each Ollama node's `/api/tags` (models pulled) and `/api/ps` (models loaded in RAM). Placement prefers warm nodes, balances the same model across machines by live in-flight count, breaks ties with a latency EWMA, fails over automatically, and excludes unreachable nodes. Streaming requests count as in-flight for their entire lifetime, prefill included — and every stream *teaches* the registry: time-to-first-token and tokens/sec are measured per model per node. Context windows and tool-calling capability come from `/api/show`.
+A background registry polls each pollable Ollama node's `/api/tags` (models pulled) and `/api/ps` (models loaded in RAM). Placement prefers warm nodes, balances by live in-flight count, breaks ties with latency EWMA, fails over automatically, and excludes unreachable nodes. Streaming requests count as in-flight for their entire lifetime. Per-model stream performance is recorded for routing and federation metadata; the legacy `/v1/ttft` tracker is scaffolding and is not a populated provider-telemetry claim. Context windows and tool-calling capability come from `/api/show`.
 
 Non-streaming responses carry a `stoke_route` field explaining the decision — the chosen node and why every candidate ranked where it did. For streamed requests the same placement is logged and visible via `GET /v1/nodes`. Routing decisions are always inspectable.
 
@@ -123,7 +123,7 @@ api_key_env = "STUDIO_STOKE_KEY"
 tier = "remote"
 ```
 
-The peer's model inventory, warm state, **live load, and measured performance** (context windows, tool capability, per-model TTFT and tokens/sec) are imported via its `/v1/nodes` — richer signals than raw Ollama can report, so even federated models get real latency predictions. Forwarded requests carry an `x-stoke-hop` header and federation depth is exactly one hop: a deliberate A↔B cycle cannot loop (there is a shipped test script that proves it).
+The peer's model inventory, warm state, live load, and available `models_meta` are imported via its `/v1/nodes`. Forwarded requests carry an `x-stoke-hop` header and federation depth is exactly one hop: a deliberate A↔B cycle cannot loop. Treat measured performance as an internal routing signal, not a published latency promise.
 
 The practical win: Ollama on each machine stays bound to `127.0.0.1`. Stoke is the only network-facing door, and it requires auth.
 
@@ -143,7 +143,7 @@ Because prompts route to your own machines by default, they never leave your inf
 - **Plugins** — webhook hooks (`pre_request`, `prompt_filter`, `post_response`) in any language; JS/TS plugins behind a compile-time feature flag (`--features js-plugins`); built-in PII redaction and JSONL audit log.
 - **OpenAI-compatible** — `/v1/chat/completions` passthrough including SSE streaming and `tool_calls`. Works with any OpenAI-compatible client or agent.
 
-Single Rust binary (~5.5 MB release build), zero runtime dependencies, TOML config, default port 8787.
+The server release binary is approximately 5.5 MB in the referenced build; the package also ships a separate `stoke-cli` companion binary. Both use TOML config and default to port 8787. No runtime Python dependency is required for the core gateway.
 
 ### Crash recovery for the durable budget ledger
 
@@ -163,13 +163,13 @@ The ledger path follows the gateway's: `STOKE_LEDGER_PATH`, else `~/.stoke/ledge
 
 The product boundary and the answer to “where do the models come from?” are recorded in [`docs/control-plane-positioning.md`](docs/control-plane-positioning.md). Stoke is a control plane for capacity you attach; it does not ship a hidden model catalogue or provider credits.
 
-Static binaries for macOS (arm64/x64) and Linux (x64/arm64) are built from every commit on `main` and published to a rolling `nightly` prerelease. The installer picks the right one, verifies its checksum, and falls back to compiling from source on any other platform.
+The public repository has a stable `v0.2.1` at commit `403c884`. Main is newer and is published through the rolling `nightly` channel when release CI succeeds; nightly is not the stable release. Verify the downloaded asset and checksum before treating it as a deployment artifact.
 
 ```bash
 curl -sSf https://stokegate.com/install | sh -s -- --version nightly
 ```
 
-There is no tagged stable release yet, so plain `| sh` (which resolves `latest`) will compile from source until the first version is cut. To build it yourself:
+For the stable line, obtain the `v0.2.1` release asset and verify its published checksum. For main/nightly behavior, use the explicit nightly channel. To build the checked-out source yourself:
 
 ```bash
 git clone https://github.com/Ozperium/stoke.git
@@ -192,7 +192,7 @@ For a fully manual configuration, use this minimal `stoke.toml` for a single loc
 
 ```toml
 routing = "single"
-default_model = "qwen3:8b"
+default_model = "<model-id-from-your-Ollama>"
 
 [server]
 host = "127.0.0.1"
@@ -222,7 +222,7 @@ Talk to it:
 curl http://localhost:8787/v1/chat/completions \
   -H "Authorization: Bearer stk-mykey" \
   -H "Content-Type: application/json" \
-  -d '{"model": "qwen3:8b", "messages": [{"role": "user", "content": "Say hello."}]}'
+  -d '{"model": "<model-id-from-your-Ollama>", "messages": [{"role": "user", "content": "Say hello."}]}'
 ```
 
 Point your agent at it — any OpenAI-compatible client works by setting the base URL. OpenCode is verified end-to-end: configure an OpenAI-compatible provider with
@@ -314,7 +314,7 @@ tier = "local"
 name = "studio"
 base_url = "http://192.168.1.20:11434/v1"
 tier = "remote"
-models = ["qwen3:8b", "llama3.3", "gemma4:e4b-mlx"]
+models = ["<model-id-from-your-Ollama>", "llama3.3", "gemma4:e4b-mlx"]
 ```
 
 The registry polls both nodes and places each request on whichever machine has the model warm and the least load.
@@ -342,9 +342,9 @@ The registry polls both nodes and places each request on whichever machine has t
 
 Subscription traffic (e.g. Claude Max/Pro seats) is quota-world, not dollar-world — there is no per-request price to meter, so Stoke cannot dollar-cap it. It can still rate-limit it and kill loops in it. Budget caps in USD apply to metered API traffic, where a request has a price.
 
-## Release v0.2.0
+## Stable and nightly scope
 
-This v0.2.0 release documents cache identity/policy, bounded exact coalescing, validated client retry hints, and native Responses gateway-owned Codex authentication alongside Ollama. Model IDs are discovered or explicitly configured; Stoke ships no model defaults. Hermes is one verified client path, not a hardcoded product dependency. Optional Headroom is included in the release, disabled by default. See the [optional Headroom guide](docs/guides/optional-headroom.md) for the macOS arm64 dependency lock, authenticated worker, off switch and protocol limits. It compacts eligible JSON tool-result whitespace before native Responses dispatch; it does not compress streamed responses or promise general savings.
+Stable `v0.2.1` is the public release at commit `403c884`. This checkout is newer main/nightly documentation and may contain changes not present in that stable artifact. Model IDs are discovered or explicitly configured; Stoke ships no model defaults. Cache identity/policy, bounded exact coalescing, validated retry hints, native Responses/Codex authentication, and optional Headroom are documented capabilities of the audited checkout, but verify the target artifact before deployment. Headroom is disabled by default and only filters eligible Responses function outputs; it does not compress streamed responses or promise general savings. See the [optional Headroom guide](docs/guides/optional-headroom.md).
 
 ## Verification
 
@@ -364,20 +364,18 @@ cargo test                       # unit + integration tests
 
 Both smoke scripts need only `python3`, `curl`, and `cargo`; no Ollama required.
 
-## Roadmap
+## Remaining work (not shipped)
 
 Planned, not built. Nothing here is a current-feature claim.
 
-- [x] Anthropic Messages API endpoint (`/v1/messages`) — Claude Code via `ANTHROPIC_BASE_URL`, enforced passthrough to an `anthropic` provider *(shipped)*
-- [x] OpenAI Responses API endpoint (`/v1/responses`) and `stoke run claude|codex` launchers *(shipped)*
-- [x] Anthropic ↔ OpenAI translation, so Claude Code can run against your **local** models — `/v1/messages` alias bridge to `codex_subscription` (Responses) and `openai_compatible` tier-`local` chat providers *(shipped)*
-- [ ] Homebrew formula and Docker images *(release CI and Dockerfile are in the repo; first tagged release pending)*
-- [x] Cost accounting for streamed responses (SSE usage parsing) so streamed spend counts against budget caps
-- [x] Quota-aware subscription fallback: qualified Claude-plan refusals (usage limit / rate limit / overload) can degrade to a named Codex subscription or local models, off by default and disclosed via response headers *(shipped)*
+- General model-mapping UX beyond explicit aliases and broader server-tool coverage.
+- Homebrew formula and a published container image (a Dockerfile exists; publication is not evidenced here).
 - [ ] Per-key loop-detection thresholds in TOML (budget caps and rate limits are already configured per key today)
 - [ ] Per-tenant usage entitlement enforcement (per-customer caps for AI products — if you need this, open an issue and talk to us)
 - [ ] Enforcement benchmark harness with published p99 overhead, time-to-trip, and false-positive rates
 - [ ] OpenTelemetry traces and Prometheus metrics
+
+See the [supported capability and protocol matrix](docs/capability-matrix.md) for the current boundary, activation, auth, gates, caveats, and proof commands. Do not infer shipped capability from research names such as `parallel_vote`, `deliberation`, `test_vote`, or `cascade_test`: the first two are not selected by the gateway dispatcher, and the latter two are refused.
 
 ## Stoke and LiteLLM
 

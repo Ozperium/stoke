@@ -12,7 +12,7 @@ Claude Code on a metered Anthropic API key can retry a failed tool call, re-send
 
 ## How this works
 
-Stoke is a single Rust binary (~5.5 MB) that listens on `127.0.0.1:8787` and speaks the Anthropic Messages API on `POST /v1/messages`. You point `ANTHROPIC_BASE_URL` at it. On every request Stoke runs its enforcement — auth, budget cap, rate limit, loop breaker — and only then forwards the request to Anthropic. Nothing that trips a check ever reaches Anthropic, so it never costs a token.
+Stoke's server binary (with a separate `stoke-cli` companion) listens on `127.0.0.1:8787` and speaks the Anthropic Messages API on `POST /v1/messages`. You point `ANTHROPIC_BASE_URL` at it. On every request Stoke runs its enforcement — auth, budget cap, rate limit, loop breaker — and only then forwards the request to Anthropic. Nothing that trips a check ever reaches Anthropic, so it never costs a token.
 
 Be clear about the scope: **this forwards to Anthropic. It does not run Claude Code on local models.** Stoke is a policy-enforcing passthrough, not a translator — your prompts still go to Claude, you still pay Anthropic's per-token price, and the gateway's job is to refuse the calls you don't want to pay for.
 
@@ -89,7 +89,7 @@ The launcher sets Claude Code's base URL and Bearer token for the child process,
 STOKE_API_KEY="cc-cap-key" stoke run claude
 ```
 
-Claude Code now sends every request to `http://127.0.0.1:8787/v1/messages` with `Authorization: Bearer ***`, and Stoke enforces before forwarding to Anthropic. The separately running Stoke server keeps `ANTHROPIC_API_KEY`; `stoke run` does not expose it to Claude Code.
+Claude Code now sends every request to `http://127.0.0.1:8787/v1/messages` with `Authorization: Bearer <gateway-key>`, and Stoke enforces before forwarding to Anthropic. The separately running Stoke server keeps `ANTHROPIC_API_KEY`; `stoke run` does not expose it to Claude Code.
 
 ## Verify it worked
 
