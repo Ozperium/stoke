@@ -524,21 +524,15 @@ impl BudgetGuard {
         }
         if let Some(ledger) = ledger {
             let key_id = self.durable_key_id(key);
-            // Committed = durable spend + durable open holds. Restart and
-            // crash both keep this figure, which is the whole point.
-            let spent = ledger.spend(&key_id)?;
-            let held = ledger.held(&key_id)?;
-            if spent + held + amount > limit {
+            // The ledger serializes the spend/holds read, cap comparison, and
+            // reservation insert in one IMMEDIATE transaction.
+            if !ledger.reserve_if_within_limit(&key_id, amount, limit)? {
                 return Err(format!(
-                    "Budget exceeded (durable ledger): ${:.4} spent + ${:.4} in flight + ${:.4} for this request exceeds ${:.4} for key_id {}",
-                    spent,
-                    held,
-                    amount,
+                    "Budget exceeded (durable ledger): this request exceeds ${:.4} for key_id {}",
                     limit,
                     &key_id[..12.min(key_id.len())]
                 ));
             }
-            ledger.reserve(&key_id, amount)?;
             return Ok(Some(SpendReservation {
                 budget: Arc::clone(self),
                 key: key.to_string(),
