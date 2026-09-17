@@ -44,7 +44,7 @@ fn default_harness_mode() -> String {
 
 // ─── PII Redaction ──────────────────────────────────────────────
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PiiConfig {
     /// Custom regex patterns to redact (in addition to built-ins)
     #[serde(default)]
@@ -56,6 +56,15 @@ pub struct PiiConfig {
 
 fn default_redact_text() -> String {
     "[REDACTED]".to_string()
+}
+
+impl Default for PiiConfig {
+    fn default() -> Self {
+        Self {
+            patterns: Vec::new(),
+            replacement: default_redact_text(),
+        }
+    }
 }
 
 // ─── Code Formatter ─────────────────────────────────────────────
@@ -79,7 +88,7 @@ pub struct AuditConfig {
 }
 
 fn default_log_body() -> bool {
-    true
+    false
 }
 
 // ─── Built-in Plugins Runner ─────────────────────────────────────
@@ -108,11 +117,17 @@ impl Builtins {
             // AWS access keys
             (r"AKIA[0-9A-Z]{16}", "AWS_KEY"),
             // AWS secret keys (40 chars of base64)
-            (r#"(?i)aws_secret_access_key["\s:=]+["']?[A-Za-z0-9/+]{40}["']?"#, "AWS_SECRET"),
+            (
+                r#"(?i)aws_secret_access_key["\s:=]+["']?[A-Za-z0-9/+]{40}["']?"#,
+                "AWS_SECRET",
+            ),
             // Google API keys
             (r"AIza[A-zA-Z0-9_-]{35}", "GOOGLE_API_KEY"),
             // Generic API key patterns in env/config
-            (r#"(?i)(api_key|apikey|token|secret|password)["\s:=]+["']?[A-Za-z0-9_+/=-]{20,}["']?"#, "API_KEY"),
+            (
+                r#"(?i)(api_key|apikey|token|secret|password)["\s:=]+["']?[A-Za-z0-9_+/=-]{20,}["']?"#,
+                "API_KEY",
+            ),
             // Email addresses
             (r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "EMAIL"),
             // GitHub tokens
@@ -120,7 +135,10 @@ impl Builtins {
             // Slack tokens
             (r"xox[bp]-[A-Za-z0-9-]{10,}", "SLACK_TOKEN"),
             // Private keys (PEM)
-            (r"-----BEGIN [A-Z ]+PRIVATE KEY-----.*?-----END [A-Z ]+PRIVATE KEY-----", "PRIVATE_KEY"),
+            (
+                r"(?s)-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z]+ )?PRIVATE KEY-----",
+                "PRIVATE_KEY",
+            ),
         ];
 
         if config.pii_redact.is_some() {
@@ -234,20 +252,8 @@ impl Builtins {
 
         for msg in messages {
             let mut new_msg = msg.clone();
-            if let Some(content) = new_msg.get_mut("content").and_then(|c| c.as_str().map(|s| s.to_string())) {
-                let mut redacted = content;
-                for (re, label_repl) in &self.pii_patterns {
-                    let parts: Vec<&str> = label_repl.splitn(2, ':').collect();
-                    let repl = if parts.len() == 2 { parts[1] } else { "[REDACTED]" };
-                    let new_val = re.replace_all(&redacted, repl).to_string();
-                    if new_val != redacted {
-                        modified = true;
-                        redacted = new_val;
-                    }
-                }
-                if let Some(obj) = new_msg.as_object_mut() {
-                    obj.insert("content".to_string(), json!(redacted));
-                }
+            if let Some(content) = new_msg.get_mut("content") {
+                modified |= self.redact_value(content);
             }
             new_messages.push(new_msg);
         }
@@ -256,6 +262,37 @@ impl Builtins {
             Ok(Some(new_messages))
         } else {
             Ok(None)
+        }
+    }
+
+    /// Redact every string below a message's content field without changing
+    /// arrays, objects, or non-string JSON values.
+    fn redact_value(&self, value: &mut Value) -> bool {
+        match value {
+            Value::String(text) => {
+                let mut redacted = text.clone();
+                for (re, label_repl) in &self.pii_patterns {
+                    let replacement = label_repl
+                        .split_once(':')
+                        .map(|(_, replacement)| replacement)
+                        .unwrap_or("[REDACTED]");
+                    redacted = re.replace_all(&redacted, replacement).into_owned();
+                }
+                let changed = redacted != *text;
+                if changed {
+                    *text = redacted;
+                }
+                changed
+            }
+            Value::Array(values) => values
+                .iter_mut()
+                .map(|value| self.redact_value(value))
+                .any(|changed| changed),
+            Value::Object(object) => object
+                .values_mut()
+                .map(|value| self.redact_value(value))
+                .any(|changed| changed),
+            _ => false,
         }
     }
 
@@ -373,7 +410,14 @@ impl Builtins {
             .join("\n")
     }
 
-    fn audit_log(&self, model: &str, response: &Value, cost_usd: f64, elapsed_ms: u64, api_key: &str) {
+    fn audit_log(
+        &self,
+        model: &str,
+        response: &Value,
+        cost_usd: f64,
+        elapsed_ms: u64,
+        api_key: &str,
+    ) {
         let path = match &self.audit_path {
             Some(p) => p,
             None => return,
@@ -382,7 +426,13 @@ impl Builtins {
         let timestamp = chrono::Utc::now().to_rfc3339();
         let key_prefix = &api_key[..8.min(api_key.len())];
 
-        let log_entry = if self.config.audit_log.as_ref().map(|a| a.log_body).unwrap_or(true) {
+        let log_entry = if self
+            .config
+            .audit_log
+            .as_ref()
+            .map(|a| a.log_body)
+            .unwrap_or(false)
+        {
             json!({
                 "ts": timestamp,
                 "model": model,
@@ -403,15 +453,95 @@ impl Builtins {
             .to_string()
         };
 
-        // Append to file (non-blocking, best-effort)
+        // Append to file (non-blocking, best-effort). Concurrent writers may
+        // still interleave records; changing that behavior is outside this fix.
         use std::io::Write;
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
         {
+            use std::os::unix::fs::OpenOptionsExt;
+            // `mode` applies only when the file is newly created.
+            options.mode(0o600);
+        }
+        if let Ok(mut file) = options.open(path) {
             let _ = writeln!(file, "{}", log_entry);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    fn pii_builtins() -> Builtins {
+        Builtins::new(BuiltinConfig {
+            pii_redact: Some(PiiConfig::default()),
+            ..BuiltinConfig::default()
+        })
+    }
+
+    #[tokio::test]
+    async fn redacts_multiline_pem_and_nested_content_leaves() {
+        let builtins = pii_builtins();
+        let messages = vec![json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": format!("-----BEGIN {}-----\nsecret\n-----END {}-----", "PRIVATE KEY", "PRIVATE KEY")},
+                {"type": "image", "image": {"url": "https://example.test/image", "detail": 2}},
+                42,
+                true
+            ]
+        })];
+
+        let filtered = builtins
+            .prompt_filter(&messages, "model", "key")
+            .await
+            .unwrap();
+        let filtered = filtered.expect("PEM should be redacted");
+        assert_eq!(filtered[0]["content"][0]["type"], "text");
+        assert_eq!(filtered[0]["content"][0]["text"], "[REDACTED]");
+        assert_eq!(filtered[0]["content"][1]["image"]["detail"], 2);
+        assert_eq!(filtered[0]["content"][2], 42);
+        assert_eq!(filtered[0]["content"][3], true);
+    }
+
+    #[tokio::test]
+    async fn pii_redaction_is_opt_in() {
+        let builtins = Builtins::new(BuiltinConfig::default());
+        let messages = vec![json!({"role": "user", "content": "x@example.com"})];
+        assert!(builtins
+            .prompt_filter(&messages, "model", "key")
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn audit_log_defaults_to_metadata_only() {
+        let config: AuditConfig = toml::from_str("path = 'audit.jsonl'").unwrap();
+        assert!(!config.log_body);
+        assert!(!default_log_body());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn newly_created_audit_log_is_owner_only() {
+        let path = std::env::temp_dir().join(format!("stoke-audit-{}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let builtins = Builtins {
+            config: BuiltinConfig::default(),
+            pii_patterns: Vec::new(),
+            audit_path: Some(path.clone()),
+        };
+        builtins.audit_log("model", &json!({"secret": "body"}), 0.0, 1, "key");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(mode, 0o600);
+        assert!(!contents.contains("response"));
     }
 }
 
