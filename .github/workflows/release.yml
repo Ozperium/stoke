@@ -37,7 +37,7 @@ jobs:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-musl,  name: stoke-linux-x64 }
           - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, name: stoke-linux-arm64 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -84,9 +84,10 @@ jobs:
           tar czf "${{ matrix.name }}.tar.gz" "$dir"
           shasum -a 256 "${{ matrix.name }}.tar.gz" > "${{ matrix.name }}.tar.gz.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
+          retention-days: 1
           path: |
             ${{ matrix.name }}.tar.gz
             ${{ matrix.name }}.tar.gz.sha256
@@ -99,8 +100,8 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
           path: dist
