@@ -11,6 +11,7 @@ set -eu
 REPO="Ozperium/stoke"
 INSTALL_DIR="${HOME}/.local/bin"
 VERSION="latest"
+ACTION="install"
 
 if [ -t 1 ]; then
   BOLD=$(printf '\033[1m'); GREEN=$(printf '\033[0;32m')
@@ -29,9 +30,12 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --dir) INSTALL_DIR="$2"; shift 2 ;;
     --version) VERSION="$2"; shift 2 ;;
+    --uninstall) ACTION="uninstall"; shift ;;
+    --rollback) ACTION="rollback"; shift ;;
     --help|-h)
       printf 'Options:\n  --dir <path>      install location (default ~/.local/bin)\n'
       printf '  --version <tag>   release tag, or "nightly" for the rolling build (default latest)\n'
+      printf '  --uninstall       remove Stoke binaries\n  --rollback        restore binaries saved by the last install\n'
       exit 0 ;;
     *) error "Unknown option: $1" ;;
   esac
@@ -60,6 +64,38 @@ verify_checksum() {
     fi )
 }
 
+replace_binaries() {
+  src="$1"; mkdir -p "$INSTALL_DIR" || return 1
+  [ -f "$src/stoke" ] && [ -f "$src/stoke-cli" ] || return 1
+  chmod +x "$src/stoke" "$src/stoke-cli" || return 1
+  backed_up_stoke=0; backed_up_cli=0
+  if [ -e "$INSTALL_DIR/stoke" ]; then
+    rm -f "$INSTALL_DIR/stoke.stoke-backup" || return 1
+    mv "$INSTALL_DIR/stoke" "$INSTALL_DIR/stoke.stoke-backup" || return 1
+    backed_up_stoke=1
+  fi
+  if [ -e "$INSTALL_DIR/stoke-cli" ]; then
+    if ! rm -f "$INSTALL_DIR/stoke-cli.stoke-backup" || ! mv "$INSTALL_DIR/stoke-cli" "$INSTALL_DIR/stoke-cli.stoke-backup"; then
+      [ "$backed_up_stoke" = "1" ] && mv "$INSTALL_DIR/stoke.stoke-backup" "$INSTALL_DIR/stoke"
+      return 1
+    fi
+    backed_up_cli=1
+  fi
+  if ! mv "$src/stoke" "$INSTALL_DIR/stoke" || ! mv "$src/stoke-cli" "$INSTALL_DIR/stoke-cli"; then
+    rm -f "$INSTALL_DIR/stoke" "$INSTALL_DIR/stoke-cli"
+    [ "$backed_up_stoke" = "1" ] && mv "$INSTALL_DIR/stoke.stoke-backup" "$INSTALL_DIR/stoke"
+    [ "$backed_up_cli" = "1" ] && mv "$INSTALL_DIR/stoke-cli.stoke-backup" "$INSTALL_DIR/stoke-cli"
+    return 1
+  fi
+}
+rollback_binaries() {
+  [ -f "$INSTALL_DIR/stoke.stoke-backup" ] && [ -f "$INSTALL_DIR/stoke-cli.stoke-backup" ] || error "No saved binaries to roll back in $INSTALL_DIR"
+  rm -f "$INSTALL_DIR/stoke" "$INSTALL_DIR/stoke-cli"
+  mv "$INSTALL_DIR/stoke.stoke-backup" "$INSTALL_DIR/stoke" && mv "$INSTALL_DIR/stoke-cli.stoke-backup" "$INSTALL_DIR/stoke-cli" || error "Rollback failed"
+  info "Rolled back Stoke binaries"
+}
+uninstall_binaries() { rm -f "$INSTALL_DIR/stoke" "$INSTALL_DIR/stoke-cli"; info "Removed Stoke binaries (configs preserved)"; }
+
 install_from_source() {
   warn "Building from source (requires Rust; takes a few minutes)."
   if ! command -v cargo >/dev/null 2>&1; then
@@ -71,9 +107,9 @@ install_from_source() {
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
   git clone --depth 1 "https://github.com/${REPO}.git" "$tmp/stoke"
   ( cd "$tmp/stoke" && cargo build --release )
-  mkdir -p "$INSTALL_DIR"
-  cp "$tmp/stoke/target/release/stoke" "$tmp/stoke/target/release/stoke-cli" "$INSTALL_DIR/"
-  chmod +x "$INSTALL_DIR/stoke" "$INSTALL_DIR/stoke-cli"
+  mkdir -p "$tmp/staged"
+  cp "$tmp/stoke/target/release/stoke" "$tmp/stoke/target/release/stoke-cli" "$tmp/staged/"
+  replace_binaries "$tmp/staged"
 }
 
 install_from_binary() {
@@ -101,10 +137,13 @@ install_from_binary() {
   fi
 
   tar xzf "$tmp/${asset}.tar.gz" -C "$tmp"
-  mkdir -p "$INSTALL_DIR"
-  cp "$tmp/${asset}/stoke" "$tmp/${asset}/stoke-cli" "$INSTALL_DIR/"
-  chmod +x "$INSTALL_DIR/stoke" "$INSTALL_DIR/stoke-cli"
+  mkdir -p "$tmp/staged"
+  cp "$tmp/${asset}/stoke" "$tmp/${asset}/stoke-cli" "$tmp/staged/"
+  replace_binaries "$tmp/staged"
 }
+
+if [ "$ACTION" = "uninstall" ]; then uninstall_binaries; exit 0; fi
+if [ "$ACTION" = "rollback" ]; then rollback_binaries; exit 0; fi
 
 if [ -n "$asset" ] && install_from_binary; then
   info "Installed prebuilt binary to $INSTALL_DIR"

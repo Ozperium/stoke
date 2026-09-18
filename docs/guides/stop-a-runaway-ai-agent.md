@@ -10,7 +10,7 @@ icon: flatline
 
 An agent that starts retrying at 2am does not stop because you are asleep. It re-sends the same tool call, fans out, and re-plans — and every attempt is a metered API request. By the time the billing alert fires, the money is already gone. That alert is a receipt, not a control: it tells you what happened, hours after you could have done anything about it.
 
-The fix is to put a gate in the request path that refuses the request *before* the provider is called. [Stoke](https://github.com/Ozperium/stoke) is a single Rust binary that sits between your agent and the model API and does exactly that. This guide sets up two independent protections — a hard per-key dollar cap and a loop breaker — and then actually triggers both with `curl` so you can see the refusals.
+The fix is to put a gate in the request path that refuses the request *before* the provider is called. [Stoke](https://github.com/Ozperium/stoke) is a Rust gateway package (`stoke` server plus `stoke-cli` companion) that sits between your agent and the model API and does exactly that. This guide sets up two independent protections — a hard per-key dollar cap and a loop breaker — and then triggers both with `curl` so you can see the refusals.
 
 ## The two protections you actually get
 
@@ -19,7 +19,7 @@ These are separate mechanisms. Either one can stop a runaway; they cover differe
 - **Hard budget cap.** A per-key cumulative spend limit in USD. Once a key's spend *reaches* the cap, the next request is refused with `429 Budget exceeded` — no provider call is made. This stops slow bleed: an agent that is technically making progress but has already spent more than you authorized.
 - **Loop breaker.** If one key sends 5 repeated requests within 60 seconds, that key is blocked for 120 seconds with `429 Loop detected`. By default "repeated" means an identical request (same model, same message content, same temperature — hashed). This stops the fast failure: a tight retry loop that would rack up hundreds of calls before any dollar cap noticed.
 
-Both checks run on the request path, before Stoke ever contacts a model. Everything except `GET /health` also requires an `Authorization: Bearer <key>` header, and Stoke is fail-closed: with no keys configured and no `STOKE_DEV=1`, every request is rejected.
+Both checks run on the request path, before Stoke ever contacts a model. Everything except `GET /health` also requires an `Authorization: Bearer <gateway-key>` header, and Stoke is fail-closed: with no keys configured and no `STOKE_DEV=1`, every request is rejected.
 
 ## Set a per-key budget and register the key
 
@@ -186,4 +186,4 @@ Grab the binary (static builds for macOS and Linux, checksum-verified, with a so
 curl -sSf https://stokegate.com/install | sh -s -- --version nightly
 ```
 
-There is no stable tag yet — a bare `| sh` resolves `latest` and compiles from source, so pin `--version nightly` for the prebuilt binary. Then `stoke-cli init`, add a `[[keys]]` cap, export `STOKE_API_KEYS`, and route your agent through `127.0.0.1:8787`. Full config reference and source: [github.com/Ozperium/stoke](https://github.com/Ozperium/stoke).
+The public stable release is v0.2.1 at commit 403c884 — a bare `| sh` resolves `latest` and compiles from source, so pin `--version nightly` for the prebuilt binary. Then `stoke-cli init`, add a `[[keys]]` cap, export `STOKE_API_KEYS`, and route your agent through `127.0.0.1:8787`. Full config reference and source: [github.com/Ozperium/stoke](https://github.com/Ozperium/stoke).

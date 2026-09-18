@@ -40,6 +40,7 @@ nav { position: fixed; top: 0; width: 100%; z-index: 100; backdrop-filter: blur(
 .nav-links { display: flex; gap: 28px; align-items: center; }
 .nav-links a { color: var(--muted); font-size: 14px; font-weight: 500; }
 .nav-links a:hover { color: var(--text); text-decoration: none; }
+.nav-toggle { display: none; background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font: inherit; cursor: pointer; }
 .nav-cta { background: var(--accent); color: #000 !important; padding: 8px 18px; border-radius: 8px; font-weight: 600; }
 .nav-cta:hover { background: var(--accent2); text-decoration: none; }
 
@@ -150,7 +151,10 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
   .hero-sub { font-size: 17px; }
   .pillars, .audience { grid-template-columns: 1fr; }
   .features { grid-template-columns: 1fr; }
-  .nav-links { display: none; }
+  .nav-toggle { display: inline-flex; align-items: center; }
+  .nav-links { display: none; position: absolute; top: 60px; left: 0; right: 0; padding: 12px 24px 18px; background: rgba(10,10,11,0.98); border-bottom: 1px solid var(--border); flex-direction: column; align-items: stretch; gap: 4px; }
+  .nav-links.is-open { display: flex; }
+  .nav-links a { padding: 10px 0; }
   h2 { font-size: 28px; }
   .cmp-table { font-size: 13px; }
   .cmp-table th, .cmp-table td { padding: 10px 8px; }
@@ -173,8 +177,8 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
 .term-dot { width: 11px; height: 11px; border-radius: 50%; background: #34343c; }
 .term-title { margin-left: 10px; font-size: 12px; color: var(--muted); letter-spacing: 0.02em; }
 .term-tabs { display: flex; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: #0f0f13; }
-.term-tabs span { font-family: var(--mono); font-size: 11.5px; color: var(--muted); padding: 3px 10px; border-radius: 999px; border: 1px solid transparent; transition: color .2s, border-color .2s, background .2s; }
-.term-tabs span.active { color: var(--accent); border-color: rgba(59,219,120,0.35); background: rgba(59,219,120,0.08); }
+.term-tabs button { font-family: var(--mono); font-size: 11.5px; color: var(--muted); padding: 3px 10px; border-radius: 999px; border: 1px solid transparent; background: transparent; cursor: pointer; transition: color .2s, border-color .2s, background .2s; }
+.term-tabs button.active, .term-tabs button:focus-visible { color: var(--accent); border-color: rgba(59,219,120,0.35); background: rgba(59,219,120,0.08); }
 .term-body { padding: 20px 22px; font-size: 13.5px; line-height: 1.85; min-height: 300px; }
 .term-line { white-space: pre-wrap; opacity: 0; transform: translateY(3px); }
 .term-line.show { opacity: 1; transform: none; transition: opacity .18s ease, transform .18s ease; }
@@ -188,51 +192,6 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
 .term-meter.killed i { background: var(--accent); }
 .cursor { display: inline-block; width: 8px; height: 15px; background: var(--accent); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
-
-/* ── Request pipeline ────────────────────────────────────────── */
-.pipe { margin-top: 40px; border: 1px solid var(--border); border-radius: 16px; background: var(--bg2); padding: 12px 8px; }
-.pipe-row { display: grid; grid-template-columns: 34px 1fr auto; gap: 14px; align-items: center; padding: 13px 16px; border-radius: 10px; transition: background .35s ease; }
-.pipe-row.lit { background: rgba(59,219,120,0.06); }
-.pipe-rail { position: relative; display: flex; justify-content: center; }
-.pipe-dot { width: 11px; height: 11px; border-radius: 50%; background: #2a2a32; border: 2px solid #3a3a44; transition: background .35s, border-color .35s, box-shadow .35s; }
-/* The travelling request is always green — it passed. A stage's power to
-   refuse is communicated by its badge, not by the dot. */
-.pipe-row.lit .pipe-dot { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 4px rgba(59,219,120,0.14); }
-.pipe-name { font-weight: 650; font-size: 15px; }
-.pipe-name .pipe-desc { display: block; font-weight: 400; font-size: 13.5px; color: var(--muted); margin-top: 2px; }
-.pipe-badge { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
-.pipe-badge.refuse { color: var(--red); border-color: rgba(255,90,90,0.3); }
-.pipe-badge.yours { color: var(--accent); border-color: rgba(59,219,120,0.3); }
-.pipe-badge.short { color: var(--amber); border-color: rgba(240,180,60,0.3); }
-.pipe-provider { display: flex; align-items: center; gap: 10px; margin: 6px 16px; padding: 12px 14px; border: 1px dashed var(--border); border-radius: 10px; color: var(--muted); font-size: 13.5px; }
-.pipe-note { color: var(--muted); font-size: 14px; margin-top: 18px; max-width: 720px; }
-.pipe-note b { color: var(--text); font-weight: 600; }
-@media (max-width: 768px) {
-  .pipe-row { grid-template-columns: 26px 1fr; }
-  .pipe-badge { grid-column: 2; justify-self: start; margin-top: 4px; }
-}
-
-/* ── Burn calculator ─────────────────────────────────────────── */
-.burn { display: grid; grid-template-columns: 1fr 0.9fr; gap: 40px; margin-top: 40px; background: var(--bg2); border: 1px solid var(--border); border-radius: 16px; padding: 40px; align-items: center; }
-.burn-controls label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 20px 0 10px; }
-.burn-controls label:first-child { margin-top: 0; }
-.burn-controls select, .burn-controls input[type=range] { width: 100%; }
-.burn-controls select { background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 11px 14px; font-family: var(--mono); font-size: 14px; }
-.burn-controls input[type=range] { accent-color: var(--accent); height: 6px; margin-top: 4px; }
-.burn-val { font-family: var(--mono); color: var(--accent); font-size: 13px; float: right; font-weight: 600; }
-.burn-out { text-align: center; }
-.burn-out .burn-cap { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-.burn-out .burn-num { font-family: var(--mono); font-size: 52px; font-weight: 800; color: var(--red); letter-spacing: -0.02em; line-height: 1.1; margin: 10px 0 6px; transition: color .2s; }
-.burn-out .burn-note { font-size: 14px; color: var(--muted); margin-bottom: 22px; }
-.burn-out .burn-note b { color: var(--text); }
-@media (max-width: 768px) {
-  .hero { text-align: left; overflow: hidden; }
-  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
-  .term-body { min-height: 300px; }
-  .term-tabs { flex-wrap: wrap; }
-  .burn { grid-template-columns: 1fr; padding: 28px; gap: 28px; }
-  .burn-out .burn-num { font-size: 42px; }
-}
 
 /* ── Landing control-room preview ───────────────────────────── */
 .control-room-demo { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 24px; align-items: stretch; }
@@ -271,6 +230,10 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
 .faq details { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 17px 20px; }
 .faq summary { cursor: pointer; font-weight: 600; }
 .faq p { color: var(--muted); font-size: 14px; margin: 12px 0 0; max-width: 720px; }
+.capability-table td:first-child { color: var(--accent); font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+.capability-table td strong { color: var(--text); }
+.matrix-note { color: var(--muted); font-size: 13px; margin-top: 18px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .compact-install { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: center; }
 .compact-install .code-block { margin: 0; font-size: 13px; }
 @media (max-width: 768px) {
@@ -279,13 +242,17 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
   .panel-metrics { grid-template-columns: 1fr 1fr 1fr; }
   .code-block { white-space: pre-wrap; overflow-wrap: anywhere; }
 }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}
 </style>
 </head>
 <body>
 <nav>
   <div class="container nav-inner">
     <a href="https://stokegate.com" class="logo">⬡ Stoke</a>
-    <div class="nav-links">
+    <button class="nav-toggle" id="nav-toggle" type="button" aria-controls="nav-links" aria-expanded="false">Menu</button>
+    <div class="nav-links" id="nav-links">
       <a href="#problem">Why Stoke</a>
       <a href="#control-room">Panel</a>
       <a href="#proof">Proof</a>
@@ -305,7 +272,7 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
       <div class="hero-copy">
         <div class="kicker">Enforce, don't just observe.</div>
         <h1>Your agents. Your machines.<br><span class="hl">Your rules.</span></h1>
-        <p class="hero-sub">Route to your own hardware — or approved cloud when you choose. Keep sensitive routes off unapproved providers; redact known credentials before dispatch. Refuse anything over budget. Kill loops in seconds. Connect native Codex Responses with gateway-owned auth and keep Ollama on its separate Chat Completions path, without hiding the provider boundary. One ~5.5&nbsp;MB Rust binary that decides <em>before</em> the money is spent, with an embedded control room at <code>/ui</code>.</p>
+        <p class="hero-sub">Route to your own hardware — or approved cloud when you choose. Keep sensitive routes off unapproved providers; redact known credentials before dispatch. Refuse anything over budget. Kill loops in seconds. Connect native Codex Responses with gateway-owned auth and keep Ollama on its separate Chat Completions path, without hiding the provider boundary. One ~5.5&nbsp;MB Rust binary that admits requests <em>before dispatch</em>, with an embedded control room at <code>/ui</code>. Concurrent streams hold possible spend first; a single stream can still overshoot its estimate until provider usage is known.</p>
         <div class="hero-cta">
           <a data-track="install_cta_clicked" href="#install" class="btn btn-primary">Install in 60 seconds</a>
           <a href="#control-room" class="btn btn-secondary">See it live</a>
@@ -319,13 +286,13 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
             <span class="term-dot"></span><span class="term-dot"></span><span class="term-dot"></span>
             <span class="term-title" id="term-title">stoke :8787 — illustrative</span>
           </div>
-          <div class="term-tabs" id="term-tabs">
-            <span data-scene="0">route it</span>
-            <span data-scene="1">fail over</span>
-            <span data-scene="2">cap it</span>
-            <span data-scene="3">kill it</span>
+          <div class="term-tabs" id="term-tabs" role="tablist" aria-label="Illustrative enforcement scenes">
+            <button type="button" role="tab" aria-selected="true" data-scene="0">route it</button>
+            <button type="button" role="tab" aria-selected="false" data-scene="1">fail over</button>
+            <button type="button" role="tab" aria-selected="false" data-scene="2">cap it</button>
+            <button type="button" role="tab" aria-selected="false" data-scene="3">kill it</button>
           </div>
-          <div class="term-body" id="term-body"></div>
+          <div class="term-body" id="term-body" role="region" aria-live="polite" aria-label="Illustrative terminal output"></div>
         </div>
       </div>
     </div>
@@ -361,7 +328,7 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
           <span class="panel-note" id="panel-demo-note">Ready — no network request</span>
         </div>
       </div>
-      <div class="panel-window" aria-label="Illustrative Stoke control room preview">
+      <div class="panel-window" role="region" aria-label="Illustrative Stoke control room preview">
         <div class="panel-bar"><strong>STOKE / CONTROL ROOM</strong><span class="panel-live">● local preview</span></div>
         <div class="panel-body">
           <div class="panel-metrics">
@@ -370,7 +337,7 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
             <div class="panel-metric"><label>Feed</label><strong>live SSE</strong></div>
           </div>
           <div class="panel-feed-label">Decision feed</div>
-          <div class="panel-feed" id="panel-demo-feed">
+          <div class="panel-feed" id="panel-demo-feed" role="log" aria-live="polite" aria-atomic="false">
             <div class="panel-event allowed"><span class="event-state">ALLOWED</span><span class="event-detail">local Ollama node · warm route selected</span></div>
             <div class="panel-event failed"><span class="event-state">FALLBACK</span><span class="event-detail">local node unavailable · next configured node</span></div>
             <div class="panel-event cache"><span class="event-state">ROUTE</span><span class="event-detail">policy permits approved-provider escalation</span></div>
@@ -400,6 +367,48 @@ footer { border-top: 1px solid var(--border); padding: 40px 0; }
       <div class="compatibility-card"><h3>Bounded reuse and retry hints</h3><p>Named routes can opt into exact caching and bounded coalescing for eligible non-streaming requests. Only validated, unambiguous <code class="inline">Retry-After</code> and <code class="inline">x-should-retry</code> values may reach clients; this adds no internal retry policy.</p></div>
       <div class="compatibility-card"><h3>Optional local Headroom</h3><p>Default-off Headroom accepts only a smaller, validated, lossless JSON-whitespace transformation before native Responses dispatch. Unsupported, unavailable, or rejected work keeps the original outputs; the local worker has documented size and platform limits.</p></div>
     </div>
+  </div>
+</section>
+
+<!-- 5. Complete capability matrix -->
+<section id="capabilities">
+  <div class="container">
+    <div class="section-tag">Shipped capability set</div>
+    <h2>One gateway, 24 evidenced capabilities.</h2>
+    <p class="section-sub">This is the complete shipped set in the audited main/nightly source. “Client protocol” describes what connects in front; “provider” describes what Stoke can route to behind it. Optional, local, authenticated, and feature-gated behavior stays labeled.</p>
+    <div class="table-scroll">
+      <table class="cmp-table capability-table">
+        <caption class="sr-only">Stoke's 24 shipped capabilities and their limits</caption>
+        <thead><tr><th>#</th><th>Capability</th><th>Surface / activation</th><th>Evidence-backed boundary</th></tr></thead>
+        <tbody>
+          <tr data-feature="1"><td>01</td><td><strong>Gateway daemon</strong></td><td><code class="inline">stoke</code>, <code class="inline">stoke serve</code>; TOML</td><td>Self-hosted Rust binary; no hosted gateway is implied.</td></tr>
+          <tr data-feature="2"><td>02</td><td><strong>Fail-closed auth</strong></td><td><code class="inline">STOKE_API_KEYS</code>; <code class="inline">STOKE_DEV=1</code> local dev</td><td>Every endpoint except <code class="inline">/health</code> is protected when keys are configured; upstream credentials stay separate.</td></tr>
+          <tr data-feature="3"><td>03</td><td><strong>OpenAI Chat Completions</strong></td><td>Client protocol: <code class="inline">POST /v1/chat/completions</code></td><td>Provider/model must be configured or discovered; no provider catalogue ships.</td></tr>
+          <tr data-feature="4"><td>04</td><td><strong>Pre-provider enforcement</strong></td><td>Budget, rate, exact/semantic loop, holds and fan-out</td><td>Admission is before dispatch; semantic mode needs an operator-supplied embedding model.</td></tr>
+          <tr data-feature="5"><td>05</td><td><strong>Durable SQLite ledger</strong></td><td>Automatic; <code class="inline">STOKE_LEDGER_PATH</code>; <code class="inline">stoke ledger</code></td><td>Spend and open holds survive restart; unresolved holds require reconciliation.</td></tr>
+          <tr data-feature="6"><td>06</td><td><strong>Node-aware placement + failover</strong></td><td>Provider tiers: <code class="inline">local</code> / <code class="inline">remote</code> / <code class="inline">cloud</code></td><td>Ranks configured, eligible capacity; failover is same-model connect-time/before-streaming, not mid-stream replay.</td></tr>
+          <tr data-feature="7"><td>07</td><td><strong>One-hop federation</strong></td><td>Provider type <code class="inline">stoke</code>; authenticated <code class="inline">/v1/nodes</code></td><td>Imports peer inventory and stops at exactly one hop; cycles are guarded.</td></tr>
+          <tr data-feature="8"><td>08</td><td><strong>Auto-route v2</strong></td><td><code class="inline">model=auto</code>, <code class="inline">auto-cheap</code>, <code class="inline">auto-fast</code></td><td>Scores configured/discovered candidates with fit exclusions and receipts; live E2E selection is not claimed.</td></tr>
+          <tr data-feature="9"><td>09</td><td><strong>SSE passthrough + metering</strong></td><td>Chat, Messages and Responses <code class="inline">stream=true</code></td><td>Usage is charged at close; metered streams may use an estimate when upstream usage is absent.</td></tr>
+          <tr data-feature="10"><td>10</td><td><strong>Stream race + hedged dispatch</strong></td><td><code class="inline">stream_race</code>; global <code class="inline">hedge=true</code></td><td>Connect-time race only; small prompts across two verified non-cloud nodes, duplicating local compute.</td></tr>
+          <tr data-feature="11"><td>11</td><td><strong>Non-stream cascade + self-consistency</strong></td><td>Named route patterns</td><td>Sequential first-success or bounded same-provider sampling; non-stream only.</td></tr>
+          <tr data-feature="12"><td>12</td><td><strong>Exact / semantic response cache</strong></td><td>Exact by default when eligible; semantic opt-in</td><td>Named non-stream single routes only; identity includes caller, route, model and effective request. Not a Responses-cache claim.</td></tr>
+          <tr data-feature="13"><td>13</td><td><strong>Exact in-flight coalescing</strong></td><td>Named route, positive TTL, <code class="inline">coalesce=true</code></td><td>Explicit opt-in; followers wait bounded time and may dispatch independently.</td></tr>
+          <tr data-feature="14"><td>14</td><td><strong>Built-in harness + PII/audit</strong></td><td>Route opt-in built-ins</td><td>PII redaction and JSONL audit are opt-in; regex redaction is not a security boundary.</td></tr>
+          <tr data-feature="15"><td>15</td><td><strong>Webhook plugin hooks</strong></td><td>Opt-in <code class="inline">pre_request</code>, <code class="inline">prompt_filter</code>, <code class="inline">post_response</code></td><td>Bounded HTTP hooks can mutate/block; they are not an OS sandbox.</td></tr>
+          <tr data-feature="16"><td>16</td><td><strong>In-process JS/TS plugins</strong></td><td>Feature-gated build: <code class="inline">--features js-plugins</code></td><td>Optional V8/deno dependency; not in the default build and not sandboxed.</td></tr>
+          <tr data-feature="17"><td>17</td><td><strong>Headroom output filter</strong></td><td>Optional, default-off, local/native Responses</td><td>Validated lossless JSON-whitespace compaction only; bounded macOS arm64 / CPython 3.11 worker limits.</td></tr>
+          <tr data-feature="18"><td>18</td><td><strong>Anthropic Messages passthrough</strong></td><td>Client protocol: <code class="inline">POST /v1/messages</code></td><td>Requires an exact configured Anthropic provider/destination; not unrestricted Anthropic support.</td></tr>
+          <tr data-feature="19"><td>19</td><td><strong>Claude subscription OAuth</strong></td><td><code class="inline">stoke login-claude</code>; subscription provider</td><td>Gateway-owned OAuth; rate/loop controls remain, but subscription traffic has no USD price to meter.</td></tr>
+          <tr data-feature="20"><td>20</td><td><strong>Claude → local bridge</strong></td><td><code class="inline">claude-stoke-local--…</code> alias</td><td>Messages translates to configured local/remote OpenAI-compatible providers; unsupported fields reject.</td></tr>
+          <tr data-feature="21"><td>21</td><td><strong>Claude → Codex bridge</strong></td><td><code class="inline">claude-stoke-codex--…</code> alias</td><td>Uses native Responses for configured Codex providers; ambiguous aliases fail closed.</td></tr>
+          <tr data-feature="22"><td>22</td><td><strong>Responses + Codex subscription</strong></td><td>Client protocol: <code class="inline">POST /v1/responses</code>; <code class="inline">stoke run codex</code></td><td>Native JSON/SSE passthrough; subscription plan limits remain and USD spend is omitted.</td></tr>
+          <tr data-feature="23"><td>23</td><td><strong>Opt-in Claude fallback</strong></td><td><code class="inline">[subscription_fallback]</code></td><td>Off by default; only qualified subscription limit/rate errors trigger it, with local fallback explicitly enabled and priced.</td></tr>
+          <tr data-feature="24"><td>24</td><td><strong>CLI setup + launchers</strong></td><td><code class="inline">stoke-cli setup</code>; <code class="inline">stoke run claude|codex</code></td><td>Owner-only setup and credential-isolating launchers; external client executables remain prerequisites.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="matrix-note">Release scope: main/nightly in this checkout; stable <code class="inline">v0.2.1</code> may not contain post-tag capabilities. Local means your machine, authenticated means gateway access, and subscription means quota-world rather than USD-world.</p>
   </div>
 </section>
 
@@ -543,6 +552,23 @@ replacement = <span class="str">"[REDACTED]"</span>
 
 <script>
 (function () {
+  var toggle = document.getElementById('nav-toggle');
+  var links = document.getElementById('nav-links');
+  if (!toggle || !links) return;
+  toggle.addEventListener('click', function () {
+    var open = links.classList.toggle('is-open');
+    toggle.setAttribute('aria-expanded', String(open));
+  });
+  links.addEventListener('click', function (event) {
+    if (event.target.tagName === 'A') {
+      links.classList.remove('is-open');
+      toggle.setAttribute('aria-expanded', 'false');
+    }
+  });
+}());
+</script>
+<script>
+(function () {
   var button = document.getElementById('panel-demo-run');
   var feed = document.getElementById('panel-demo-feed');
   var note = document.getElementById('panel-demo-note');
@@ -618,7 +644,7 @@ replacement = <span class="str">"[REDACTED]"</span>
         {meter: true, spend: 1.042, over: true},
         {h: '<span class="r">⨯ 429</span> Budget exceeded: $52.10 / $50.00', kill: true},
         {h: '<span class="dim">   refused before the provider was called</span>'},
-        {h: '<span class="g">✓</span> the bill stops at <span class="g">your number</span>', done: true},
+        {h: '<span class="g">✓</span> admission stopped at <span class="g">your configured cap</span>; final usage can be reconciled', done: true},
       ],
     },
     { // KILL IT — the loop breaker (the anchor)
@@ -640,6 +666,7 @@ replacement = <span class="str">"[REDACTED]"</span>
   function setTabs() {
     [].forEach.call(tabs.children, function (t, idx) {
       t.className = idx === s ? 'active' : '';
+      t.setAttribute('aria-selected', idx === s ? 'true' : 'false');
     });
   }
   // `gen` invalidates any pending timer from a scene that was restarted (tab

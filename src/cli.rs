@@ -439,6 +439,7 @@ assumed_max_output_tokens = 2048
     )
 }
 
+
 fn generate_api_key() -> Result<String, String> {
     use std::io::Read;
 
@@ -449,15 +450,71 @@ fn generate_api_key() -> Result<String, String> {
     Ok(hex::encode(bytes))
 }
 
-fn write_owner_file(path: &std::path::Path, content: &str) -> Result<(), String> {
-    std::fs::write(path, content)
-        .map_err(|error| format!("could not write {}: {}", path.display(), error))?;
+fn write_new_owner_file(path: &std::path::Path, content: &str) -> Result<(), String> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|error| format!("could not protect {}: {}", path.display(), error))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
+    let mut file = options.open(path)
+        .map_err(|error| format!("could not create {}: {}", path.display(), error))?;
+    if let Err(error) = file.write_all(content.as_bytes()) {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err(format!("could not write {}: {}", path.display(), error));
+    }
+    Ok(())
+}
+
+fn write_setup_files(config_path: &std::path::Path, config: &str, env_path: &std::path::Path, env: &str, force: bool) -> Result<(), String> {
+    if !force && (config_path.exists() || env_path.exists()) {
+        return Err(format!(
+            "{} or {} already exists; use --force to overwrite",
+            config_path.display(),
+            env_path.display()
+        ));
+    }
+    let suffix = format!(".stoke-setup-{}", generate_api_key()?);
+    let name = |p: &std::path::Path| p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let ct = config_path.with_file_name(format!(".{}{}", name(config_path), suffix));
+    let et = env_path.with_file_name(format!(".{}{}", name(env_path), suffix));
+    write_new_owner_file(&ct, config)?;
+    if let Err(e) = write_new_owner_file(&et, env) {
+        let _ = std::fs::remove_file(&ct);
+        return Err(e);
+    }
+    let cb = config_path.with_file_name(format!(".{}{}.bak", name(config_path), suffix));
+    let eb = env_path.with_file_name(format!(".{}{}.bak", name(env_path), suffix));
+    let mut bc = false; let mut be = false;
+    let result = (|| -> Result<(), String> {
+        if force && config_path.exists() {
+            let _ = std::fs::remove_file(&cb);
+            std::fs::rename(config_path, &cb).map_err(|e| e.to_string())?;
+            bc = true;
+        }
+        if force && env_path.exists() {
+            let _ = std::fs::remove_file(&eb);
+            std::fs::rename(env_path, &eb).map_err(|e| e.to_string())?;
+            be = true;
+        }
+        std::fs::rename(&ct, config_path).map_err(|e| e.to_string())?;
+        std::fs::rename(&et, env_path).map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    if let Err(e) = result {
+        let _ = std::fs::remove_file(config_path);
+        let _ = std::fs::remove_file(env_path);
+        if bc { let _ = std::fs::rename(&cb, config_path); }
+        if be { let _ = std::fs::rename(&eb, env_path); }
+        let _ = std::fs::remove_file(&ct);
+        let _ = std::fs::remove_file(&et);
+        return Err(e);
+    }
+    let _ = std::fs::remove_file(cb);
+    let _ = std::fs::remove_file(eb);
     Ok(())
 }
 
@@ -546,13 +603,6 @@ fn cli_setup(args: &[String]) -> ExitCode {
 
     let config_path = std::path::Path::new(&output);
     let env_path = std::path::Path::new(&env_output);
-    if !force && (config_path.exists() || env_path.exists()) {
-        eprintln!(
-            "Error: {} or {} already exists; use --force to overwrite",
-            output, env_output
-        );
-        return ExitCode::FAILURE;
-    }
 
     let api_key = match generate_api_key() {
         Ok(key) => key,
@@ -562,16 +612,13 @@ fn cli_setup(args: &[String]) -> ExitCode {
         }
     };
     let config = render_setup_config(&model, &ollama_url, bind_all);
-    if let Err(error) = write_owner_file(config_path, &config) {
-        eprintln!("Error: {}", error);
-        return ExitCode::FAILURE;
-    }
-    if let Err(error) = write_owner_file(env_path, &format!("STOKE_API_KEYS={}\n", api_key)) {
+    if let Err(error) = write_setup_files(config_path, &config, env_path, &format!("STOKE_API_KEYS={}\n", api_key), force) {
         eprintln!("Error: {}", error);
         return ExitCode::FAILURE;
     }
 
     println!("Generated {} and {}", output, env_output);
+
     println!("\nStart Stoke:");
     println!("  set -a; . {}; set +a; stoke serve", env_output);
     println!("\nTest it:");
@@ -820,7 +867,7 @@ fn cli_serve(args: &[String]) -> ExitCode {
                STOKE_API_KEYS       Comma-separated API keys for auth\n  \
                STOKE_SEMANTIC_CACHE  Set to enable semantic cache\n  \
                OLLAMA_BASE_URL         Ollama URL for embeddings\n  \
-               STOKE_EMBED_MODEL    Embedding model (default: nomic-embed-text)"
+               STOKE_EMBED_MODEL    Embedding model (no default; required when semantic cache is enabled)"
         );
         return ExitCode::SUCCESS;
     }
@@ -888,6 +935,35 @@ mod tests {
         assert!(config.contains("default_model = \"qwen2.5-coder:7b\""));
         assert!(config.contains("host = \"127.0.0.1\""));
         assert!(config.contains("tier = \"local\""));
+    }
+
+
+    #[test]
+    fn setup_write_failure_does_not_publish_first_file() {
+        let root = std::env::temp_dir().join(format!("stoke-setup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let config = root.join("stoke.toml");
+        let env = root.join("missing").join(".env");
+        assert!(write_setup_files(&config, "config", &env, "secret", false).is_err());
+        assert!(!config.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn setup_temp_write_refuses_symlinks() {
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir().join(format!("stoke-setup-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("captured-secret");
+        let link = root.join("predictable-temp");
+        std::fs::write(&target, "unchanged").unwrap();
+        symlink(&target, &link).unwrap();
+        assert!(write_new_owner_file(&link, "secret").is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "unchanged");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
 /// `stoke login-claude` — interactive Anthropic OAuth login for the

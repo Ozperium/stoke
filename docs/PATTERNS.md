@@ -24,7 +24,26 @@ Stoke's codebase implements patterns from the before- and after-inference catego
 
 ---
 
-## Patterns (8 total)
+## Reachability matrix
+
+The source contains research helpers that are not necessarily gateway routes. This
+table is authoritative for request-path reachability at the audited checkout.
+
+| Pattern | Source implementation | Gateway selectable | Streaming | Status |
+|---|---:|---:|---:|---|
+| Single | yes | yes/default | yes | supported |
+| Cascade | yes | yes when pinned/configured | no | supported, bounded |
+| Self-consistency | yes | yes when pinned/configured | no | supported, bounded |
+| Stream race | yes | yes on streaming path | yes | supported narrowly |
+| Auto / auto-cheap / auto-fast | yes | yes via pseudo-model/routing | via selected mode | supported; live mode proof limited |
+| Parallel vote | helper only | no | no | not selected by dispatcher |
+| Deliberation | helper only | no | no | not selected by dispatcher |
+| Test vote / cascade test | removed/refused | no | no | explicitly refused; never restore gateway-side code execution |
+
+Use [`docs/capability-matrix.md`](capability-matrix.md) for activation, provider gates,
+auth, caveats, and proof commands.
+
+## Patterns (research taxonomy)
 
 ### 1. Single (Baseline)
 **Academic category:** None — direct inference.
@@ -40,7 +59,7 @@ Multiple models generate responses independently. The most common response wins 
 
 **When it fails:** When models converge on the same wrong answer (confirmed by [Debate or Vote, NeurIPS 2025](https://arxiv.org/abs/2508.17536) — debate gains are "primarily from majority voting" not from the debate itself). Also fails for code where correct implementations differ syntactically.
 
-**Status:** implemented in `router.rs` as `parallel_vote`, but not currently exposed on the request path (a request asking for it falls through to single-model routing).
+**Status:** source helper only; not selected by the gateway dispatcher. Do not market it as a shipped route.
 
 ### 3. Self-Consistency (Ensemble After — Same-Model Voting)
 **Academic origin:** [Self-Consistency (Wang et al., ICLR 2023)](https://arxiv.org/abs/2203.11171)
@@ -103,7 +122,7 @@ Fan out to N generator models. A merge model synthesizes all responses into one.
 
 ---
 
-## What We're Missing (Based on Research)
+## What remains research-only (not shipped)
 
 ### 9. Best-of-N with Verifier (Not yet implemented)
 **Academic origin:** [Best-of-N + Process Reward Models (Snell et al., 2024)](https://arxiv.org/abs/2408.03314); [Self-Certainty (Kang et al., 2025)](https://arxiv.org/abs/2502.18581)
@@ -119,7 +138,7 @@ Generate N samples, score each with a verifier (reward model or self-certainty),
 
 Our parallel_merge is single-layer MoA. The full MoA is multi-layer: each layer's agents see all outputs from the previous layer. Deeper = better (up to diminishing returns).
 
-### 11. Cost-Aware Auto-Routing (Not yet implemented)
+### 11. General policy-defined cost-aware routing (not yet implemented)
 **Academic origin:** [RouteLLM (Ong et al., 2024)](https://arxiv.org/abs/2406.18665)
 
 Classify prompt difficulty, route to cheap model for easy, expensive model for hard. RouteLLM showed 2x cost savings while maintaining quality.
@@ -128,7 +147,7 @@ Classify prompt difficulty, route to cheap model for easy, expensive model for h
 
 ## Key Research Insights
 
-1. **Voting > Debate** — [Debate or Vote (NeurIPS 2025)](https://arxiv.org/abs/2508.17536) proved debate is a martingale; gains come from ensembling, not interaction. This validates our parallel_vote and self_consistency patterns.
+1. **Voting versus debate** — research findings do not make `parallel_vote` a shipped Stoke route. `self_consistency` is selectable; `parallel_vote` is not.
 
 2. **Diversity matters** — [DMAD (ICLR 2025)](https://openreview.net/forum?id=qsKo9mdGNu) showed that diverse reasoning approaches beat persona-based diversity. For us: use different model families, not just different prompts.
 
@@ -136,7 +155,7 @@ Classify prompt difficulty, route to cheap model for easy, expensive model for h
 
 4. **Collaborativeness** — [MoA](https://arxiv.org/abs/2406.04692) found models improve when seeing other models' outputs, even inferior ones. This is why parallel_merge works for text.
 
-5. **RecursiveMAS** — [+8.3% avg accuracy, 2.4x speedup, -75.6% tokens](https://recursivemas.github.io/) via latent-space recursion. The four collaboration patterns they identify map to ours: Sequential (chain), Mixture (parallel_merge), Distillation (chain with teacher→student), Deliberation (debate — implemented in `router.rs` as `deliberation`, not exposed on the request path).
+5. **RecursiveMAS** — research claims are not Stoke measurements. Its collaboration taxonomy does not imply that `chain`, `parallel_merge`, or `deliberation` are exposed gateway routes.
 
 ---
 

@@ -8,16 +8,20 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WORK_DIR="$(mktemp -d)"
-STOKE_PORT=18787
-COLD_PORT=21001
-WARM_PORT=21002
+STOKE_PORT=${STOKE_PORT:-18787}
+COLD_PORT=${COLD_PORT:-21001}
+WARM_PORT=${WARM_PORT:-21002}
 PIDS=()
 
 cleanup() {
-  for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
+  for pid in "${PIDS[@]:-}"; do kill -TERM "$pid" 2>/dev/null || true; done
+  for pid in "${PIDS[@]:-}"; do wait "$pid" 2>/dev/null || true; done
   rm -rf "$WORK_DIR"
 }
 trap cleanup EXIT
+
+fail() { echo "FAIL: $1"; echo "--- stoke.log ---"; tail -20 "$WORK_DIR/stoke.log" 2>/dev/null || true; exit 1; }
+wait_ready() { local url=$1; for _ in $(seq 1 40); do curl -fsS --max-time 1 "$url" >/dev/null 2>&1 && return 0; sleep 0.25; done; return 1; }
 
 echo "==> building stoke"
 cargo build --quiet --manifest-path "$REPO_DIR/Cargo.toml"
@@ -63,10 +67,7 @@ echo "==> starting stoke on :$STOKE_PORT"
   "$REPO_DIR/target/debug/stoke" > "$WORK_DIR/stoke.log" 2>&1) &
 PIDS+=($!)
 
-for _ in $(seq 1 20); do
-  curl -s --max-time 1 "http://127.0.0.1:$STOKE_PORT/health" >/dev/null && break
-  sleep 0.5
-done
+wait_ready "http://127.0.0.1:$STOKE_PORT/health" || fail "stoke readiness"
 sleep 2 # let the first poll cycle complete
 
 fail() { echo "FAIL: $1"; echo "--- stoke.log ---"; tail -20 "$WORK_DIR/stoke.log"; exit 1; }

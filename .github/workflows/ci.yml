@@ -83,3 +83,13 @@ jobs:
         run: |
           python scripts/smoke_gateway_auth.py target/release/stoke --verify-release-pins
           python scripts/smoke_headroom_package.py --binary target/release/stoke --worker-python "$(command -v python)"
+
+  js-plugins:
+    name: JS plugin chains (V8 feature)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Feature-gated JS plugin tests
+        run: cargo test --locked --features js-plugins

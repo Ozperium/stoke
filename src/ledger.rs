@@ -150,6 +150,51 @@ impl Ledger {
         tx.commit().map_err(|e| format!("ledger: commit: {e}"))
     }
 
+    /// Atomically admit a reservation against the durable spend and holds.
+    /// The IMMEDIATE transaction serializes the read/compare/insert sequence,
+    /// so concurrent callers cannot all observe the same remaining headroom.
+    pub fn reserve_if_within_limit(
+        &self,
+        key_id: &str,
+        amount: f64,
+        limit: f64,
+    ) -> Result<bool, String> {
+        if !(amount > 0.0) {
+            return Ok(true);
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| format!("ledger: tx: {e}"))?;
+        let spent: f64 = tx
+            .query_row(
+                "SELECT spend_usd FROM spend WHERE key_id = ?1",
+                params![key_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| format!("ledger: spend read: {e}"))?
+            .unwrap_or(0.0);
+        let held: f64 = tx
+            .query_row(
+                "SELECT COALESCE(SUM(amount_usd), 0) FROM reservations WHERE key_id = ?1",
+                params![key_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("ledger: holds read: {e}"))?;
+        if spent + held + amount > limit {
+            tx.commit().map_err(|e| format!("ledger: commit: {e}"))?;
+            return Ok(false);
+        }
+        tx.execute(
+            "INSERT INTO reservations (key_id, amount_usd, created_at) VALUES (?1, ?2, ?3)",
+            params![key_id, amount, unix_now()],
+        )
+        .map_err(|e| format!("ledger: reserve: {e}"))?;
+        tx.commit().map_err(|e| format!("ledger: commit: {e}"))?;
+        Ok(true)
+    }
+
     /// Atomically convert `amount` into durable spend and drop that much of
     /// the key's open reservations. One transaction: a charge without the
     /// release would double-count; a release without the charge would erase
@@ -743,6 +788,31 @@ mod tests {
         }
         let held = ledger.held("k").unwrap();
         assert!((held - 0.08).abs() < 1e-9, "expected 8 holds of 0.01, got {held}");
+    }
+
+    #[test]
+    fn concurrent_limited_reserves_admit_exactly_the_durable_cap() {
+        use std::sync::{Arc, Barrier};
+        let ledger = Arc::new(l());
+        let barrier = Arc::new(Barrier::new(32));
+        let mut handles = Vec::new();
+        for _ in 0..32 {
+            let ledger = Arc::clone(&ledger);
+            let barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                ledger
+                    .reserve_if_within_limit("k", 0.01, 0.08)
+                    .unwrap()
+            }));
+        }
+        let accepted = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .filter(|accepted| *accepted)
+            .count();
+        assert_eq!(accepted, 8);
+        assert!((ledger.held("k").unwrap() - 0.08).abs() < 1e-9);
     }
 
     #[test]

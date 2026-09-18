@@ -19,6 +19,35 @@
 - Native Codex subscription auth may be gateway-owned from the existing `~/.codex/auth.json`; `STOKE_API_KEYS` remains gateway auth. Explicit separate client OAuth is supported. Subscription traffic bypasses per-token USD metering, but provider plan limits and Stoke rate/loop controls still apply.
 - Optional Headroom is default-off and local. Before native Responses dispatch it accepts only a smaller, validated, lossless JSON-whitespace transformation for eligible tool-result strings; rejected or unavailable work retains the original outputs. The current worker lock targets macOS arm64 / CPython 3.11, with bounded request and batch sizes. It is not streamed-response compression or a universal token/billing-savings claim.
 
+## Complete shipped capability matrix (24)
+
+The audited main/nightly source ships these 24 capabilities. Client protocols are listed separately from provider types; optional, authenticated, local, subscription, and feature-gated boundaries are part of each claim.
+
+1. HTTP gateway daemon: self-hosted Rust binary, TOML configuration; no hosted gateway.
+2. Fail-closed gateway auth: `STOKE_API_KEYS` protects every endpoint except `/health`; upstream credentials are separate.
+3. OpenAI Chat Completions client protocol: `POST /v1/chat/completions`; provider/model must be configured or discovered.
+4. Pre-provider enforcement: budget, rate, exact/semantic loop, in-flight/fan-out holds; semantic mode needs an operator embedding model.
+5. Durable SQLite spend ledger: automatic, survives restart; unresolved crash holds require operator reconciliation.
+6. Node-aware local/remote/cloud placement and failover: ranks configured eligible capacity; failover is same-model connect-time/before-streaming.
+7. One-hop Stoke federation: authenticated `type=stoke` peers import `/v1/nodes` inventory; cycles are guarded.
+8. Auto-route v2: `auto`, `auto-cheap`, and `auto-fast` score configured/discovered candidates with fit exclusions and receipts; live E2E selection is not claimed.
+9. SSE passthrough and stream metering: Chat, Messages, and Responses; metered missing usage may be estimated.
+10. Stream race and hedged dispatch: opt-in connect-time race; small prompts across two verified non-cloud nodes, duplicating local compute.
+11. Non-stream cascade and self-consistency: bounded route patterns; non-stream only.
+12. Exact and optional semantic response cache: eligible named non-stream single routes; identity includes caller, route, model, and effective request; no Responses-cache claim.
+13. Exact-request in-flight coalescing: explicit named-route opt-in; bounded follower wait, then independent dispatch is possible.
+14. Built-in prompt harness, PII redaction, formatter, and JSONL audit: route opt-in; regex redaction is not a security boundary.
+15. HTTP webhook plugin hooks: opt-in pre-request, prompt-filter, and post-response hooks; not an OS sandbox.
+16. In-process JS/TS plugins: compile-time `--features js-plugins`; optional dependency, not default or sandboxed.
+17. Native Headroom output filter: optional/default-off, local/native Responses only; validated lossless JSON-whitespace compaction with bounded macOS arm64 / CPython 3.11 worker limits.
+18. Anthropic Messages client protocol: `POST /v1/messages`; requires an exact configured Anthropic provider/destination.
+19. Claude subscription OAuth: `stoke login-claude`; rate/loop controls remain, but subscription traffic has no USD price to meter.
+20. Claude Messages bridge to local OpenAI-compatible providers: explicit `claude-stoke-local--…` aliases; unsupported fields reject.
+21. Claude Messages bridge to Codex Responses providers: explicit `claude-stoke-codex--…` aliases; ambiguous aliases fail closed.
+22. OpenAI Responses client protocol and Codex subscription provider: `POST /v1/responses`, `stoke run codex`; native JSON/SSE, plan limits remain, subscription USD spend is omitted.
+23. Opt-in Claude subscription fallback: off by default; only qualified limit/rate errors trigger it; local fallback must be explicitly enabled and priced.
+24. CLI setup, inspection, ledger operations, and client launchers: `stoke-cli setup`, `stoke ledger`, `stoke run claude|codex`; external client executables remain prerequisites.
+
 ## Endpoints
 
 - `GET /health` — liveness; only unauthenticated endpoint.

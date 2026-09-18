@@ -24,9 +24,11 @@ LOCAL_PORT=${LOCAL_PORT:-11713}
 STOKE_PORT=${STOKE_PORT:-8792}
 KEY_A="key-alpha"
 FIXTURE_HOME="$WORK_DIR/home"
+PIDS=(); STOKE_PID=""; CLAUDE_PID=""; CODEX_PID=""; LOCAL_PID=""
 
 cleanup() {
-  kill $(jobs -p) 2>/dev/null || true
+  for pid in "${PIDS[@]:-}"; do kill -TERM "$pid" 2>/dev/null || true; done
+  for pid in "${PIDS[@]:-}"; do wait "$pid" 2>/dev/null || true; done
   if [ "${STOKE_SMOKE_KEEP:-0}" != "1" ]; then rm -rf "$WORK_DIR"; fi
 }
 trap cleanup EXIT
@@ -38,9 +40,15 @@ echo "==> building stoke"
 
 echo "==> starting mocks (claude-limit :$CLAUDE_PORT, codex :$CODEX_PORT, local :$LOCAL_PORT)"
 python3 "$REPO_DIR/scripts/mock_claude_limit.py" "$CLAUDE_PORT" limit >/dev/null 2>&1 &
+CLAUDE_PID=$!; PIDS+=("$CLAUDE_PID")
 python3 "$REPO_DIR/scripts/mock_counting_provider.py" "$CODEX_PORT" >/dev/null 2>&1 &
+CODEX_PID=$!; PIDS+=("$CODEX_PID")
 python3 "$REPO_DIR/scripts/mock_counting_provider.py" "$LOCAL_PORT" >/dev/null 2>&1 &
-sleep 1
+LOCAL_PID=$!; PIDS+=("$LOCAL_PID")
+wait_ready() { local url=$1; for _ in $(seq 1 40); do curl -fsS --max-time 1 "$url" >/dev/null 2>&1 && return 0; sleep 0.25; done; return 1; }
+wait_ready "http://127.0.0.1:$CLAUDE_PORT/count" || fail "claude readiness"
+wait_ready "http://127.0.0.1:$CODEX_PORT/count" || fail "codex readiness"
+wait_ready "http://127.0.0.1:$LOCAL_PORT/count" || fail "local readiness"
 
 claude_calls() { curl -s "http://127.0.0.1:$CLAUDE_PORT/count" | python3 -c 'import sys,json;print(json.load(sys.stdin)["calls"])'; }
 calls() { curl -s "http://127.0.0.1:${1:-$CODEX_PORT}/count" | python3 -c 'import sys,json;print(json.load(sys.stdin)["calls"])'; }
@@ -133,9 +141,12 @@ start_stoke() {
   ( cd "$FIXTURE_HOME" && exec env HOME="$FIXTURE_HOME" STOKE_API_KEYS="$KEY_A" \
       STOKE_TEST_SUBSCRIPTION_BASES="http://127.0.0.1:$CLAUDE_PORT,http://127.0.0.1:$CODEX_PORT/v1" \
       "$REPO_DIR/target/debug/stoke" > "$WORK_DIR/stoke.log" 2>&1 ) &
-  sleep 3
+  STOKE_PID=$!; PIDS+=("$STOKE_PID")
+  wait_ready "http://127.0.0.1:$STOKE_PORT/health" || fail "stoke readiness"
+  sleep 1
 }
-stop_stoke() { pkill -f "$REPO_DIR/target/debug/stoke" 2>/dev/null || true; sleep 1; }
+stop_stoke() { if [ -n "$STOKE_PID" ]; then kill -TERM "$STOKE_PID" 2>/dev/null || true; wait "$STOKE_PID" 2>/dev/null || true; STOKE_PID=""; fi; sleep 0.25; }
+restart_claude_mock() { kill -TERM "$CLAUDE_PID" 2>/dev/null || true; wait "$CLAUDE_PID" 2>/dev/null || true; python3 "$REPO_DIR/scripts/mock_claude_limit.py" "$CLAUDE_PORT" limit >/dev/null 2>&1 & CLAUDE_PID=$!; PIDS+=("$CLAUDE_PID"); wait_ready "http://127.0.0.1:$CLAUDE_PORT/count" || fail "claude restart readiness"; }
 
 # ── 1. Qualified 429 triggers the codex fallback ──────────────────────
 echo "==> assert: a qualified 429 falls back to the codex provider, retargeting the model"
@@ -170,9 +181,7 @@ echo "     upstream model retargeted ✔"
 
 echo "==> assert: with fallback disabled the qualified 429 surfaces unchanged"
 stop_stoke
-pkill -f "mock_claude_limit.py $CLAUDE_PORT" 2>/dev/null || true
-python3 "$REPO_DIR/scripts/mock_claude_limit.py" "$CLAUDE_PORT" limit >/dev/null 2>&1 &
-sleep 1
+restart_claude_mock
 write_config ""
 sed -i '' 's/^enabled = true$/enabled = false/' "$FIXTURE_HOME/stoke.toml" 2>/dev/null || sed -i 's/^enabled = true$/enabled = false/' "$FIXTURE_HOME/stoke.toml"
 start_stoke
@@ -187,9 +196,7 @@ stop_stoke
 # ── 2. Metered local fallback bills the caller's key ─────────────────
 echo "==> assert: a metered local fallback spends the CALLER's budget"
 stop_stoke
-pkill -f "mock_claude_limit.py $CLAUDE_PORT" 2>/dev/null || true
-python3 "$REPO_DIR/scripts/mock_claude_limit.py" "$CLAUDE_PORT" limit >/dev/null 2>&1 &
-sleep 1
+restart_claude_mock
 write_config ""
 sed -i '' 's/^codex_provider = "codex-sub"$/codex_provider = "missing-codex"/' "$FIXTURE_HOME/stoke.toml" 2>/dev/null \
   || sed -i 's/^codex_provider = "codex-sub"$/codex_provider = "missing-codex"/' "$FIXTURE_HOME/stoke.toml"

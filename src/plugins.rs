@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use futures_util::StreamExt;
+use sha2::{Digest, Sha256};
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 pub const HEADROOM_MAX_BYTES: usize = 1024 * 1024;
@@ -19,6 +21,22 @@ pub const HEADROOM_TOKEN_ENV: &str = "STOKE_HEADROOM_TOKEN";
 /// fat-fingered config: cloud instance-metadata endpoints (never a legitimate
 /// plugin target, and the classic credential-theft pivot), the unspecified
 /// address, and anything that isn't plain HTTP(S).
+fn is_metadata_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.octets() == [169, 254, 169, 254]
+                || v4.octets() == [169, 254, 170, 2]
+                || v4.is_unspecified()
+        }
+        IpAddr::V6(v6) => {
+            v6.is_unspecified()
+                || v6.is_multicast()
+                || v6.segments()[0] == 0xfd00
+                || v6.to_ipv4_mapped().is_some_and(|v4| is_metadata_ip(IpAddr::V4(v4)))
+        }
+    }
+}
+
 fn is_forbidden_url(url_str: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(url_str) else {
         return true; // Invalid URL → refuse
@@ -32,30 +50,46 @@ fn is_forbidden_url(url_str: &str) -> bool {
         return true; // No file://, gopher://, etc.
     }
 
-    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        match ip {
-            std::net::IpAddr::V4(v4) => {
-                // 169.254.169.254 (AWS/GCP/Azure) and 169.254.170.2 (ECS task role)
-                let is_metadata = v4.octets() == [169, 254, 169, 254]
-                    || v4.octets() == [169, 254, 170, 2];
-                if is_metadata || v4.is_unspecified() {
-                    return true;
-                }
-            }
-            std::net::IpAddr::V6(v6) => {
-                // fd00:ec2::254 is the AWS IMDS IPv6 endpoint
-                if v6.is_unspecified() || v6.is_multicast() || v6.segments()[0] == 0xfd00 {
-                    return true;
-                }
-            }
+    let host_ip = host.strip_prefix('[').and_then(|value| value.strip_suffix(']')).unwrap_or(host);
+    if let Ok(ip) = host_ip.parse::<IpAddr>() {
+        if is_metadata_ip(ip) {
+            return true;
         }
     } else {
         let blocked_hosts = ["metadata.google.internal", "metadata"];
-        if blocked_hosts.iter().any(|h| host.eq_ignore_ascii_case(h)) {
+        let normalized = host.trim_end_matches('.');
+        if blocked_hosts.iter().any(|h| normalized.eq_ignore_ascii_case(h)) {
             return true;
         }
     }
     false
+}
+
+async fn webhook_client(url_str: &str) -> Result<reqwest::Client, String> {
+    if is_forbidden_url(url_str) {
+        return Err("forbidden webhook URL (metadata endpoint or non-HTTP scheme)".to_string());
+    }
+    let url = reqwest::Url::parse(url_str).map_err(|error| error.to_string())?;
+    let mut builder = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy();
+    if let Some(host) = url.domain() {
+        let port = url.port_or_known_default().ok_or_else(|| "webhook URL has no usable port".to_string())?;
+        let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|error| format!("could not resolve webhook host: {}", error))?
+            .collect();
+        if addrs.is_empty() {
+            return Err("webhook host resolved to no addresses".to_string());
+        }
+        if addrs.iter().any(|addr| is_metadata_ip(addr.ip())) {
+            return Err("webhook host resolves to a metadata endpoint".to_string());
+        }
+        // Pin the validated addresses so a second DNS lookup cannot rebind the request.
+        builder = builder.resolve_to_addrs(host, &addrs);
+    }
+    builder.build().map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -80,7 +114,9 @@ mod url_tests {
         assert!(is_forbidden_url("http://169.254.169.254/latest/meta-data/"));
         assert!(is_forbidden_url("http://169.254.170.2/v2/credentials"));
         assert!(is_forbidden_url("http://metadata.google.internal/computeMetadata/v1/"));
+        assert!(is_forbidden_url("http://metadata.google.internal./computeMetadata/v1/"));
         assert!(is_forbidden_url("http://METADATA/computeMetadata"));
+        assert!(is_forbidden_url("http://[::ffff:169.254.169.254]/latest/meta-data/"));
         assert!(is_forbidden_url("http://0.0.0.0:9100/"));
         assert!(is_forbidden_url("file:///etc/passwd"));
         assert!(is_forbidden_url("gopher://evil/"));
@@ -114,7 +150,8 @@ pub struct PreRequestContext<'a> {
     pub model: &'a str,
     pub routing: &'a str,
     pub messages: &'a [Value],
-    pub api_key: &'a str,
+    /// Stable opaque identifier for the caller; the credential is never sent.
+    pub key_id: String,
     pub metadata: Value,
 }
 
@@ -143,7 +180,8 @@ pub struct PreRequestResult {
 pub struct PromptFilterContext<'a> {
     pub messages: &'a [Value],
     pub model: &'a str,
-    pub api_key: &'a str,
+    /// Stable opaque identifier for the caller; the credential is never sent.
+    pub key_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -163,7 +201,8 @@ pub struct PostResponseContext<'a> {
     pub response: &'a Value,
     pub cost_usd: f64,
     pub elapsed_ms: u64,
-    pub api_key: &'a str,
+    /// Stable opaque identifier for the caller; the credential is never sent.
+    pub key_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -175,17 +214,12 @@ pub struct PostResponseResult {
 
 pub struct Plugins {
     config: PluginConfig,
-    client: reqwest::Client,
     headroom_client: Option<reqwest::Client>,
     headroom_token: Option<String>,
 }
 
 impl Plugins {
     pub fn new(config: PluginConfig) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()
-            .unwrap_or_default();
         let headroom_token = std::env::var(HEADROOM_TOKEN_ENV)
             .ok()
             .filter(|token| !token.is_empty());
@@ -202,7 +236,7 @@ impl Plugins {
         } else {
             None
         };
-        Self { config, client, headroom_client, headroom_token }
+        Self { config, headroom_client, headroom_token }
     }
 
     pub fn has_pre_request(&self) -> bool {
@@ -293,11 +327,13 @@ impl Plugins {
                 model: &current_model,
                 routing: &current_routing,
                 messages,
-                api_key,
+                key_id: key_id(api_key),
                 metadata: metadata.clone(),
             };
-            let resp = self
-                .client
+            let client = webhook_client(url)
+                .await
+                .map_err(|e| format!("plugin {} refused: {}", url, e))?;
+            let resp = client
                 .post(url)
                 .json(&ctx)
                 .send()
@@ -359,10 +395,12 @@ impl Plugins {
             let ctx = PromptFilterContext {
                 messages: &current_messages,
                 model,
-                api_key,
+                key_id: key_id(api_key),
             };
-            let resp = self
-                .client
+            let client = webhook_client(url)
+                .await
+                .map_err(|e| format!("filter {} refused: {}", url, e))?;
+            let resp = client
                 .post(url)
                 .json(&ctx)
                 .send()
@@ -410,9 +448,16 @@ impl Plugins {
                 response: &current_response,
                 cost_usd,
                 elapsed_ms,
-                api_key,
+                key_id: key_id(api_key),
             };
-            match self.client.post(url).json(&ctx).send().await {
+            let client = match webhook_client(url).await {
+                Ok(client) => client,
+                Err(error) => {
+                    tracing::warn!("post_response plugin {} refused: {}", url, error);
+                    continue;
+                }
+            };
+            match client.post(url).json(&ctx).send().await {
                 Ok(resp) if resp.status().is_success() => {
                     if let Ok(result) = resp.json::<PostResponseResult>().await {
                         if let Some(ref r) = result.response {
@@ -427,6 +472,83 @@ impl Plugins {
         }
 
         current_response
+    }
+}
+
+fn key_id(api_key: &str) -> String {
+    let digest = Sha256::digest(api_key.as_bytes());
+    format!("sha256:{}", hex::encode(digest))
+}
+
+#[cfg(test)]
+mod webhook_security_tests {
+    use super::*;
+    use serde_json::json;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+    use std::thread;
+    use std::time::Instant;
+
+    #[test]
+    fn webhook_contexts_expose_only_a_stable_opaque_key_id() {
+        let secret = "gateway-secret-that-must-not-cross-the-boundary";
+        let messages = vec![json!({"role": "user", "content": "hello"})];
+        let response = json!({"choices": [{"message": {"content": "hi"}}]});
+        let pre = serde_json::to_value(PreRequestContext {
+            model: "model", routing: "single", messages: &messages,
+            key_id: key_id(secret), metadata: json!({}),
+        }).unwrap();
+        let filter = serde_json::to_value(PromptFilterContext {
+            messages: &messages, model: "model", key_id: key_id(secret),
+        }).unwrap();
+        let post = serde_json::to_value(PostResponseContext {
+            model: "model", response: &response, cost_usd: 0.1, elapsed_ms: 5,
+            key_id: key_id(secret),
+        }).unwrap();
+        for context in [pre, filter, post] {
+            assert!(!context.to_string().contains(secret));
+            assert!(context.get("api_key").is_none());
+            let id = context["key_id"].as_str().unwrap();
+            assert!(id.starts_with("sha256:") && id.len() == 71);
+            assert!(id.chars().skip(7).all(|c| c.is_ascii_hexdigit()));
+        }
+        assert_eq!(key_id(secret), key_id(secret));
+        assert_ne!(key_id(secret), key_id("different-secret"));
+    }
+
+    #[tokio::test]
+    async fn webhook_client_never_follows_redirects() {
+        let target = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let target_addr = target.local_addr().unwrap();
+        target.set_nonblocking(true).unwrap();
+        let reached = Arc::new(AtomicBool::new(false));
+        let target_reached = Arc::clone(&reached);
+        let target_thread = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_millis(500);
+            while Instant::now() < deadline {
+                match target.accept() {
+                    Ok(_) => { target_reached.store(true, Ordering::SeqCst); return; }
+                    Err(_) => thread::sleep(Duration::from_millis(10)),
+                }
+            }
+        });
+        let redirect_url = format!("http://{target_addr}/final");
+        let redirector = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let redirect_addr = redirector.local_addr().unwrap();
+        let redirect_thread = thread::spawn(move || {
+            let (mut stream, _) = redirector.accept().unwrap();
+            let mut request = [0_u8; 2048];
+            let _ = stream.read(&mut request);
+            write!(stream, "HTTP/1.1 302 Found\r\nLocation: {redirect_url}\r\nContent-Length: 2\r\n\r\n{{}}\r\n").unwrap();
+        });
+        let plugins = Plugins::new(PluginConfig {
+            pre_request: vec![format!("http://{redirect_addr}/start")], ..Default::default()
+        });
+        assert!(plugins.pre_request("model", "single", &[], "secret").await.is_err());
+        redirect_thread.join().unwrap();
+        target_thread.join().unwrap();
+        assert!(!reached.load(Ordering::SeqCst));
     }
 }
 

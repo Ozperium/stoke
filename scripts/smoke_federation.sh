@@ -17,18 +17,22 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WORK_A="$(mktemp -d)"
 WORK_B="$(mktemp -d)"
-A_PORT=18787
-B_PORT=18788
+A_PORT=${A_PORT:-18787}
+B_PORT=${B_PORT:-18788}
 B_KEY="stk-federation-test-key"
-MA_PORT=21011
-MB_PORT=21012
+MA_PORT=${MA_PORT:-21011}
+MB_PORT=${MB_PORT:-21012}
 PIDS=()
 
 cleanup() {
-  for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
+  for pid in "${PIDS[@]:-}"; do kill -TERM "$pid" 2>/dev/null || true; done
+  for pid in "${PIDS[@]:-}"; do wait "$pid" 2>/dev/null || true; done
   rm -rf "$WORK_A" "$WORK_B"
 }
 trap cleanup EXIT
+
+fail() { echo "FAIL: $1"; echo "--- A log ---"; tail -15 "$WORK_A/stoke.log" 2>/dev/null || true; echo "--- B log ---"; tail -15 "$WORK_B/stoke.log" 2>/dev/null || true; exit 1; }
+wait_ready() { local port=$1; for _ in $(seq 1 40); do curl -fsS --max-time 1 "http://127.0.0.1:$port/health" >/dev/null 2>&1 && return 0; sleep 0.25; done; return 1; }
 
 echo "==> building stoke"
 cargo build --quiet --manifest-path "$REPO_DIR/Cargo.toml"
@@ -84,12 +88,8 @@ PIDS+=($!)
   "$REPO_DIR/target/debug/stoke" > "$WORK_B/stoke.log" 2>&1) &
 PIDS+=($!)
 
-for port in $A_PORT $B_PORT; do
-  for _ in $(seq 1 20); do
-    curl -s --max-time 1 "http://127.0.0.1:$port/health" >/dev/null && break
-    sleep 0.5
-  done
-done
+wait_ready "$A_PORT" || fail "gateway A readiness"
+wait_ready "$B_PORT" || fail "gateway B readiness"
 sleep 3 # two poll cycles: B discovers node-b, then A imports from B
 
 fail() { echo "FAIL: $1"; echo "--- A log ---"; tail -15 "$WORK_A/stoke.log"; echo "--- B log ---"; tail -15 "$WORK_B/stoke.log"; exit 1; }

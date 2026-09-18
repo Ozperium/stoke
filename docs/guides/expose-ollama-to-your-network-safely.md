@@ -19,7 +19,7 @@ Ollama's OpenAI-compatible server has no auth. Binding it to `0.0.0.0` means it 
 curl http://192.168.1.20:11434/api/tags        # your full model inventory
 curl http://192.168.1.20:11434/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"qwen3:8b","messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"<model-id-from-your-Ollama>","messages":[{"role":"user","content":"hi"}]}'
 ```
 
 Both succeed. The first is reconnaissance — it tells an attacker exactly which models you run. The second burns your electricity and GPU on their prompt. There is no rate limit and nothing to stop a script from looping it. That's the cost of the one-line fix.
@@ -66,7 +66,7 @@ stoke-cli init --bind-all --output stoke.toml
 
 ```toml
 routing = "single"
-default_model = "qwen3:8b"   # whatever `ollama list` shows on your box
+default_model = "<model-id-from-your-Ollama>"   # whatever `ollama list` shows on your box
 
 [server]
 host = "0.0.0.0"        # Stoke faces the LAN
@@ -124,7 +124,7 @@ Try inference **without** a key — you should be refused:
 curl -s -o /dev/null -w '%{http_code}\n' \
   http://192.168.1.20:8787/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"qwen3:8b","messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"<model-id-from-your-Ollama>","messages":[{"role":"user","content":"hi"}]}'
 # 401        ← body: "Invalid or missing API key"
 ```
 
@@ -134,7 +134,7 @@ Now **with** the key:
 curl http://192.168.1.20:8787/v1/chat/completions \
   -H "Authorization: Bearer $STOKE_API_KEYS" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"qwen3:8b","messages":[{"role":"user","content":"say hi"}]}'
+  -d '{"model":"<model-id-from-your-Ollama>","messages":[{"role":"user","content":"say hi"}]}'
 # 200 with a normal chat completion; non-streaming responses also carry
 # stoke_cost and stoke_route.
 ```
