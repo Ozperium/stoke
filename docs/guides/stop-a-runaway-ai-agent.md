@@ -186,4 +186,4 @@ Grab the binary (static builds for macOS and Linux, checksum-verified, with a so
 curl -sSf https://stokegate.com/install | sh -s -- --version nightly
 ```
 
-The public stable release is v0.2.1 at commit 403c884 — a bare `| sh` resolves `latest` and compiles from source, so pin `--version nightly` for the prebuilt binary. Then `stoke-cli init`, add a `[[keys]]` cap, export `STOKE_API_KEYS`, and route your agent through `127.0.0.1:8787`. Full config reference and source: [github.com/Ozperium/stoke](https://github.com/Ozperium/stoke).
+A bare `| sh` downloads the latest stable platform archive; `--version nightly` explicitly selects the rolling prerelease. Pin `--version v0.2.2` for this release after verifying its publication and checksum. Source compilation is only the fallback when a platform archive is unavailable. Then `stoke-cli init`, add a `[[keys]]` cap, export `STOKE_API_KEYS`, and route your agent through `127.0.0.1:8787`. Full config reference and source: [github.com/Ozperium/stoke](https://github.com/Ozperium/stoke).

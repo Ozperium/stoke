@@ -13,7 +13,7 @@
 <meta property="og:title" content="Cap Claude Code API Spend with a Local Budget Gateway">
 <meta property="og:description" content="Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.">
 <meta property="og:url" content="https://stokegate.com/guides/cap-claude-code-api-spend/">
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Cap Claude Code API Spend with a Local Budget Gateway","description":"Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.","url":"https://stokegate.com/guides/cap-claude-code-api-spend/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-09-14"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Cap Claude Code API Spend with a Local Budget Gateway","description":"Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.","url":"https://stokegate.com/guides/cap-claude-code-api-spend/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-10-11"}</script>
 <script src="/tracking.js" defer></script>
 <style>
 :root{--bg:#0a0a0b;--bg2:#131316;--bg3:#1a1a20;--border:#2a2a32;--text:#e4e4e7;--muted:#8a8a96;--accent:#3bdb78;--red:#ff5454;
@@ -87,7 +87,7 @@ footer{border-top:1px solid var(--border);padding:28px 24px;color:var(--muted);f
 <h1>Cap Claude Code API Spend with a Local Budget Gateway</h1>
 <p>Claude Code on a metered Anthropic API key can retry a failed tool call, re-send the same prompt in a loop, or grind through a task far longer than you expected. Anthropic's billing alerts fire hours late, so the first time you notice is on the invoice. This guide puts a small local gateway — <a href="https://github.com/Ozperium/stoke">Stoke</a> — between Claude Code and the Anthropic API so requests over your cap are refused <em>before</em> Anthropic is contacted, and repeated identical prompts are stopped by a loop breaker.</p>
 <h2 id="how-this-works">How this works</h2>
-<p>Stoke is a single Rust binary (~5.5 MB) that listens on <code>127.0.0.1:8787</code> and speaks the Anthropic Messages API on <code>POST /v1/messages</code>. You point <code>ANTHROPIC_BASE_URL</code> at it. On every request Stoke runs its enforcement — auth, budget cap, rate limit, loop breaker — and only then forwards the request to Anthropic. Nothing that trips a check ever reaches Anthropic, so it never costs a token.</p>
+<p>Stoke's server binary (with a separate <code>stoke-cli</code> companion) listens on <code>127.0.0.1:8787</code> and speaks the Anthropic Messages API on <code>POST /v1/messages</code>. You point <code>ANTHROPIC_BASE_URL</code> at it. On every request Stoke runs its enforcement — auth, budget cap, rate limit, loop breaker — and only then forwards the request to Anthropic. Nothing that trips a check ever reaches Anthropic, so it never costs a token.</p>
 <p>Be clear about the scope: <strong>this forwards to Anthropic. It does not run Claude Code on local models.</strong> Stoke is a policy-enforcing passthrough, not a translator — your prompts still go to Claude, you still pay Anthropic's per-token price, and the gateway's job is to refuse the calls you don't want to pay for.</p>
 <h2 id="install-stoke">Install Stoke</h2>
 <pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -sSf</span> https://stokegate.com/install | sh</code></pre>
@@ -132,7 +132,7 @@ spend cannot be metered and `budget_usd` could not enforce a cap.</code></pre>
 <h2 id="point-claude-code-at-stoke">Point Claude Code at Stoke</h2>
 <p>The launcher sets Claude Code's base URL and Bearer token for the child process, and removes the real upstream key from that child. In the shell where you run Claude Code:</p>
 <pre><code class="lang-bash"><span class="tok-var">STOKE_API_KEY</span>=<span class="tok-str">"cc-cap-key"</span> stoke run claude</code></pre>
-<p>Claude Code now sends every request to <code>http://127.0.0.1:8787/v1/messages</code> with <code>Authorization: Bearer ***</code>, and Stoke enforces before forwarding to Anthropic. The separately running Stoke server keeps <code>ANTHROPIC_API_KEY</code>; <code>stoke run</code> does not expose it to Claude Code.</p>
+<p>Claude Code now sends every request to <code>http://127.0.0.1:8787/v1/messages</code> with <code>Authorization: Bearer &lt;gateway-key&gt;</code>, and Stoke enforces before forwarding to Anthropic. The separately running Stoke server keeps <code>ANTHROPIC_API_KEY</code>; <code>stoke run</code> does not expose it to Claude Code.</p>
 <h2 id="verify-it-worked">Verify it worked</h2>
 <p>Health check needs no auth:</p>
 <pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -sS</span> http://<span class="tok-num">127.0</span>.<span class="tok-num">0.1</span>:<span class="tok-num">8787</span>/health

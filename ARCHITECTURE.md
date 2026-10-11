@@ -16,10 +16,10 @@ Two binaries build from this crate (`Cargo.toml`):
 | `stoke` | `src/main.rs` | The gateway server (default port 8787), plus `run claude` / `run codex` client launchers |
 | `stoke-cli` | `src/cli.rs` | Companion CLI: `init`, `serve`, `route`, `bench`, `models`, `pricing`, `routes`, `version` |
 
-The public stable release is `v0.2.1` at commit `403c884`; this document describes the
-newer main/nightly checkout unless a section says otherwise. Install options are a source
-build, a verified release artifact, or the included Dockerfile; do not treat nightly as
-stable.
+This document describes the `v0.2.2` source candidate unless a section says otherwise.
+The published release manifest identifies its exact source revision. Install options are
+a source build, a verified release artifact, or the included Dockerfile; do not treat
+nightly as stable or the Dockerfile as a published image.
 
 The launchers are implemented in `src/client_run.rs`. They change only the child
 process environment/configuration: Claude Code receives Stoke as its Anthropic base URL,

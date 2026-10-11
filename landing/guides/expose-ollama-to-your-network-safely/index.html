@@ -13,7 +13,7 @@
 <meta property="og:title" content="Expose Ollama to Your Network Safely">
 <meta property="og:description" content="Setting OLLAMA_HOST=0.0.0.0 publishes an unauthenticated model server to your whole LAN. Put an authenticated Stoke gateway in front of Ollama instead.">
 <meta property="og:url" content="https://stokegate.com/guides/expose-ollama-to-your-network-safely/">
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Expose Ollama to Your Network Safely","description":"Setting OLLAMA_HOST=0.0.0.0 publishes an unauthenticated model server to your whole LAN. Put an authenticated Stoke gateway in front of Ollama instead.","url":"https://stokegate.com/guides/expose-ollama-to-your-network-safely/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-09-14"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Expose Ollama to Your Network Safely","description":"Setting OLLAMA_HOST=0.0.0.0 publishes an unauthenticated model server to your whole LAN. Put an authenticated Stoke gateway in front of Ollama instead.","url":"https://stokegate.com/guides/expose-ollama-to-your-network-safely/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-10-11"}</script>
 <script src="/tracking.js" defer></script>
 <style>
 :root{--bg:#0a0a0b;--bg2:#131316;--bg3:#1a1a20;--border:#2a2a32;--text:#e4e4e7;--muted:#8a8a96;--accent:#3bdb78;--red:#ff5454;
@@ -92,7 +92,7 @@ footer{border-top:1px solid var(--border);padding:28px 24px;color:var(--muted);f
 <span class="tok-kw">curl</span> http://<span class="tok-num">192.168</span>.<span class="tok-num">1.20</span>:<span class="tok-num">11434</span>/api/tags        <span class="tok-com"># your full model inventory</span>
 <span class="tok-kw">curl</span> http://<span class="tok-num">192.168</span>.<span class="tok-num">1.20</span>:<span class="tok-num">11434</span>/v1/chat/completions \
  <span class="tok-flag"> -H</span> <span class="tok-str">'Content-Type: application/json'</span> \
- <span class="tok-flag"> -d</span> <span class="tok-str">'{"model":"qwen3:8b","messages":[{"role":"user","content":"hi"}]}'</span></code></pre>
+ <span class="tok-flag"> -d</span> <span class="tok-str">'{"model":"&lt;model-id-from-your-Ollama&gt;","messages":[{"role":"user","content":"hi"}]}'</span></code></pre>
 <p>Both succeed. The first is reconnaissance — it tells an attacker exactly which models you run. The second burns your electricity and GPU on their prompt. There is no rate limit and nothing to stop a script from looping it. That's the cost of the one-line fix.</p>
 <h2 id="the-safer-topology">The safer topology</h2>
 <p>Keep Ollama private. Put Stoke — a single ~5.5 MB Rust binary that sits between agents and model APIs — on the network edge instead:</p>
@@ -114,7 +114,7 @@ footer{border-top:1px solid var(--border);padding:28px 24px;color:var(--muted);f
 <pre><code class="lang-bash"><span class="tok-kw">stoke</span>-cli init<span class="tok-flag"> --bind-all</span><span class="tok-flag"> --output</span> stoke.toml</code></pre>
 <p><code>--bind-all</code> sets the server host to <code>0.0.0.0</code>. <code>stoke-cli init</code> also discovers a default model from your own Ollama at generation time — Stoke ships zero model names of its own. The result looks like this (trimmed):</p>
 <pre><code class="lang-toml"><span class="tok-key">routing</span> = <span class="tok-str">"single"</span>
-<span class="tok-key">default_model</span> = <span class="tok-str">"qwen3:8b"</span>   <span class="tok-com"># whatever `ollama list` shows on your box</span>
+<span class="tok-key">default_model</span> = <span class="tok-str">"&lt;model-id-from-your-Ollama&gt;"</span>   <span class="tok-com"># whatever `ollama list` shows on your box</span>
 <span class="tok-sec">
 [server]</span>
 <span class="tok-key">host</span> = <span class="tok-str">"0.0.0.0"</span>        <span class="tok-com"># Stoke faces the LAN</span>
@@ -148,13 +148,13 @@ footer{border-top:1px solid var(--border);padding:28px 24px;color:var(--muted);f
 <pre><code class="lang-bash"><span class="tok-kw">curl</span><span class="tok-flag"> -s</span><span class="tok-flag"> -o</span> /dev/null<span class="tok-flag"> -w</span> <span class="tok-str">'%{http_code}\n'</span> \
   http://<span class="tok-num">192.168</span>.<span class="tok-num">1.20</span>:<span class="tok-num">8787</span>/v1/chat/completions \
  <span class="tok-flag"> -H</span> <span class="tok-str">'Content-Type: application/json'</span> \
- <span class="tok-flag"> -d</span> <span class="tok-str">'{"model":"qwen3:8b","messages":[{"role":"user","content":"hi"}]}'</span>
+ <span class="tok-flag"> -d</span> <span class="tok-str">'{"model":"&lt;model-id-from-your-Ollama&gt;","messages":[{"role":"user","content":"hi"}]}'</span>
 <span class="tok-com"># 401        ← body: "Invalid or missing API key"</span></code></pre>
 <p>Now <strong>with</strong> the key:</p>
 <pre><code class="lang-bash"><span class="tok-kw">curl</span> http://<span class="tok-num">192.168</span>.<span class="tok-num">1.20</span>:<span class="tok-num">8787</span>/v1/chat/completions \
  <span class="tok-flag"> -H</span> <span class="tok-str">"Authorization: Bearer $STOKE_API_KEYS"</span> \
  <span class="tok-flag"> -H</span> <span class="tok-str">'Content-Type: application/json'</span> \
- <span class="tok-flag"> -d</span> <span class="tok-str">'{"model":"qwen3:8b","messages":[{"role":"user","content":"say hi"}]}'</span>
+ <span class="tok-flag"> -d</span> <span class="tok-str">'{"model":"&lt;model-id-from-your-Ollama&gt;","messages":[{"role":"user","content":"say hi"}]}'</span>
 <span class="tok-com"># 200 with a normal chat completion; non-streaming responses also carry</span>
 <span class="tok-com"># stoke_cost and stoke_route.</span></code></pre>
 <p>401 without the key, 200 with it, and Ollama's own port dead from the LAN — that's the whole property you wanted.</p>

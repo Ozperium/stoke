@@ -2,7 +2,7 @@
 
 **A self-hosted gateway for controlling model traffic: hard budget caps, loop detection, and local-first routing.**
 
-Status: public source is newer than stable `v0.2.1`. The stable tag is commit `403c884`; this checkout is main/nightly work after that tag. MIT licensed. Stoke ships no models or provider credits.
+Release candidate: `v0.2.2`. See [release notes](docs/releases/v0.2.2.md) for the included fixes and platform limits. Published availability is recorded in [GitHub Releases](https://github.com/Ozperium/stoke/releases); a source checkout alone is not a published binary. MIT licensed. Stoke ships no models or provider credits.
 
 ## Why
 
@@ -163,13 +163,13 @@ The ledger path follows the gateway's: `STOKE_LEDGER_PATH`, else `~/.stoke/ledge
 
 The product boundary and the answer to “where do the models come from?” are recorded in [`docs/control-plane-positioning.md`](docs/control-plane-positioning.md). Stoke is a control plane for capacity you attach; it does not ship a hidden model catalogue or provider credits.
 
-The public repository has a stable `v0.2.1` at commit `403c884`. Main is newer and is published through the rolling `nightly` channel when release CI succeeds; nightly is not the stable release. Verify the downloaded asset and checksum before treating it as a deployment artifact.
+This checkout prepares `v0.2.2`. Verify its publication in GitHub Releases and the downloaded asset's checksum before treating it as a deployment artifact. The rolling `nightly` channel is a prerelease, not stable.
 
 ```bash
-curl -sSf https://stokegate.com/install | sh -s -- --version nightly
+curl -sSf https://stokegate.com/install | sh -s -- --version v0.2.2
 ```
 
-For the stable line, obtain the `v0.2.1` release asset and verify its published checksum. For main/nightly behavior, use the explicit nightly channel. To build the checked-out source yourself:
+For main/nightly behavior, use the explicit `--version nightly` channel. To build the checked-out source yourself:
 
 ```bash
 git clone https://github.com/Ozperium/stoke.git
@@ -344,7 +344,7 @@ Subscription traffic (e.g. Claude Max/Pro seats) is quota-world, not dollar-worl
 
 ## Stable and nightly scope
 
-Stable `v0.2.1` is the public release at commit `403c884`. This checkout is newer main/nightly documentation and may contain changes not present in that stable artifact. Model IDs are discovered or explicitly configured; Stoke ships no model defaults. Cache identity/policy, bounded exact coalescing, validated retry hints, native Responses/Codex authentication, and optional Headroom are documented capabilities of the audited checkout, but verify the target artifact before deployment. Headroom is disabled by default and only filters eligible Responses function outputs; it does not compress streamed responses or promise general savings. See the [optional Headroom guide](docs/guides/optional-headroom.md).
+The `v0.2.2` release notes identify this candidate's included changes; the published release manifest identifies the exact source revision. Nightly remains a separate prerelease channel. Model IDs are discovered or explicitly configured; Stoke ships no model defaults. Cache identity/policy, bounded exact coalescing, validated retry hints, native Responses/Codex authentication, and optional Headroom are documented source capabilities, but verify the target artifact before deployment. Headroom is disabled by default and only filters eligible Responses function outputs; it does not compress streamed responses or promise general savings. See the [optional Headroom guide](docs/guides/optional-headroom.md).
 
 ## Verification
 

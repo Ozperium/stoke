@@ -65,6 +65,12 @@ jobs:
       - name: Smoke — durable budget ledger (spend survives crash/restart, raw key never in DB)
         run: ./scripts/smoke_durable_ledger.sh
 
+      - name: Landing build, links, sitemap, and installer syntax
+        run: |
+          python3 scripts/build_guides.py
+          python3 scripts/check_landing.py
+          sh -n landing/install.sh
+
   headroom:
     name: optional Headroom — macOS arm64
     runs-on: macos-15
