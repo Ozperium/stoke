@@ -5,6 +5,7 @@ const EVENTS = new Set([
   'panel_demo_clicked',
   'local_capacity_cta_clicked',
   'guides_clicked',
+  'cloud_invitation_requested',
 ]);
 
 export async function onRequestPost({ request, env }) {

@@ -5,6 +5,7 @@
 ## Facts an agent needs before using it
 
 - Default listen address: `127.0.0.1:8787`; config is TOML.
+- The complete 24-capability inventory now lives at [the gateway surface](https://stokegate.com/gateway/); use that route instead of the retired homepage `#capabilities` section.
 - Fail-closed: without `STOKE_API_KEYS` and without `STOKE_DEV=1`, every endpoint except `GET /health` rejects requests.
 - OpenAI Chat Completions clients: `OPENAI_BASE_URL=http://127.0.0.1:8787/v1`.
 - Native Codex: `STOKE_API_KEY=... stoke run codex`; Stoke can read the existing native login at `~/.codex/auth.json` for the gateway-owned subscription path while `STOKE_API_KEYS` authenticates the gateway hop. Responses JSON, reasoning, tool calls, and SSE remain un-translated.

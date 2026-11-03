@@ -1,0 +1,121 @@
+{
+  "$schema": "https://www.designtokens.org/schemas/2025.10/format.json",
+  "$description": "Premium graphite-and-ivory product storytelling with a restrained ember accent.",
+  "color": {
+    "$type": "color",
+    "primary": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.09,
+          0.09,
+          0.086
+        ],
+        "hex": "#171716"
+      }
+    },
+    "secondary": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.957,
+          0.941,
+          0.91
+        ],
+        "hex": "#f4f0e8"
+      }
+    },
+    "tertiary": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.937,
+          0.467,
+          0.31
+        ],
+        "hex": "#ef774f"
+      }
+    }
+  },
+  "spacing": {
+    "$type": "dimension",
+    "sm": {
+      "$value": {
+        "value": 12,
+        "unit": "px"
+      }
+    },
+    "md": {
+      "$value": {
+        "value": 24,
+        "unit": "px"
+      }
+    },
+    "lg": {
+      "$value": {
+        "value": 56,
+        "unit": "px"
+      }
+    }
+  },
+  "rounded": {
+    "$type": "dimension",
+    "sm": {
+      "$value": {
+        "value": 12,
+        "unit": "px"
+      }
+    },
+    "md": {
+      "$value": {
+        "value": 18,
+        "unit": "px"
+      }
+    },
+    "lg": {
+      "$value": {
+        "value": 22,
+        "unit": "px"
+      }
+    }
+  },
+  "typography": {
+    "display": {
+      "$type": "typography",
+      "$value": {
+        "fontFamily": "Arial Narrow, Avenir Next Condensed, Inter, sans-serif",
+        "fontSize": {
+          "value": 6.4,
+          "unit": "rem"
+        },
+        "fontWeight": 800,
+        "letterSpacing": {
+          "value": -0.075,
+          "unit": "em"
+        }
+      }
+    },
+    "body": {
+      "$type": "typography",
+      "$value": {
+        "fontFamily": "Inter, ui-sans-serif, sans-serif",
+        "fontSize": {
+          "value": 1,
+          "unit": "rem"
+        },
+        "fontWeight": 400
+      }
+    },
+    "mono": {
+      "$type": "typography",
+      "$value": {
+        "fontFamily": "SFMono-Regular, Consolas, monospace",
+        "fontSize": {
+          "value": 0.75,
+          "unit": "rem"
+        },
+        "fontWeight": 700
+      }
+    }
+  }
+}

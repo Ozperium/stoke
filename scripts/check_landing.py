@@ -10,6 +10,7 @@ import runpy
 import re
 import subprocess
 import tempfile
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,39 +47,53 @@ def local_target(href):
 home_parser, home_text = parse(LANDING / "index.html")
 assert home_parser.tags[0][0] == "html" and home_parser.tags[0][1].get("lang") == "en"
 assert sum(tag == "h1" for tag, _ in home_parser.tags) == 1
-assert "id=\"capabilities\"" in (LANDING / "index.html").read_text()
-assert len(re.findall(r'data-feature="\d+"', (LANDING / "index.html").read_text())) == 24
-assert "One gateway, 24 evidenced capabilities." in home_text
-for number in range(1, 25):
-    assert f'data-feature="{number}"' in (LANDING / "index.html").read_text(), f"missing capability {number}"
+gateway_html = (LANDING / "gateway" / "index.html").read_text()
+assert len(re.findall(r'<tr><td>\d{2}</td>', gateway_html)) == 24, "gateway matrix is not 24 rows"
+assert "#capabilities" not in (LANDING / "llms.txt").read_text().replace("retired homepage `#capabilities`", "")
 
 # Every same-page anchor resolves, and every first-party href points at a file/route.
-for href in home_parser.hrefs:
-    if href.startswith("#"):
-        assert href[1:] in home_parser.ids, f"missing anchor: {href}"
-    else:
+parsers = {}
+for page_path in sorted(LANDING.rglob("index.html")):
+    parsers[page_path] = parse(page_path)[0]
+for page_path, parser in parsers.items():
+    for href in parser.hrefs:
         target = local_target(href)
         if target is not None:
-            assert target.is_file(), f"missing local link target: {href} -> {target}"
+            assert target.is_file(), f"missing local link target: {page_path}: {href} -> {target}"
+            fragment = urlparse(href).fragment
+            if fragment:
+                assert fragment in parsers[target].ids, f"missing anchor: {page_path}: {href}"
 
 # Required evidence and boundary language.
-for phrase in (
-    "Run the failure proof, not a simulation.", "scripts/smoke_spend.sh", "PII redaction",
-    "builtins.pii_redact", '"stoke_route"', "GET /v1/nodes", "Two machines, one endpoint",
-    "durable", "subscription", "feature-gated", "stream can still overshoot",
-    "client protocol", "provider", "STOKE_API_KEYS", "POST /ui/demo",
-):
-    assert phrase.lower() in home_text.lower(), f"missing evidence copy: {phrase}"
-for stale in ("supports every provider", "all provider", "unlimited savings", "guaranteed savings", "zero cost"):
-    assert stale not in home_text.lower(), f"stale/overclaiming copy: {stale}"
+all_text = "\n".join(parse(path)[1] for path in parsers)
+for phrase in ("PII redaction", "GET /v1/nodes", "durable", "subscription", "feature-gated", "client paths", "provider", "STOKE_API_KEYS", "POST /v1/responses"):
+    assert phrase.lower() in all_text.lower(), f"missing evidence copy: {phrase}"
+for stale in ("supports every provider", "supports all providers", "unlimited savings", "guaranteed savings", "zero cost"):
+    assert stale not in all_text.lower(), f"stale/overclaiming copy: {stale}"
 
 # Dynamic UI has an honest live region and keyboard/mobile controls.
-assert any(a.get("id") == "nav-toggle" and a.get("aria-controls") == "nav-links" and a.get("aria-expanded") == "false" for t, a in home_parser.tags if t == "button")
-assert any(a.get("id") == "panel-demo-feed" and a.get("role") == "log" and a.get("aria-live") == "polite" for t, a in home_parser.tags)
-assert any(a.get("id") == "term-body" and a.get("aria-live") == "polite" for t, a in home_parser.tags)
+assert any("data-nav-toggle" in a and a.get("aria-controls") == "nav-menu" and a.get("aria-expanded") == "false" for t, a in home_parser.tags if t == "button")
+assert any("data-flow-demo" in a for t, a in home_parser.tags)
+assert any(a.get("aria-label") and "illustrative" in a.get("aria-label", "").lower() for t, a in home_parser.tags)
 for tag, attrs in home_parser.tags:
     if tag == "button": assert attrs.get("type") == "button", "button missing explicit type"
-assert "prefers-reduced-motion" in (LANDING / "index.html").read_text()
+flow_tabs = [attrs for tag, attrs in home_parser.tags if tag == "button" and attrs.get("role") == "tab"]
+assert len(flow_tabs) == 3, "flow tablist must have three tabs"
+assert {attrs.get("id") for attrs in flow_tabs} == {"flow-tab-route", "flow-tab-guardrail", "flow-tab-portability"}
+assert all(attrs.get("aria-controls") == "flow-panel" for attrs in flow_tabs), "flow tabs must share their panel"
+assert {attrs.get("tabindex") for attrs in flow_tabs} == {"0", "-1"}
+flow_panels = [attrs for tag, attrs in home_parser.tags if attrs.get("id") == "flow-panel"]
+assert len(flow_panels) == 1 and flow_panels[0].get("role") == "tabpanel", "flow panel ARIA missing"
+assert flow_panels[0].get("aria-labelledby") == "flow-tab-route"
+flow_statuses = [attrs for tag, attrs in home_parser.tags if "data-flow-status" in attrs]
+assert len(flow_statuses) == 1 and flow_statuses[0].get("role") == "status"
+assert flow_statuses[0].get("aria-live") == "polite" and flow_statuses[0].get("aria-atomic") == "true"
+site_css = (LANDING / "site.css").read_text()
+site_js = (LANDING / "site.js").read_text()
+assert ".site-nav.nav-enhanced .nav-links" in site_css and ".site-nav.nav-enhanced .nav-toggle" in site_css
+assert "header.classList.add('nav-enhanced')" in site_js and "event.key === 'Escape'" in site_js
+assert "event.key === 'Home'" in site_js and "event.key === 'End'" in site_js
+assert "prefers-reduced-motion" in site_css
 
 # All rendered routes must have titles and resolve their first-party links.
 for page_path in sorted(LANDING.rglob("index.html")):
@@ -106,11 +121,14 @@ for route in ("security", "legal", "contact"):
     assert f"https://stokegate.com/{route}/" in page.read_text()
 
 tracking = (LANDING / "tracking.js").read_text()
-for event in ("install_cta_clicked", "github_clicked", "panel_demo_clicked", "local_capacity_cta_clicked", "guides_clicked"):
-    assert f'data-track="{event}"' in (LANDING / "index.html").read_text()
-assert 'navigator.sendBeacon("/events"' in tracking and "install_section_viewed" in tracking
 handler = (ROOT / "functions" / "events.js").read_text()
-assert "INSERT INTO events" in handler and "panel_demo_clicked" in handler
+allowed_events = set(re.findall(r"'([a-z0-9_]+)'", handler.split("]);", 1)[0]))
+tracked_events = {attrs["data-track"] for parser in parsers.values() for tag, attrs in parser.tags if "data-track" in attrs}
+assert tracked_events <= allowed_events, f"unallowlisted tracking event: {sorted(tracked_events - allowed_events)}"
+assert 'navigator.sendBeacon("/events"' in tracking and "install_section_viewed" in tracking
+assert "INSERT INTO events" in handler and "cloud_invitation_requested" in handler
+assert "EVENTS.has(body.event)" in handler and "body.event" in handler
+assert "document.cookie" not in tracking and "localStorage" not in tracking
 wrangler = (ROOT / "wrangler.toml").read_text()
 assert "d1_databases" in wrangler and "c04effbf-1293-4b35-84d3-9fb47519ed73" in wrangler
 
@@ -152,9 +170,20 @@ for invalid_slug in ("../escape", 'bad"slug', "two/parts", "", "UpperCase", "spa
     else:
         raise AssertionError(f"invalid guide slug accepted: {invalid_slug!r}")
 
-# Social previews are required on the homepage and every generated guide route.
-indexable = [LANDING / "index.html", LANDING / "guides" / "index.html"]
+# Social previews are required on the homepage, Cloud, gateway, and every generated guide route.
+indexable = [
+    LANDING / "index.html",
+    LANDING / "cloud" / "index.html",
+    LANDING / "gateway" / "index.html",
+    LANDING / "guides" / "index.html",
+]
 indexable.extend(sorted((LANDING / "guides").glob("*/index.html")))
+website_pages = {
+    LANDING / "index.html",
+    LANDING / "cloud" / "index.html",
+    LANDING / "gateway" / "index.html",
+    LANDING / "guides" / "index.html",
+}
 for page_path in indexable:
     parser, _ = parse(page_path)
     page_html = page_path.read_text()
@@ -168,7 +197,7 @@ for page_path in indexable:
     assert values("meta", "property", "og:image:height", "content") == ["630"]
     assert values("meta", "name", "twitter:card", "content") == ["summary_large_image"]
     assert values("meta", "name", "twitter:image", "content") == ["https://stokegate.com/og-image.png"]
-    assert values("meta", "property", "og:type", "content") == ["website" if page_path in indexable[:2] else "article"]
+    assert values("meta", "property", "og:type", "content") == ["website" if page_path in website_pages else "article"]
     for key, property_name in (("property", "og:title"), ("property", "og:description"), ("property", "og:image:alt"), ("name", "twitter:title"), ("name", "twitter:description"), ("name", "twitter:image:alt")):
         found = values("meta", key, property_name, "content")
         assert len(found) == 1 and bool(found[0]), f"missing or duplicate {property_name}: {page_path}"
@@ -176,7 +205,12 @@ for page_path in indexable:
     assert len(schemas) == 1, f"JSON-LD count: {page_path}"
     schema = json.loads(schemas[0])
     assert schema["@context"] == "https://schema.org" and schema["url"] == canonical
-    expected_type = "SoftwareApplication" if page_path == LANDING / "index.html" else "CollectionPage" if page_path == LANDING / "guides" / "index.html" else "TechArticle"
+    expected_type = (
+        "SoftwareApplication" if page_path == LANDING / "index.html"
+        else "WebPage" if page_path in {LANDING / "cloud" / "index.html", LANDING / "gateway" / "index.html"}
+        else "CollectionPage" if page_path == LANDING / "guides" / "index.html"
+        else "TechArticle"
+    )
     assert schema["@type"] == expected_type, f"JSON-LD type: {page_path}"
     if expected_type == "SoftwareApplication":
         package_text = (ROOT / "Cargo.toml").read_text().split("[package]", 1)[1].split("\n[", 1)[0]

@@ -303,12 +303,12 @@ PAGE = """<!DOCTYPE html>
 <meta property="og:image" content="{site}/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Stoke: enforce AI agent spend before the bill">
+<meta property="og:image:alt" content="Your models. Wherever you work.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{title}">
 <meta name="twitter:description" content="{description}">
 <meta name="twitter:image" content="{site}/og-image.png">
-<meta name="twitter:image:alt" content="Stoke: enforce AI agent spend before the bill">
+<meta name="twitter:image:alt" content="Your models. Wherever you work.">
 <script type="application/ld+json">{jsonld}</script>
 <script src="/tracking.js" defer></script>
 <style>{css}</style>
@@ -420,7 +420,7 @@ def main():
     print(f"  index -> landing/guides/index.html ({len(built)} guides)")
 
     urls = [f"{SITE}/", f"{SITE}/guides/"] + [f"{SITE}/guides/{m['slug']}/" for m in built]
-    urls += [f"{SITE}/{route}/" for route in ("security", "legal", "contact")
+    urls += [f"{SITE}/{route}/" for route in ("cloud", "gateway", "security", "legal", "contact")
              if os.path.isfile(os.path.join(ROOT, "landing", route, "index.html"))]
     today = date.today().isoformat()
     sm = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
