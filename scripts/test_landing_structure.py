@@ -8,6 +8,7 @@ import sys
 from xml.etree import ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1] / "landing"
+DYNAMIC_PATHS = {"/api/waitlist"}
 EXPECTED_MEDIA = {
     "stoke-preview.mp4",
     "stoke-preview-poster.jpg",
@@ -56,6 +57,8 @@ def local_target(href):
     if not href.startswith("/") or href.startswith("//"):
         return None
     path = href.split("#", 1)[0].split("?", 1)[0]
+    if path in DYNAMIC_PATHS:
+        return None
     if not path or path == "/":
         return ROOT / "index.html"
     candidate = ROOT / path.lstrip("/")
@@ -125,12 +128,24 @@ def main():
     check("prefers-reduced-motion" in css, "reduced motion CSS missing")
     check("data-nav-toggle" in home and "aria-expanded" in home, "responsive navigation hooks missing")
     check("public site should" not in combined.lower(), "internal meta-copy leaked into public page")
-    check("<form" not in home.lower() and "<form" not in cloud.lower(), "preview pages must not add a fake signup form")
+    check("<form" not in home.lower(), "homepage must not add a fake signup form")
+    check("id=\"waitlist\"" in cloud and "action=\"/api/waitlist\"" in cloud and "method=\"post\"" in cloud, "waitlist form contract missing")
+    check('name="email"' in cloud and 'type="email"' in cloud and 'name="persona"' in cloud and 'value="solo"' in cloud and 'value="team"' in cloud, "waitlist identity/persona fields missing")
+    check('name="use_case"' in cloud and 'maxlength="800"' in cloud and 'name="consent"' in cloud and 'value="yes"' in cloud and 'name="notice_version"' in cloud and 'value="waitlist-v1"' in cloud, "waitlist consent/description contract missing")
+    check('name="website"' in cloud and 'class="honeypot"' in cloud and 'href="/api/waitlist"' in cloud and "<noscript>" in cloud, "waitlist privacy/no-JS contract missing")
+    waitlist_js = (ROOT / "newwaitlist.js").read_text()
+    check("?format=json" in waitlist_js and "config.open === true" in waitlist_js and "fields.disabled = true" in waitlist_js, "waitlist must fail closed while bootstrapping")
+    check("new URLSearchParams(new FormData(form))" in waitlist_js and 'response.status !== 202' in waitlist_js and "not acceptance" in waitlist_js, "waitlist pending/approval handling missing")
+    check("console." not in waitlist_js and "sendBeacon" not in waitlist_js and "data-track" not in waitlist_js, "waitlist must not add analytics or console logging")
+    legal = (ROOT / "legal/index.html").read_text()
+    check("email address" in legal and "solo/team persona" in legal and "use-case description" in legal and "consent" in legal, "legal waitlist data disclosure missing")
+    check("/api/waitlist" in legal and "90-day expiry" in legal and "daily cleanup" in legal and "Cloudflare" in legal, "server privacy notice link/boundaries missing")
+    check(local_target("/api/waitlist") is None and local_target("/api/unknown") == ROOT / "api" / "unknown", "dynamic route allowlist is too broad")
     check(len(re.findall(r'<tr><td>\d{2}</td>', gateway)) == 24, "gateway matrix is not 24 rows")
     check("/cloud/" in (ROOT / "sitemap.xml").read_text() and "/gateway/" in (ROOT / "sitemap.xml").read_text(), "new routes missing from sitemap")
     check("pilot availability/details" in combined.lower(), "pilot availability CTA missing")
     check("open a public bug report" in contact.lower() and "github.com/Ozperium/stoke/issues/new" in contact, "contact route lacks bug-report GitHub CTA")
-    check("no private intake form" in contact.lower() and 'data-track="cloud_invitation_requested"' not in contact, "contact route implies a private invitation intake")
+    check("manual review" in contact.lower() and 'data-track="cloud_invitation_requested"' not in contact, "contact route lacks conditional waitlist guidance")
     events = (ROOT.parent / "functions" / "events.js").read_text()
     check("cloud_invitation_requested" in events and "body.event" in events, "invitation event is not allowlisted/validated")
 
