@@ -53,7 +53,7 @@ Stoke's public launch uses editorial product storytelling rather than generic Sa
 - **Graphite (#171716):** primary surface for the hero and product sections.
 - **Ivory (#F4F0E8):** readable page surface and high-contrast primary action.
 - **Ember (#EF774F):** restrained accent for focus, links, pilot labels, and directional emphasis.
-- **Sage (#B8CFB5):** secondary status color inside the explicitly illustrative flow.
+- **Sage (#B8CFB5):** secondary status color in clearly labeled preview surfaces.
 
 ## Typography
 
@@ -65,4 +65,4 @@ Keep wide editorial margins, thin rules, and asymmetric two-column hero sections
 
 ## Accessibility
 
-All interactive flow states have text labels; the illustration is explicitly identified as not live. Navigation has a keyboard-operated mobile menu, tabs expose `aria-selected`, focus rings remain visible, and reduced-motion preferences disable transitions and animation.
+Lead with the real product interface: a large, user-initiated native video and useful UI stills rather than abstract flow boxes. Label all sample-data frames as preview, not a live Cloud session. Preserve native controls and a poster without autoplay. Navigation progressively enhances a visible no-JS menu; focus stays visible and reduced-motion preferences disable nonessential motion.

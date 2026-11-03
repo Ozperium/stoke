@@ -57,7 +57,7 @@ for page_path in sorted(LANDING.rglob("index.html")):
     parsers[page_path] = parse(page_path)[0]
 for page_path, parser in parsers.items():
     for href in parser.hrefs:
-        target = local_target(href)
+        target = page_path if not urlparse(href).path and not urlparse(href).scheme and not urlparse(href).netloc else local_target(href)
         if target is not None:
             assert target.is_file(), f"missing local link target: {page_path}: {href} -> {target}"
             fragment = urlparse(href).fragment
@@ -73,26 +73,22 @@ for stale in ("supports every provider", "supports all providers", "unlimited sa
 
 # Dynamic UI has an honest live region and keyboard/mobile controls.
 assert any("data-nav-toggle" in a and a.get("aria-controls") == "nav-menu" and a.get("aria-expanded") == "false" for t, a in home_parser.tags if t == "button")
-assert any("data-flow-demo" in a for t, a in home_parser.tags)
-assert any(a.get("aria-label") and "illustrative" in a.get("aria-label", "").lower() for t, a in home_parser.tags)
+videos = [a for t, a in home_parser.tags if t == "video"]
+assert len(videos) == 1, "exactly one product preview required"
+assert all(k in videos[0] for k in ["controls", "playsinline", "poster", "aria-label", "aria-describedby"])
+assert "autoplay" not in videos[0], "preview must not force playback"
+assert videos[0]["poster"] == "/media/stoke-preview-poster.jpg"
+assert "sample data" in home_text.lower() and "not a live" in home_text.lower()
+assert not any("data-flow-demo" in a for t, a in home_parser.tags), "retired abstraction must not remain hidden"
 for tag, attrs in home_parser.tags:
     if tag == "button": assert attrs.get("type") == "button", "button missing explicit type"
-flow_tabs = [attrs for tag, attrs in home_parser.tags if tag == "button" and attrs.get("role") == "tab"]
-assert len(flow_tabs) == 3, "flow tablist must have three tabs"
-assert {attrs.get("id") for attrs in flow_tabs} == {"flow-tab-route", "flow-tab-guardrail", "flow-tab-portability"}
-assert all(attrs.get("aria-controls") == "flow-panel" for attrs in flow_tabs), "flow tabs must share their panel"
-assert {attrs.get("tabindex") for attrs in flow_tabs} == {"0", "-1"}
-flow_panels = [attrs for tag, attrs in home_parser.tags if attrs.get("id") == "flow-panel"]
-assert len(flow_panels) == 1 and flow_panels[0].get("role") == "tabpanel", "flow panel ARIA missing"
-assert flow_panels[0].get("aria-labelledby") == "flow-tab-route"
-flow_statuses = [attrs for tag, attrs in home_parser.tags if "data-flow-status" in attrs]
-assert len(flow_statuses) == 1 and flow_statuses[0].get("role") == "status"
-assert flow_statuses[0].get("aria-live") == "polite" and flow_statuses[0].get("aria-atomic") == "true"
+for name in ["stoke-preview.mp4", "stoke-preview-poster.jpg", "stoke-preview-devices.jpg", "stoke-preview-access.jpg", "stoke-preview-activity.jpg"]:
+    assert (LANDING / "media" / name).is_file(), "missing product media: " + name
 site_css = (LANDING / "site.css").read_text()
 site_js = (LANDING / "site.js").read_text()
 assert ".site-nav.nav-enhanced .nav-links" in site_css and ".site-nav.nav-enhanced .nav-toggle" in site_css
 assert "header.classList.add('nav-enhanced')" in site_js and "event.key === 'Escape'" in site_js
-assert "event.key === 'Home'" in site_js and "event.key === 'End'" in site_js
+assert "product-preview" in site_js and ".play()" in site_js, "watch CTA must play the actual preview"
 assert "prefers-reduced-motion" in site_css
 
 # All rendered routes must have titles and resolve their first-party links.
@@ -100,7 +96,7 @@ for page_path in sorted(LANDING.rglob("index.html")):
     parser, _ = parse(page_path)
     assert any(t == "title" for t, _ in parser.tags), f"missing title: {page_path}"
     for href in parser.hrefs:
-        target = local_target(href)
+        target = page_path if not urlparse(href).path and not urlparse(href).scheme and not urlparse(href).netloc else local_target(href)
         if target is not None: assert target.is_file(), f"missing local link: {page_path}: {href}"
 
 # Sitemap entries must be real routes and must include every published HTML route.
