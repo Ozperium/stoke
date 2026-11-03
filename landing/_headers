@@ -15,3 +15,7 @@
 /favicon.svg
   Content-Type: image/svg+xml
   Cache-Control: public, max-age=86400
+
+/og-image.png
+  Content-Type: image/png
+  Cache-Control: public, max-age=3600, must-revalidate

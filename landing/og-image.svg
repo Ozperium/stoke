@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Stoke — enforce AI agent spend before the bill</title>
+  <desc id="desc">A self-hosted Rust gateway for hard budget caps, local-first routing, and security policy.</desc>
+  <defs>
+    <linearGradient id="glow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3bdb78" stop-opacity=".18"/>
+      <stop offset="1" stop-color="#0a0a0b" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#2a2a32" stroke-opacity=".42"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="#0a0a0b"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <rect width="800" height="630" fill="url(#glow)"/>
+  <path d="M0 560H1200" stroke="#2a2a32"/>
+  <g transform="translate(78 76)">
+    <path d="M28 0 52 14v28L28 56 4 42V14Z" fill="none" stroke="#3bdb78" stroke-width="5" stroke-linejoin="round"/>
+    <text x="76" y="41" fill="#e4e4e7" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="32" font-weight="700">Stoke</text>
+  </g>
+  <g transform="translate(78 196)">
+    <text fill="#3bdb78" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="22" font-weight="600">// ENFORCE, DON'T JUST OBSERVE</text>
+    <text y="82" fill="#e4e4e7" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="62" font-weight="800" letter-spacing="-2">Your agents.</text>
+    <text y="151" fill="#e4e4e7" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="62" font-weight="800" letter-spacing="-2">Your machines.</text>
+    <text y="220" fill="#3bdb78" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="62" font-weight="800" letter-spacing="-2">Your rules.</text>
+    <text y="279" fill="#8a8a96" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="23">Hard caps, local-first routing, policy before provider.</text>
+  </g>
+  <g transform="translate(790 142)">
+    <rect width="330" height="300" rx="16" fill="#131316" stroke="#2a2a32" stroke-width="2"/>
+    <rect width="330" height="50" rx="16" fill="#141418"/>
+    <path d="M0 50h330" stroke="#2a2a32"/>
+    <circle cx="24" cy="25" r="6" fill="#3b3b45"/><circle cx="44" cy="25" r="6" fill="#3b3b45"/><circle cx="64" cy="25" r="6" fill="#3b3b45"/>
+    <text x="94" y="30" fill="#8a8a96" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="13">illustrative flow</text>
+    <text x="28" y="92" fill="#8a8a96" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="13">REQUEST</text>
+    <text x="28" y="119" fill="#e4e4e7" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15">POST /v1/chat/completions</text>
+    <path d="M28 143h274" stroke="#2a2a32"/>
+    <circle cx="40" cy="175" r="7" fill="#3bdb78"/><text x="60" y="180" fill="#3bdb78" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">BUDGET  within cap</text>
+    <circle cx="40" cy="211" r="7" fill="#3bdb78"/><text x="60" y="216" fill="#3bdb78" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">ROUTE   local node</text>
+    <circle cx="40" cy="247" r="7" fill="#ff5454"/><text x="60" y="252" fill="#ff5454" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">LOOP    refused</text>
+    <text x="28" y="280" fill="#8a8a96" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">decision made before upstream call</text>
+  </g>
+  <text x="78" y="594" fill="#8a8a96" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">stokegate.com</text>
+  <text x="1120" y="594" text-anchor="end" fill="#3bdb78" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">OPEN SOURCE · RUST · MIT</text>
+</svg>

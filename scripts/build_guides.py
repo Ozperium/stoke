@@ -34,6 +34,16 @@ def esc(s):
     return html.escape(s, quote=False)
 
 
+def attr(s):
+    return html.escape(s, quote=True)
+
+
+def guide_url(slug):
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug):
+        raise ValueError(f"invalid guide slug: {slug!r}")
+    return f"{SITE}/guides/{slug}/"
+
+
 def inline(s):
     s = esc(s)
     s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
@@ -285,10 +295,20 @@ PAGE = """<!DOCTYPE html>
 <title>{title} — Stoke</title>
 <meta name="description" content="{description}">
 <link rel="canonical" href="{canonical}">
-<meta property="og:type" content="article">
+<meta property="og:type" content="{og_type}">
+<meta property="og:site_name" content="Stoke">
 <meta property="og:title" content="{title}">
 <meta property="og:description" content="{description}">
 <meta property="og:url" content="{canonical}">
+<meta property="og:image" content="{site}/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Stoke: enforce AI agent spend before the bill">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{title}">
+<meta name="twitter:description" content="{description}">
+<meta name="twitter:image" content="{site}/og-image.png">
+<meta name="twitter:image:alt" content="Stoke: enforce AI agent spend before the bill">
 <script type="application/ld+json">{jsonld}</script>
 <script src="/tracking.js" defer></script>
 <style>{css}</style>
@@ -330,18 +350,19 @@ def card(m):
     )
 
 
-def jsonld(meta, url):
+def jsonld(meta, url, schema_type="TechArticle"):
     import json
-    return json.dumps({
+    data = {
         "@context": "https://schema.org",
-        "@type": "TechArticle",
-        "headline": meta["title"],
+        "@type": schema_type,
         "description": meta["description"],
         "url": url,
         "author": {"@type": "Organization", "name": "Stoke"},
         "publisher": {"@type": "Organization", "name": "Stoke"},
         "dateModified": date.today().isoformat(),
-    }, separators=(",", ":"))
+    }
+    data["name" if schema_type == "CollectionPage" else "headline"] = meta["title"]
+    return json.dumps(data, separators=(",", ":")).replace("<", "\\u003c")
 
 
 def main():
@@ -357,11 +378,13 @@ def main():
         for k in ("title", "description", "slug"):
             if k not in meta:
                 raise SystemExit(f"{fn}: front-matter missing '{k}'")
-        url = f"{SITE}/guides/{meta['slug']}/"
+        url = guide_url(meta["slug"])
         page = PAGE.format(
-            title=esc(meta["title"]),
-            description=esc(meta["description"]),
-            canonical=url,
+            title=attr(meta["title"]),
+            description=attr(meta["description"]),
+            canonical=attr(url),
+            site=attr(SITE),
+            og_type="article",
             jsonld=jsonld(meta, url),
             css=CSS,
             body=render(body_md),
@@ -387,8 +410,10 @@ def main():
     open(os.path.join(OUT, "index.html"), "w").write(PAGE.format(
         title="Guides",
         description="Task-shaped guides for capping AI agent spend, killing runaway loops, and routing agents to your own machines with Stoke.",
-        canonical=f"{SITE}/guides/",
-        jsonld=jsonld({"title": "Guides", "description": "Stoke guides"}, f"{SITE}/guides/"),
+        canonical=attr(f"{SITE}/guides/"),
+        site=attr(SITE),
+        og_type="website",
+        jsonld=jsonld({"title": "Guides", "description": "Stoke guides"}, f"{SITE}/guides/", "CollectionPage"),
         css=CSS,
         body=index_body,
     ))
