@@ -44,7 +44,7 @@ identical same-caller hit, distinct role/message-boundary requests, and a
 `max_tokens` change. It is a wire identity check, not an inference, cost, or
 savings benchmark.
 
-## Verification receipt
+## Historical development receipt
 
 - Focused cache tests: exit `0`; `13 passed`, `0 failed` (other targets were
   filtered).
@@ -53,7 +53,5 @@ savings benchmark.
 - Binary smoke: exit `0`; identical pair produced `hit` with one provider call,
   both negative cases bypassed cache, and the final mock provider call count was
   `4`.
-- The earlier parent RED collision is recorded separately in
-  `/Users/pawloz/projects/stoke-efficiency-1-7/cache-identity-red.log`; this
-  receipt reports only the current focused/full/smoke GREEN results and does not
-  claim a new RED→GREEN run by this worker.
+- These are retained development results, not a new RED→GREEN run for the
+  current release. Use the verification commands above for a fresh result.

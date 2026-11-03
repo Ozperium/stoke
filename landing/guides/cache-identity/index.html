@@ -7,13 +7,23 @@
 <link rel="mask-icon" href="/favicon.svg" color="#3bdb78">
 <meta name="theme-color" content="#0a0a0b">
 <title>Cache Identity and Scope — Stoke</title>
-<meta name="description" content="Understand the exact request identity and caller scope used by Stoke's response cache.">
+<meta name="description" content="Understand the exact request identity and caller scope used by Stoke&#x27;s response cache.">
 <link rel="canonical" href="https://stokegate.com/guides/cache-identity/">
 <meta property="og:type" content="article">
+<meta property="og:site_name" content="Stoke">
 <meta property="og:title" content="Cache Identity and Scope">
-<meta property="og:description" content="Understand the exact request identity and caller scope used by Stoke's response cache.">
+<meta property="og:description" content="Understand the exact request identity and caller scope used by Stoke&#x27;s response cache.">
 <meta property="og:url" content="https://stokegate.com/guides/cache-identity/">
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Cache Identity and Scope","description":"Understand the exact request identity and caller scope used by Stoke's response cache.","url":"https://stokegate.com/guides/cache-identity/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-10-11"}</script>
+<meta property="og:image" content="https://stokegate.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Stoke: enforce AI agent spend before the bill">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Cache Identity and Scope">
+<meta name="twitter:description" content="Understand the exact request identity and caller scope used by Stoke&#x27;s response cache.">
+<meta name="twitter:image" content="https://stokegate.com/og-image.png">
+<meta name="twitter:image:alt" content="Stoke: enforce AI agent spend before the bill">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","description":"Understand the exact request identity and caller scope used by Stoke's response cache.","url":"https://stokegate.com/guides/cache-identity/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-11-03","headline":"Cache Identity and Scope"}</script>
 <script src="/tracking.js" defer></script>
 <style>
 :root{--bg:#0a0a0b;--bg2:#131316;--bg3:#1a1a20;--border:#2a2a32;--text:#e4e4e7;--muted:#8a8a96;--accent:#3bdb78;--red:#ff5454;
@@ -96,15 +106,15 @@ footer{border-top:1px solid var(--border);padding:28px 24px;color:var(--muted);f
   &gt; /tmp/cache-identity-full.log <span class="tok-num">2</span>&gt;&amp;<span class="tok-num">1</span>
 <span class="tok-var">STOKE_BIN</span>=<span class="tok-str">"$PWD/target/debug/stoke"</span> python3 scripts/smoke_cache_identity.py</code></pre>
 <p>The smoke harness uses only a local stdlib mock provider. It checks one identical same-caller hit, distinct role/message-boundary requests, and a <code>max_tokens</code> change. It is a wire identity check, not an inference, cost, or savings benchmark.</p>
-<h2 id="verification-receipt">Verification receipt</h2>
+<h2 id="historical-development-receipt">Historical development receipt</h2>
 <ul><li>Focused cache tests: exit <code>0</code>; <code>13 passed</code>, <code>0 failed</code> (other targets were</li></ul>
 <p>  filtered).</p>
 <ul><li>Full suite: exit <code>0</code>; target results were <code>63</code>, <code>245</code>, <code>2</code>, <code>6</code>, and <code>0</code></li></ul>
 <p>  passed, with <code>0 failed</code> in each target.</p>
 <ul><li>Binary smoke: exit <code>0</code>; identical pair produced <code>hit</code> with one provider call,</li></ul>
 <p>  both negative cases bypassed cache, and the final mock provider call count was   <code>4</code>.</p>
-<ul><li>The earlier parent RED collision is recorded separately in</li></ul>
-<p>  <code>/Users/pawloz/projects/stoke-efficiency-1-7/cache-identity-red.log</code>; this   receipt reports only the current focused/full/smoke GREEN results and does not   claim a new RED→GREEN run by this worker.</p>
+<ul><li>These are retained development results, not a new RED→GREEN run for the</li></ul>
+<p>  current release. Use the verification commands above for a fresh result.</p>
 <div class="cta">
   <h3>Put a control point in front of your agents</h3>
   <p>Stoke is a single Rust binary: hard budget caps, a runaway-loop kill switch, and local-first routing — enforced before a provider is ever called. Open source, MIT.</p>
