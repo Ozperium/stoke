@@ -15,6 +15,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 LANDING = ROOT / "landing"
+DYNAMIC_PATHS = {"/api/waitlist"}
 
 class Page(HTMLParser):
     def __init__(self):
@@ -40,6 +41,8 @@ def local_target(href):
     if parsed.scheme or parsed.netloc or href.startswith("mailto:"):
         return None
     path = parsed.path or "/"
+    if path in DYNAMIC_PATHS:
+        return None
     if path == "/": return LANDING / "index.html"
     clean = path.lstrip("/")
     return LANDING / clean / "index.html" if path.endswith("/") else LANDING / clean
@@ -90,6 +93,39 @@ assert ".site-nav.nav-enhanced .nav-links" in site_css and ".site-nav.nav-enhanc
 assert "header.classList.add('nav-enhanced')" in site_js and "event.key === 'Escape'" in site_js
 assert "product-preview" in site_js and ".play()" in site_js, "watch CTA must play the actual preview"
 assert "prefers-reduced-motion" in site_css
+
+# Waitlist markup is a minimal, no-JS-capable form; JS only opens it after a fail-closed config check.
+cloud_page = LANDING / "cloud" / "index.html"
+cloud_parser = parsers[cloud_page]
+forms = [attrs for tag, attrs in cloud_parser.tags if tag == "form" and attrs.get("id") == "waitlist-form"]
+assert len(forms) == 1, "waitlist form missing or duplicated"
+waitlist_form = forms[0]
+assert waitlist_form.get("action") == "/api/waitlist" and waitlist_form.get("method") == "post"
+fields = [attrs for tag, attrs in cloud_parser.tags if tag in {"input", "textarea"} and attrs.get("name")]
+field_names = {attrs["name"] for attrs in fields}
+assert field_names == {"email", "persona", "use_case", "consent", "notice_version", "website"}
+assert any(attrs.get("name") == "email" and attrs.get("type") == "email" and "required" in attrs for attrs in fields)
+assert sum(attrs.get("name") == "persona" and attrs.get("type") == "radio" for attrs in fields) == 2
+assert all("required" in attrs for attrs in fields if attrs.get("name") == "persona")
+assert any(attrs.get("name") == "consent" and attrs.get("value") == "yes" and "required" in attrs for attrs in fields)
+assert any(attrs.get("name") == "notice_version" and attrs.get("value") == "waitlist-v2" for attrs in fields)
+assert any(attrs.get("name") == "website" and attrs.get("value") == "" for attrs in fields)
+assert 'href="/api/waitlist"' in cloud_page.read_text() and "<noscript>" in cloud_page.read_text()
+waitlist_js = (LANDING / "newwaitlist.js").read_text()
+assert "?format=json" in waitlist_js and "config.open === true" in waitlist_js
+assert "fields.disabled = true" in waitlist_js and "closeWaitlist" in waitlist_js
+assert "new URLSearchParams(new FormData(form))" in waitlist_js
+assert 'response.status !== 202' in waitlist_js and "not acceptance" in waitlist_js
+assert "role=\"alert\"" in cloud_page.read_text() and "aria-live=\"polite\"" in cloud_page.read_text()
+assert "console." not in waitlist_js and "sendBeacon" not in waitlist_js and "data-track" not in waitlist_js
+assert local_target("/api/waitlist") is None and local_target("/api/unknown") == LANDING / "api" / "unknown"
+legal_text = (LANDING / "legal" / "index.html").read_text()
+assert "email address" in legal_text and "solo/team persona" in legal_text and "use-case description" in legal_text and "consent" in legal_text
+assert "90 days" in legal_text and "daily cleanup" in legal_text and "Cloudflare" in legal_text and "hashed anti-abuse" in legal_text
+assert "controller_name" not in cloud_page.read_text() and "privacy_email" not in waitlist_js
+assert "data-notice-controller" not in cloud_page.read_text() and "data-notice-email" not in cloud_page.read_text()
+assert "invitation" not in cloud_page.read_text().lower() and "invitation" not in waitlist_js.lower()
+assert "manual pilot review" in cloud_page.read_text() and "approval does not automatically grant, start, or email Cloud access" in cloud_page.read_text()
 
 # All rendered routes must have titles and resolve their first-party links.
 for page_path in sorted(LANDING.rglob("index.html")):
