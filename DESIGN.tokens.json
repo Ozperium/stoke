@@ -1,39 +1,39 @@
 {
   "$schema": "https://www.designtokens.org/schemas/2025.10/format.json",
-  "$description": "Premium graphite-and-ivory product storytelling with a restrained ember accent.",
+  "$description": "Approved OpenDesign request-content visual with policy-first causal motion.",
   "color": {
     "$type": "color",
     "primary": {
       "$value": {
         "colorSpace": "srgb",
         "components": [
-          0.09,
-          0.09,
-          0.086
+          0.098,
+          0.098,
+          0.098
         ],
-        "hex": "#171716"
+        "hex": "#191919"
       }
     },
     "secondary": {
       "$value": {
         "colorSpace": "srgb",
         "components": [
-          0.957,
-          0.941,
-          0.91
+          0.988,
+          0.988,
+          0.988
         ],
-        "hex": "#f4f0e8"
+        "hex": "#fcfcfc"
       }
     },
     "tertiary": {
       "$value": {
         "colorSpace": "srgb",
         "components": [
-          0.937,
-          0.467,
-          0.31
+          0.945,
+          0.325,
+          0.196
         ],
-        "hex": "#ef774f"
+        "hex": "#f15332"
       }
     }
   },
@@ -53,7 +53,7 @@
     },
     "lg": {
       "$value": {
-        "value": 56,
+        "value": 64,
         "unit": "px"
       }
     }
@@ -62,19 +62,19 @@
     "$type": "dimension",
     "sm": {
       "$value": {
-        "value": 12,
+        "value": 0,
         "unit": "px"
       }
     },
     "md": {
       "$value": {
-        "value": 18,
+        "value": 8,
         "unit": "px"
       }
     },
     "lg": {
       "$value": {
-        "value": 22,
+        "value": 999,
         "unit": "px"
       }
     }
@@ -83,14 +83,14 @@
     "display": {
       "$type": "typography",
       "$value": {
-        "fontFamily": "Arial Narrow, Avenir Next Condensed, Inter, sans-serif",
+        "fontFamily": "Sora",
         "fontSize": {
-          "value": 6.4,
+          "value": 4.8,
           "unit": "rem"
         },
-        "fontWeight": 800,
+        "fontWeight": 620,
         "letterSpacing": {
-          "value": -0.075,
+          "value": -0.03,
           "unit": "em"
         }
       }
@@ -98,23 +98,12 @@
     "body": {
       "$type": "typography",
       "$value": {
-        "fontFamily": "Inter, ui-sans-serif, sans-serif",
+        "fontFamily": "Source Sans 3",
         "fontSize": {
-          "value": 1,
+          "value": 1.05,
           "unit": "rem"
         },
         "fontWeight": 400
-      }
-    },
-    "mono": {
-      "$type": "typography",
-      "$value": {
-        "fontFamily": "SFMono-Regular, Consolas, monospace",
-        "fontSize": {
-          "value": 0.75,
-          "unit": "rem"
-        },
-        "fontWeight": 700
       }
     }
   }
