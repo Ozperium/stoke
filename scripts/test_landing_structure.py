@@ -124,6 +124,10 @@ def main():
     check(route_paths - {"/join/"} == sitemap_paths and len(sitemap_paths) == 16, "sitemap must include every indexable route")
 
     missing_media = sorted(name for name in EXPECTED_MEDIA if not (ROOT / "media" / name).is_file())
+    for name in EXPECTED_MEDIA:
+        asset = (ROOT / "media" / name).read_text()
+        check('font-family="Source Sans 3,Arial,sans-serif"' not in asset, "SVG family containing numeral must be quoted")
+        check('font-family="\'Source Sans 3\',Arial,sans-serif"' in asset, "portable SVG sans-serif fallback missing")
     check(not missing_media, "missing drawing assets: " + ", ".join(missing_media))
     media_note = "drawing assets present and referenced"
     print(f"STATIC CHECKS PASSED: {len(pages)} selected pages, join semantics, visual routes, accessibility hooks, sitemap, XML, JSON-LD, and links verified; {media_note}")
