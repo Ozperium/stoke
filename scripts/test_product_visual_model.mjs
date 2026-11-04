@@ -181,6 +181,34 @@ test('browser smoke covers visible startup, automatic scene flow, pause, and rou
     await page.waitForFunction(() => document.querySelector('[data-product-visual]')?.dataset.phase !== 'complete');
     assert.ok(Number(await root.getAttribute('data-elapsed')) < DURATIONS.budget);
     assert.ok(await page.locator('[data-route="ingress"]').evaluate((path) => path.getTotalLength() > 0), 'scene switch keeps ingress geometry');
+    await page.setViewportSize({width: 390, height: 1500});
+    await page.emulateMedia({reducedMotion: 'reduce'});
+    await page.locator('[role="tab"][data-scenario="privacy"]').click();
+    await page.evaluate(() => document.fonts.ready);
+    const labelHits = await page.evaluate(() => {
+      const canvas = document.querySelector('[data-visual-canvas]').getBoundingClientRect();
+      const boxes = [];
+      for (const label of document.querySelectorAll('.product-visual__actor-label')) {
+        for (const node of label.childNodes) {
+          if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+            const range = document.createRange(); range.selectNodeContents(node);
+            boxes.push(...range.getClientRects());
+          }
+        }
+      }
+      let hits = 0;
+      for (const route of document.querySelectorAll('[data-route]')) {
+        if (route.hasAttribute('hidden')) continue;
+        const length = route.getTotalLength();
+        for (let i = 1; i < 200; i++) {
+          const point = route.getPointAtLength(length * i / 200);
+          const x = point.x + canvas.left, y = point.y + canvas.top;
+          if (boxes.some(b => x > b.left && x < b.right && y > b.top && y < b.bottom)) hits++;
+        }
+      }
+      return hits;
+    });
+    assert.equal(labelHits, 0, 'mobile routes must not cross actor-label text');
   } finally {
     await browser.close();
     await new Promise((resolveServer) => server.close(resolveServer));

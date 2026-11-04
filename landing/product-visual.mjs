@@ -73,7 +73,8 @@ function routeBetween(from, to, canvas) {
     const gutter = useLeftGutter ? 11 : canvasRect.width - 11;
     const targetSide = useLeftGutter ? 'left' : 'right';
     const b = pointFor(to, targetSide, canvasRect);
-    return `M${a.x},${a.y} C${a.x},${a.y + 18} ${gutter},${a.y + 18} ${gutter},${a.y + 30} L${gutter},${b.y} L${b.x},${b.y}`;
+    // Stay inside the inter-actor gap before descending beside the labels.
+    return `M${a.x},${a.y} C${a.x},${a.y + 3} ${gutter},${a.y + 3} ${gutter},${a.y + 6} L${gutter},${b.y} L${b.x},${b.y}`;
   }
   const b = pointFor(to, 'top', canvasRect);
   const bend = Math.max(24, (b.y - a.y) * .48);
