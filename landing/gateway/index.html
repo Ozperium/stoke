@@ -1,50 +1,136 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#171716">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#FCFCFC">
   <meta name="description" content="The complete evidence-backed Stoke gateway surface: 24 shipped capabilities and their operational boundaries.">
-  <link rel="canonical" href="https://stokegate.com/gateway/"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <meta property="og:type" content="website"><meta property="og:site_name" content="Stoke"><meta property="og:title" content="Stoke gateway surface"><meta property="og:description" content="24 shipped capabilities, with their operational boundaries attached."><meta property="og:url" content="https://stokegate.com/gateway/"><meta property="og:image" content="https://stokegate.com/og-image.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Your models. Wherever you work.">
-  <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Stoke gateway surface"><meta name="twitter:description" content="24 shipped capabilities, with their operational boundaries attached."><meta name="twitter:image" content="https://stokegate.com/og-image.png"><meta name="twitter:image:alt" content="Your models. Wherever you work.">
+  <link rel="canonical" href="https://stokegate.com/gateway/">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Stoke">
+  <meta property="og:title" content="Stoke gateway surface">
+  <meta property="og:description" content="24 shipped capabilities, with their operational boundaries attached.">
+  <meta property="og:url" content="https://stokegate.com/gateway/">
+  <meta property="og:image" content="https://stokegate.com/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Your models. Wherever you work.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Stoke gateway surface">
+  <meta name="twitter:description" content="24 shipped capabilities, with their operational boundaries attached.">
+  <meta name="twitter:image" content="https://stokegate.com/og-image.png">
+  <meta name="twitter:image:alt" content="Your models. Wherever you work.">
   <title>Stoke gateway surface — capabilities and limits</title>
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","name":"Stoke gateway surface","description":"The complete evidence-backed Stoke gateway surface: 24 shipped capabilities and their operational boundaries.","url":"https://stokegate.com/gateway/","isPartOf":{"@type":"WebSite","name":"Stoke","url":"https://stokegate.com/"}}</script>
-  <link rel="stylesheet" href="/site.css">
+  <link rel="stylesheet" href="/presentation.css">
+  <link rel="stylesheet" href="/document.css">
 </head>
-<body>
+<body class="document-page">
   <a class="skip-link" href="#main">Skip to content</a>
-  <header class="site-nav"><div class="shell nav-inner"><a class="brand" href="/" aria-label="Stoke home"><svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 21 7v10l-9 5-9-5V7l9-5Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m8 12 2.5 2.5L16 9" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>Stoke</a><button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button><nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation"><a href="/#product">Product</a><a href="/gateway/" aria-current="page">Gateway</a><a href="/cloud/">Stoke Cloud</a><a href="/guides/">Guides</a><a href="https://github.com/Ozperium/stoke">GitHub</a><a class="nav-cta" href="/contact/">Contact</a></nav></div></header>
-  <main id="main">
-    <section class="page-hero gateway-hero"><div class="shell"><span class="eyebrow">The self-hosted product</span><h1>The gateway,<br><em>with the edges showing.</em></h1><p class="gateway-intro">Stoke is a Rust gateway between AI clients and the local, remote, or approved provider capacity you attach. This matrix keeps the complete shipped capability set visible while naming the boundaries that matter.</p><div class="actions"><a class="button primary" href="https://github.com/Ozperium/stoke" data-track="github_clicked">Read the repository <span aria-hidden="true">↗</span></a><a class="button ghost" href="/guides/">Open the guides</a></div></div></section>
-    <section class="cloud-section"><div class="shell"><span class="eyebrow">Complete shipped capability matrix</span><h2>24 capabilities, not 24 vague promises.</h2><div class="matrix-wrap"><table class="matrix"><caption class="sr-only">Stoke's 24 shipped capabilities and their limits</caption><thead><tr><th>#</th><th>Capability</th><th>Surface / activation</th><th>Evidence-backed boundary</th></tr></thead><tbody>
-      <tr><td>01</td><td><strong>Gateway daemon</strong></td><td><code>stoke</code>, <code>stoke serve</code>; TOML</td><td>Self-hosted Rust binary; no hosted gateway is implied.</td></tr>
-      <tr><td>02</td><td><strong>Fail-closed auth</strong></td><td><code>STOKE_API_KEYS</code>; <code>STOKE_DEV=1</code> local dev</td><td>Every endpoint except <code>/health</code> is protected when keys are configured; upstream credentials stay separate.</td></tr>
-      <tr><td>03</td><td><strong>OpenAI Chat Completions</strong></td><td><code>POST /v1/chat/completions</code></td><td>Provider/model must be configured or discovered; no provider catalogue ships.</td></tr>
-      <tr><td>04</td><td><strong>Pre-provider enforcement</strong></td><td>Budget, rate, exact/semantic loop, holds and fan-out</td><td>Admission is before dispatch; semantic mode needs an operator-supplied embedding model.</td></tr>
-      <tr><td>05</td><td><strong>Durable SQLite ledger</strong></td><td><code>STOKE_LEDGER_PATH</code>; <code>stoke ledger</code></td><td>Spend and open holds survive restart; unresolved holds require reconciliation.</td></tr>
-      <tr><td>06</td><td><strong>Node-aware placement + failover</strong></td><td>Provider tiers: <code>local</code> / <code>remote</code> / <code>cloud</code></td><td>Ranks configured eligible capacity; failover is same-model connect-time/before-streaming, not mid-stream replay.</td></tr>
-      <tr><td>07</td><td><strong>One-hop federation</strong></td><td>Provider type <code>stoke</code>; authenticated <code>/v1/nodes</code></td><td>Imports peer inventory and stops at exactly one hop; cycles are guarded.</td></tr>
-      <tr><td>08</td><td><strong>Auto-route v2</strong></td><td><code>model=auto</code>, <code>auto-cheap</code>, <code>auto-fast</code></td><td>Scores configured/discovered candidates with fit exclusions and receipts; live E2E selection is not claimed.</td></tr>
-      <tr><td>09</td><td><strong>SSE passthrough + metering</strong></td><td>Chat, Messages and Responses <code>stream=true</code></td><td>Usage is charged at close; metered streams may use an estimate when upstream usage is absent.</td></tr>
-      <tr><td>10</td><td><strong>Stream race + hedged dispatch</strong></td><td><code>stream_race</code>; global <code>hedge=true</code></td><td>Connect-time race only; small prompts across two verified non-cloud nodes, duplicating local compute.</td></tr>
-      <tr><td>11</td><td><strong>Non-stream cascade + self-consistency</strong></td><td>Named route patterns</td><td>Sequential first-success or bounded same-provider sampling; non-stream only.</td></tr>
-      <tr><td>12</td><td><strong>Exact / semantic response cache</strong></td><td>Exact by default when eligible; semantic opt-in</td><td>Named non-stream single routes only; identity includes caller, route, model and effective request. Not a Responses-cache claim.</td></tr>
-      <tr><td>13</td><td><strong>Exact in-flight coalescing</strong></td><td>Named route, positive TTL, <code>coalesce=true</code></td><td>Explicit opt-in; followers wait bounded time and may dispatch independently.</td></tr>
-      <tr><td>14</td><td><strong>Built-in harness + PII/audit</strong></td><td>Route opt-in built-ins</td><td>PII redaction and JSONL audit are opt-in; regex redaction is not a security boundary.</td></tr>
-      <tr><td>15</td><td><strong>Webhook plugin hooks</strong></td><td>Opt-in <code>pre_request</code>, <code>prompt_filter</code>, <code>post_response</code></td><td>Bounded HTTP hooks can mutate/block; they are not an OS sandbox.</td></tr>
-      <tr><td>16</td><td><strong>In-process JS/TS plugins</strong></td><td>Feature-gated build: <code>--features js-plugins</code></td><td>Optional V8/deno dependency; not in the default build and not sandboxed.</td></tr>
-      <tr><td>17</td><td><strong>Headroom output filter</strong></td><td>Optional, default-off, local/native Responses</td><td>Validated lossless JSON-whitespace compaction only; bounded macOS arm64 / CPython 3.11 worker limits.</td></tr>
-      <tr><td>18</td><td><strong>Anthropic Messages passthrough</strong></td><td><code>POST /v1/messages</code></td><td>Requires an exact configured Anthropic provider/destination; not unrestricted Anthropic support.</td></tr>
-      <tr><td>19</td><td><strong>Claude subscription OAuth</strong></td><td><code>stoke login-claude</code>; subscription provider</td><td>Gateway-owned OAuth; rate/loop controls remain, but subscription traffic has no USD price to meter.</td></tr>
-      <tr><td>20</td><td><strong>Claude → local bridge</strong></td><td><code>claude-stoke-local--…</code> alias</td><td>Messages translates to configured local/remote OpenAI-compatible providers; unsupported fields reject.</td></tr>
-      <tr><td>21</td><td><strong>Claude → Codex bridge</strong></td><td><code>claude-stoke-codex--…</code> alias</td><td>Uses native Responses for configured Codex providers; ambiguous aliases fail closed.</td></tr>
-      <tr><td>22</td><td><strong>Responses + Codex subscription</strong></td><td><code>POST /v1/responses</code>; <code>stoke run codex</code></td><td>Native JSON/SSE passthrough; subscription plan limits remain and USD spend is omitted.</td></tr>
-      <tr><td>23</td><td><strong>Opt-in Claude fallback</strong></td><td><code>[subscription_fallback]</code></td><td>Off by default; only qualified subscription limit/rate errors trigger it, with local fallback explicitly enabled and priced.</td></tr>
-      <tr><td>24</td><td><strong>CLI setup + launchers</strong></td><td><code>stoke-cli setup</code>; <code>stoke run claude|codex</code></td><td>Owner-only setup and credential-isolating launchers; external client executables remain prerequisites.</td></tr>
-    </tbody></table></div><p class="muted" style="margin-top: 16px; font-size: 13px">Release scope: main/nightly in this checkout; stable releases may not contain post-tag capabilities. Local means your machine, authenticated means gateway access, and subscription means quota-world rather than USD-world.</p></div></section>
-    <section class="cloud-section" style="background: var(--paper-warm)"><div class="shell"><div class="section-head"><span class="eyebrow">Read it in context</span><div><h2>Start from the behavior you need.</h2><p class="section-intro">The matrix is evidence-oriented by design. Use the guides for task-shaped setup, then verify the exact source and smoke harnesses in the repository.</p></div></div><div class="gateway-notes"><article class="note-card"><h3>Local capacity</h3><p>Discover exact Ollama model IDs and health from your running provider. See the <a href="/guides/run-ollama-across-two-machines/">two-machine guide</a>.</p></article><article class="note-card"><h3>Client paths</h3><p>Keep native Responses native, Ollama on Chat Completions, and configured Messages paths explicit. See <a href="/guides/use-codex-and-ollama-with-stoke/">Codex + Ollama</a>.</p></article><article class="note-card"><h3>Policy first</h3><p>Per-route tiers can refuse cloud fallback before dispatch. Read the <a href="/security/">security page</a> and public configuration docs.</p></article></div></div></section>
-    <section class="section final-cta" id="install"><div class="shell section-head"><div><h2>Get Stoke.</h2><p class="section-intro">Install on macOS or Linux.</p><pre><code>curl -fsSL https://stokegate.com/install.sh | sh</code></pre><div class="actions"><a class="button primary" href="https://github.com/Ozperium/stoke/releases/latest">Download a release</a><a class="button ghost" href="https://github.com/Ozperium/stoke#readme">Setup guide</a><a class="button ghost" href="/join/">Try Cloud</a></div></div></div></section>
+  <header class="site-nav">
+    <div class="nav-inner">
+      <a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a>
+      <button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button>
+      <nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation">
+        <a href="/gateway/" aria-current="page">Gateway</a>
+        <a href="/cloud/">Cloud</a>
+        <a href="/guides/">Guides</a>
+        <a href="https://github.com/Ozperium/stoke">GitHub</a>
+        <a class="nav-cta button button-secondary" href="/join/">Try Cloud</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="document-shell">
+    <section class="document-hero">
+      <div class="crumb"><a href="/">Stoke</a> / Gateway</div>
+      <h1>The gateway,<br>with the edges showing.</h1>
+      <p class="lede">Stoke is a Rust gateway between AI clients and the local, remote, or approved provider capacity you attach. This matrix keeps the complete shipped capability set visible while naming the boundaries that matter.</p>
+      <div class="doc-actions">
+        <a class="button button-primary" href="https://github.com/Ozperium/stoke" data-track="github_clicked">Read the repository <span aria-hidden="true">↗</span></a>
+        <a class="button button-secondary" href="/guides/">Open the guides</a>
+      </div>
+    </section>
+
+    <section class="document-content document-wide">
+      <span class="crumb">Complete shipped capability matrix</span>
+      <h2>24 capabilities, not 24 vague promises.</h2>
+      <div class="matrix-wrap">
+        <table class="matrix">
+          <caption>Stoke's 24 shipped capabilities and their limits</caption>
+          <thead>
+            <tr><th>#</th><th>Capability</th><th>Surface / activation</th><th>Evidence-backed boundary</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>01</td><td><strong>Gateway daemon</strong></td><td><code>stoke</code>, <code>stoke serve</code>; TOML</td><td>Self-hosted Rust binary; no hosted gateway is implied.</td></tr>
+            <tr><td>02</td><td><strong>Fail-closed auth</strong></td><td><code>STOKE_API_KEYS</code>; <code>STOKE_DEV=1</code> local dev</td><td>Every endpoint except <code>/health</code> is protected when keys are configured; upstream credentials stay separate.</td></tr>
+            <tr><td>03</td><td><strong>OpenAI Chat Completions</strong></td><td><code>POST /v1/chat/completions</code></td><td>Provider/model must be configured or discovered; no provider catalogue ships.</td></tr>
+            <tr><td>04</td><td><strong>Pre-provider enforcement</strong></td><td>Budget, rate, exact/semantic loop, holds and fan-out</td><td>Admission is before dispatch; semantic mode needs an operator-supplied embedding model.</td></tr>
+            <tr><td>05</td><td><strong>Durable SQLite ledger</strong></td><td><code>STOKE_LEDGER_PATH</code>; <code>stoke ledger</code></td><td>Spend and open holds survive restart; unresolved holds require reconciliation.</td></tr>
+            <tr><td>06</td><td><strong>Node-aware placement + failover</strong></td><td>Provider tiers: <code>local</code> / <code>remote</code> / <code>cloud</code></td><td>Ranks configured eligible capacity; failover is same-model connect-time/before-streaming, not mid-stream replay.</td></tr>
+            <tr><td>07</td><td><strong>One-hop federation</strong></td><td>Provider type <code>stoke</code>; authenticated <code>/v1/nodes</code></td><td>Imports peer inventory and stops at exactly one hop; cycles are guarded.</td></tr>
+            <tr><td>08</td><td><strong>Auto-route v2</strong></td><td><code>model=auto</code>, <code>auto-cheap</code>, <code>auto-fast</code></td><td>Scores configured/discovered candidates with fit exclusions and receipts; live E2E selection is not claimed.</td></tr>
+            <tr><td>09</td><td><strong>SSE passthrough + metering</strong></td><td>Chat, Messages and Responses <code>stream=true</code></td><td>Usage is charged at close; metered streams may use an estimate when upstream usage is absent.</td></tr>
+            <tr><td>10</td><td><strong>Stream race + hedged dispatch</strong></td><td><code>stream_race</code>; global <code>hedge=true</code></td><td>Connect-time race only; small prompts across two verified non-cloud nodes, duplicating local compute.</td></tr>
+            <tr><td>11</td><td><strong>Non-stream cascade + self-consistency</strong></td><td>Named route patterns</td><td>Sequential first-success or bounded same-provider sampling; non-stream only.</td></tr>
+            <tr><td>12</td><td><strong>Exact / semantic response cache</strong></td><td>Exact by default when eligible; semantic opt-in</td><td>Named non-stream single routes only; identity includes caller, route, model and effective request. Not a Responses-cache claim.</td></tr>
+            <tr><td>13</td><td><strong>Exact in-flight coalescing</strong></td><td>Named route, positive TTL, <code>coalesce=true</code></td><td>Explicit opt-in; followers wait bounded time and may dispatch independently.</td></tr>
+            <tr><td>14</td><td><strong>Built-in harness + PII/audit</strong></td><td>Route opt-in built-ins</td><td>PII redaction and JSONL audit are opt-in; regex redaction is not a security boundary.</td></tr>
+            <tr><td>15</td><td><strong>Webhook plugin hooks</strong></td><td>Opt-in <code>pre_request</code>, <code>prompt_filter</code>, <code>post_response</code></td><td>Bounded HTTP hooks can mutate/block; they are not an OS sandbox.</td></tr>
+            <tr><td>16</td><td><strong>In-process JS/TS plugins</strong></td><td>Feature-gated build: <code>--features js-plugins</code></td><td>Optional V8/deno dependency; not in the default build and not sandboxed.</td></tr>
+            <tr><td>17</td><td><strong>Headroom output filter</strong></td><td>Optional, default-off, local/native Responses</td><td>Validated lossless JSON-whitespace compaction only; bounded macOS arm64 / CPython 3.11 worker limits.</td></tr>
+            <tr><td>18</td><td><strong>Anthropic Messages passthrough</strong></td><td><code>POST /v1/messages</code></td><td>Requires an exact configured Anthropic provider/destination; not unrestricted Anthropic support.</td></tr>
+            <tr><td>19</td><td><strong>Claude subscription OAuth</strong></td><td><code>stoke login-claude</code>; subscription provider</td><td>Gateway-owned OAuth; rate/loop controls remain, but subscription traffic has no USD price to meter.</td></tr>
+            <tr><td>20</td><td><strong>Claude → local bridge</strong></td><td><code>claude-stoke-local--…</code> alias</td><td>Messages translates to configured local/remote OpenAI-compatible providers; unsupported fields reject.</td></tr>
+            <tr><td>21</td><td><strong>Claude → Codex bridge</strong></td><td><code>claude-stoke-codex--…</code> alias</td><td>Uses native Responses for configured Codex providers; ambiguous aliases fail closed.</td></tr>
+            <tr><td>22</td><td><strong>Responses + Codex subscription</strong></td><td><code>POST /v1/responses</code>; <code>stoke run codex</code></td><td>Native JSON/SSE passthrough; subscription plan limits remain and USD spend is omitted.</td></tr>
+            <tr><td>23</td><td><strong>Opt-in Claude fallback</strong></td><td><code>[subscription_fallback]</code></td><td>Off by default; only qualified subscription limit/rate errors trigger it, with local fallback explicitly enabled and priced.</td></tr>
+            <tr><td>24</td><td><strong>CLI setup + launchers</strong></td><td><code>stoke-cli setup</code>; <code>stoke run claude|codex</code></td><td>Owner-only setup and credential-isolating launchers; external client executables remain prerequisites.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Release scope: main/nightly in this checkout; stable releases may not contain post-tag capabilities. Local means your machine, authenticated means gateway access, and subscription means quota-world rather than USD-world.</p>
+    </section>
+
+    <section class="document-content">
+      <span class="crumb">Read it in context</span>
+      <h2>Start from the behavior you need.</h2>
+      <p>The matrix is evidence-oriented by design. Use the guides for task-shaped setup, then verify the exact source and smoke harnesses in the repository.</p>
+      <div class="card">
+        <h3>Local capacity</h3>
+        <p>Discover exact Ollama model IDs and health from your running provider. See the <a href="/guides/run-ollama-across-two-machines/">two-machine guide</a>.</p>
+      </div>
+      <div class="card">
+        <h3>Client paths</h3>
+        <p>Keep native Responses native, Ollama on Chat Completions, and configured Messages paths explicit. See <a href="/guides/use-codex-and-ollama-with-stoke/">Codex + Ollama</a>.</p>
+      </div>
+      <div class="card">
+        <h3>Policy first</h3>
+        <p>Per-route tiers can refuse cloud fallback before dispatch. Read the <a href="/security/">security page</a> and public configuration docs.</p>
+      </div>
+    </section>
+
+    <section class="document-content cta" id="install">
+      <h2>Get Stoke.</h2>
+      <p>Install on macOS or Linux.</p>
+      <pre><code>curl -fsSL https://stokegate.com/install.sh | sh</code></pre>
+      <div class="doc-actions">
+        <a class="button button-primary" href="https://github.com/Ozperium/stoke/releases/latest">Download a release</a>
+        <a class="button button-secondary" href="https://github.com/Ozperium/stoke#readme">Setup guide</a>
+        <a class="button button-secondary" href="/join/">Try Cloud</a>
+      </div>
+    </section>
   </main>
-  <footer class="site-footer"><div class="shell"><div class="footer-top"><div><a class="brand" href="/"><svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 21 7v10l-9 5-9-5V7l9-5Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m8 12 2.5 2.5L16 9" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>Stoke</a><p class="footer-note">The complete public gateway surface, with operational limits attached.</p></div><nav class="footer-links" aria-label="Footer navigation"><a href="/">Home</a><a href="/cloud/">Stoke Cloud</a><a href="/guides/">Guides</a><a href="/security/">Security</a><a href="/legal/">Legal</a><a href="/contact/">Contact</a><a href="https://github.com/Ozperium/stoke">GitHub</a></nav></div><div class="footer-bottom"><span>MIT-licensed data plane</span><span>© <span data-year>2026</span> Stoke</span></div></div></footer>
-  <script src="/site.js" defer></script><script src="/tracking.js" defer></script>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a>
+      <nav aria-label="Footer navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/">Guides</a><a href="/security/">Security</a><a href="/legal/">Legal</a><a href="/contact/">Contact</a><a href="https://github.com/Ozperium/stoke">GitHub</a></nav>
+      <span>© <span data-year>2026</span> Stoke</span>
+    </div>
+  </footer>
+  <script src="/presentation.js" defer></script>
+  <script src="/tracking.js" defer></script>
 </body>
 </html>

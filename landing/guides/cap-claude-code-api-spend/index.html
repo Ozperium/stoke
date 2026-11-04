@@ -1,101 +1,37 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="mask-icon" href="/favicon.svg" color="#3bdb78">
-<meta name="theme-color" content="#0a0a0b">
-<title>Cap Claude Code API Spend with a Local Budget Gateway — Stoke</title>
-<meta name="description" content="Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.">
-<link rel="canonical" href="https://stokegate.com/guides/cap-claude-code-api-spend/">
-<meta property="og:type" content="article">
-<meta property="og:site_name" content="Stoke">
-<meta property="og:title" content="Cap Claude Code API Spend with a Local Budget Gateway">
-<meta property="og:description" content="Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.">
-<meta property="og:url" content="https://stokegate.com/guides/cap-claude-code-api-spend/">
-<meta property="og:image" content="https://stokegate.com/og-image.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Your models. Wherever you work.">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Cap Claude Code API Spend with a Local Budget Gateway">
-<meta name="twitter:description" content="Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.">
-<meta name="twitter:image" content="https://stokegate.com/og-image.png">
-<meta name="twitter:image:alt" content="Your models. Wherever you work.">
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","description":"Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.","url":"https://stokegate.com/guides/cap-claude-code-api-spend/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-11-03","headline":"Cap Claude Code API Spend with a Local Budget Gateway"}</script>
-<script src="/tracking.js" defer></script>
-<style>
-:root{--bg:#0a0a0b;--bg2:#131316;--bg3:#1a1a20;--border:#2a2a32;--text:#e4e4e7;--muted:#8a8a96;--accent:#3bdb78;--red:#ff5454;
---font:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace}
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7;-webkit-font-smoothing:antialiased}
-a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
-nav{border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(10,10,11,.85);backdrop-filter:blur(8px);z-index:10}
-.nav-inner{max-width:860px;margin:0 auto;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
-.logo{font-weight:700;font-size:17px;color:var(--text)}
-.nav-links{display:flex;gap:20px}.nav-links a{color:var(--muted);font-size:14px}
-main{max-width:760px;margin:0 auto;padding:56px 24px 80px}
-h1{font-size:40px;line-height:1.15;letter-spacing:-.02em;margin-bottom:16px}
-h2{font-size:24px;margin:44px 0 14px;letter-spacing:-.01em;scroll-margin-top:80px}
-h3{font-size:18px;margin:28px 0 10px}
-p{margin:14px 0;color:#c9c9d1}
-ul,ol{margin:14px 0 14px 22px}li{margin:7px 0;color:#c9c9d1}
-code{font-family:var(--mono);font-size:.88em;color:var(--accent);background:var(--bg3);padding:2px 6px;border-radius:5px}
-pre{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;overflow-x:auto;margin:18px 0}
-pre code{background:none;color:#d9d9e3;padding:0;font-size:13.5px;line-height:1.65}
-blockquote{border-left:3px solid var(--accent);background:var(--bg2);padding:12px 18px;margin:18px 0;border-radius:0 8px 8px 0;color:var(--muted)}
-table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14.5px}
-th,td{border:1px solid var(--border);padding:9px 12px;text-align:left}
-th{background:var(--bg2);font-weight:600}
-hr{border:0;border-top:1px solid var(--border);margin:36px 0}
-.lede{color:var(--muted);font-size:18px;margin-bottom:8px}
-.crumb{font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:22px}
-.cta{margin-top:52px;border:1px solid var(--border);background:var(--bg2);border-radius:14px;padding:26px}
-.cta h3{margin-top:0}
-.btn{display:inline-block;background:var(--accent);color:#07120b;font-weight:650;padding:11px 20px;border-radius:9px;margin-top:10px}
-.btn:hover{text-decoration:none;opacity:.92}
-footer{border-top:1px solid var(--border);padding:28px 24px;color:var(--muted);font-size:13.5px;text-align:center}
-@media(max-width:640px){h1{font-size:31px}main{padding:36px 20px 60px}.nav-links{display:none}}
-
-/* syntax tokens (build-time highlighted; no client JS) */
-.tok-com{color:var(--muted);font-style:italic}
-.tok-str{color:#7dd3fc}
-.tok-num{color:#e8b339}
-.tok-kw{color:#3bdb78;font-weight:600}
-.tok-bi{color:#6ee7a8}
-.tok-var{color:#e8b339}
-.tok-key{color:#e4e4e7}
-.tok-sec{color:#3bdb78;font-weight:600}
-.tok-flag{color:#8a8a96}
-
-/* guide index cards */
-.gwrap{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:36px}
-.gcard{display:block;border:1px solid var(--border);background:var(--bg2);border-radius:16px;overflow:hidden;transition:border-color .18s,transform .18s}
-.gcard:hover{border-color:rgba(59,219,120,.45);transform:translateY(-2px);text-decoration:none}
-.gart{height:118px;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 120%,rgba(59,219,120,.14),transparent 68%);border-bottom:1px solid var(--border)}
-.gart svg{width:52px;height:52px;color:var(--accent);opacity:.92}
-.gbody{padding:20px 22px 22px}
-.gchip{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--border);border-radius:99px;padding:3px 9px;margin-bottom:11px}
-.gcard h2{font-size:18px;margin:0 0 7px;color:var(--text);letter-spacing:-.01em;line-height:1.35}
-.gcard p{font-size:14px;color:var(--muted);margin:0 0 14px;line-height:1.6}
-.gcard .go{font-size:13.5px;color:var(--accent);font-weight:600}
-@media(max-width:700px){.gwrap{grid-template-columns:1fr}}
-
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#FCFCFC">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="mask-icon" href="/favicon.svg" color="#F15332">
+  <title>Cap Claude Code API Spend with a Local Budget Gateway — Stoke</title>
+  <meta name="description" content="Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.">
+  <link rel="canonical" href="https://stokegate.com/guides/cap-claude-code-api-spend/">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Stoke">
+  <meta property="og:title" content="Cap Claude Code API Spend with a Local Budget Gateway">
+  <meta property="og:description" content="Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.">
+  <meta property="og:url" content="https://stokegate.com/guides/cap-claude-code-api-spend/">
+  <meta property="og:image" content="https://stokegate.com/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Your models. Wherever you work.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Cap Claude Code API Spend with a Local Budget Gateway">
+  <meta name="twitter:description" content="Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.">
+  <meta name="twitter:image" content="https://stokegate.com/og-image.png">
+  <meta name="twitter:image:alt" content="Your models. Wherever you work.">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","description":"Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.","url":"https://stokegate.com/guides/cap-claude-code-api-spend/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-11-04","headline":"Cap Claude Code API Spend with a Local Budget Gateway"}</script>
+  <link rel="stylesheet" href="/presentation.css">
+  <link rel="stylesheet" href="/document.css">
 </head>
-<body>
-<nav><div class="nav-inner">
-  <a href="/" class="logo">⬡ Stoke</a>
-  <div class="nav-links">
-    <a href="/guides/">Guides</a>
-    <a href="https://github.com/Ozperium/stoke">GitHub</a>
-  </div>
-</div></nav>
-<main>
-<div class="crumb"><a href="/">Stoke</a> / <a href="/guides/">Guides</a></div>
-<h1>Cap Claude Code API Spend with a Local Budget Gateway</h1>
-<p>Claude Code on a metered Anthropic API key can retry a failed tool call, re-send the same prompt in a loop, or grind through a task far longer than you expected. Anthropic's billing alerts fire hours late, so the first time you notice is on the invoice. This guide puts a small local gateway — <a href="https://github.com/Ozperium/stoke">Stoke</a> — between Claude Code and the Anthropic API so requests over your cap are refused <em>before</em> Anthropic is contacted, and repeated identical prompts are stopped by a loop breaker.</p>
+<body class="document-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-nav"><div class="nav-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a><button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button><nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/" aria-current="page">Guides</a><a href="https://github.com/Ozperium/stoke">GitHub</a><a class="nav-cta button button-secondary" href="/join/">Try Cloud</a></nav></div></header>
+  <main id="main" class="document-shell">
+    <section class="document-hero"><div class="crumb"><a href="/">Stoke</a> / <a href="/guides/">Guides</a></div><h1>Cap Claude Code API Spend with a Local Budget Gateway</h1><p class="lede">Cap Claude Code API spend with Stoke, a local gateway enforcing a hard budget, rate limits, and a loop breaker before any request reaches Anthropic.</p></section><div class="document-content"><p>Claude Code on a metered Anthropic API key can retry a failed tool call, re-send the same prompt in a loop, or grind through a task far longer than you expected. Anthropic's billing alerts fire hours late, so the first time you notice is on the invoice. This guide puts a small local gateway — <a href="https://github.com/Ozperium/stoke">Stoke</a> — between Claude Code and the Anthropic API so requests over your cap are refused <em>before</em> Anthropic is contacted, and repeated identical prompts are stopped by a loop breaker.</p>
 <h2 id="how-this-works">How this works</h2>
 <p>Stoke's server binary (with a separate <code>stoke-cli</code> companion) listens on <code>127.0.0.1:8787</code> and speaks the Anthropic Messages API on <code>POST /v1/messages</code>. You point <code>ANTHROPIC_BASE_URL</code> at it. On every request Stoke runs its enforcement — auth, budget cap, rate limit, loop breaker — and only then forwards the request to Anthropic. Nothing that trips a check ever reaches Anthropic, so it never costs a token.</p>
 <p>Be clear about the scope: <strong>this forwards to Anthropic. It does not run Claude Code on local models.</strong> Stoke is a policy-enforcing passthrough, not a translator — your prompts still go to Claude, you still pay Anthropic's per-token price, and the gateway's job is to refuse the calls you don't want to pay for.</p>
@@ -185,13 +121,10 @@ done
 <pre><code class="lang-bash"><span class="tok-kw">stoke</span>-cli pricing</code></pre>
 <ul><li><strong>Loop thresholds are global</strong>, not per-key, and this is pre-release software (MIT).</li></ul>
 <h2 id="next-steps">Next steps</h2>
-<p>Get the binary, drop a <code>[[keys]]</code> cap in front of your metered key, and let the loop breaker do the rest — source, config reference, and issues are at <a href="https://github.com/Ozperium/stoke">github.com/Ozperium/stoke</a>.</p>
-<div class="cta">
-  <h3>Put a control point in front of your agents</h3>
-  <p>Stoke is a single Rust binary: hard budget caps, a runaway-loop kill switch, and local-first routing — enforced before a provider is ever called. Open source, MIT.</p>
-  <a class="btn" href="https://github.com/Ozperium/stoke">Get Stoke on GitHub</a>
-</div>
-</main>
-<footer>MIT licensed · <a href="https://stokegate.com">stokegate.com</a> · <a href="/security/">Security</a> · <a href="/legal/">Legal</a> · <a href="/contact/">Contact</a> · <a href="https://github.com/Ozperium/stoke">GitHub</a></footer>
+<p>Get the binary, drop a <code>[[keys]]</code> cap in front of your metered key, and let the loop breaker do the rest — source, config reference, and issues are at <a href="https://github.com/Ozperium/stoke">github.com/Ozperium/stoke</a>.</p><aside class="doc-callout"><h2>Put a control point in front of your agents</h2><p>Stoke is a single Rust binary: hard budget caps, a runaway-loop kill switch, and local-first routing — enforced before a provider is ever called. Open source, MIT.</p><div class="doc-actions"><a class="button button-primary" href="https://github.com/Ozperium/stoke">Get Stoke on GitHub</a></div></aside></div>
+  </main>
+  <footer class="site-footer"><div class="footer-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a><nav aria-label="Footer navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/">Guides</a><a href="/security/">Security</a><a href="/legal/">Legal</a><a href="/contact/">Contact</a><a href="https://github.com/Ozperium/stoke">GitHub</a></nav><span>© <span data-year>2026</span> Stoke</span></div></footer>
+  <script src="/presentation.js" defer></script>
+  <script src="/tracking.js" defer></script>
 </body>
 </html>

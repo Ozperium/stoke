@@ -1,16 +1,72 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#171716">
-  <meta name="robots" content="noindex, follow"><link rel="canonical" href="https://stokegate.com/contact/"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <title>Contact — Stoke</title><meta name="description" content="Contact the Stoke project through the existing public GitHub channel for bug reports and questions. Review Cloud pilot availability and details on the public explainer.">
-  <link rel="stylesheet" href="/site.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#FCFCFC">
+  <meta name="robots" content="noindex, follow">
+  <link rel="canonical" href="https://stokegate.com/contact/">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>Contact — Stoke</title>
+  <meta name="description" content="Contact the Stoke project through the existing public GitHub channel, or use the Cloud request handoff for manual review.">
+  <link rel="stylesheet" href="/presentation.css">
+  <link rel="stylesheet" href="/document.css">
 </head>
-<body>
+<body class="document-page">
   <a class="skip-link" href="#main">Skip to content</a>
-  <header class="site-nav"><div class="shell nav-inner"><a class="brand" href="/" aria-label="Stoke home"><svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 21 7v10l-9 5-9-5V7l9-5Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m8 12 2.5 2.5L16 9" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>Stoke</a><button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button><nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Stoke Cloud</a><a href="/guides/">Guides</a><a href="https://github.com/Ozperium/stoke">GitHub</a></nav></div></header>
-  <main id="main"><section class="page-hero"><div class="shell page-hero-grid"><div><span class="eyebrow">Contact</span><h1>Keep it public,<br><em>keep it useful.</em></h1><p class="lede">The project is built in the open. Use GitHub for reproducible public questions, and use the public Cloud page for pilot availability/details and the conditional waitlist.</p></div><aside class="page-aside"><span class="micro">Cloud status</span><strong>Not deployed<br>yet.</strong><p>This contact page does not collect pilot requests. When the waitlist is open, requests belong on the Cloud page and go through manual review.</p></aside></div></section><section class="cloud-section"><div class="shell"><div class="pillars"><article class="pillar light"><span class="eyebrow">Public project</span><h3>Questions, bugs, and feature requests.</h3><p>Open an issue for a reproducible public bug report, feature request, or architecture question.</p><div class="actions"><a class="button dark" href="https://github.com/Ozperium/stoke/issues/new" data-track="github_clicked">Open a public bug report <span aria-hidden="true">↗</span></a></div><p style="margin-top: 18px; font-size: 12px">Never include API keys, prompt contents, credentials, or other secrets.</p></article><article class="pillar light"><span class="eyebrow">Pilot information</span><h3>Read the public Cloud brief.</h3><p>Stoke Cloud is not deployed yet. Review the first 10 accepted-participant offer, its boundaries, and current availability/details. If the waitlist is open, the Cloud page accepts a minimal request for manual review; there is no payment collection or card processing here.</p><div class="actions"><a class="button dark" href="/cloud/">Private Cloud pilot <span aria-hidden="true">↗</span></a></div><p style="margin-top: 18px; font-size: 12px">Keep any public bug report free of private contact details, secrets, or customer data.</p></article></div></div></section></main>
-  <footer class="site-footer"><div class="shell"><div class="footer-top"><div><a class="brand" href="/"><svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 21 7v10l-9 5-9-5V7l9-5Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m8 12 2.5 2.5L16 9" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>Stoke</a><p class="footer-note">Public support uses GitHub. Private pilot status is not a promise of deployment or acceptance.</p></div><nav class="footer-links" aria-label="Footer navigation"><a href="/">Home</a><a href="/gateway/">Gateway</a><a href="/cloud/">Stoke Cloud</a><a href="/guides/">Guides</a><a href="/security/">Security</a><a href="/legal/">Legal</a></nav></div><div class="footer-bottom"><span>MIT-licensed data plane</span><span>© <span data-year>2026</span> Stoke</span></div></div></footer>
-  <script src="/site.js" defer></script><script src="/tracking.js" defer></script>
+  <header class="site-nav">
+    <div class="nav-inner">
+      <a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a>
+      <button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button>
+      <nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation">
+        <a href="/gateway/">Gateway</a>
+        <a href="/cloud/">Cloud</a>
+        <a href="/guides/">Guides</a>
+        <a href="https://github.com/Ozperium/stoke">GitHub</a>
+        <a class="nav-cta button button-secondary" href="/join/">Try Cloud</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="document-shell">
+    <section class="document-hero">
+      <div class="crumb"><a href="/">Stoke</a> / Contact</div>
+      <h1>Keep it public,<br>keep it useful.</h1>
+      <p class="lede">Use GitHub for reproducible public questions, and use the Cloud request handoff when you want to ask about access.</p>
+    </section>
+
+    <section class="document-content">
+      <div class="card">
+        <span class="crumb">Public project</span>
+        <h2>Questions, bugs, and feature requests.</h2>
+        <p>Open an issue for a reproducible public bug report, feature request, or architecture question.</p>
+        <div class="doc-actions"><a class="button button-primary" href="https://github.com/Ozperium/stoke/issues/new" data-track="github_clicked">Open a public bug report <span aria-hidden="true">↗</span></a></div>
+        <p>Never include API keys, prompt contents, credentials, personal data, customer data, or other secrets.</p>
+      </div>
+
+      <div class="card">
+        <span class="crumb">Cloud request</span>
+        <h2>Use the Cloud request handoff.</h2>
+        <p>For Cloud interest, use the <a href="/join/">Cloud request page</a> for manual review. A request does not guarantee acceptance or automatically grant access.</p>
+        <div class="doc-actions"><a class="button button-secondary" href="/join/">Request Cloud access</a></div>
+        <p>There is no contact form or payment collection on this page.</p>
+      </div>
+
+      <div class="doc-callout">
+        <h2>Private vulnerability reports</h2>
+        <p>Use the <a href="/security/">private vulnerability reporting flow</a> rather than posting credentials, exploit details, sensitive configuration, secrets, or personal data in a public issue.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a>
+      <nav aria-label="Footer navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/">Guides</a><a href="/security/">Security</a><a href="/legal/">Legal</a><a href="/contact/">Contact</a><a href="https://github.com/Ozperium/stoke">GitHub</a></nav>
+      <span>© <span data-year>2026</span> Stoke</span>
+    </div>
+  </footer>
+  <script src="/presentation.js" defer></script>
+  <script src="/tracking.js" defer></script>
 </body>
 </html>

@@ -65,4 +65,4 @@ Two action variants: primary filled and secondary outlined. Navigation, film lin
 - Use original motion graphics, meaningful close-ups and progressive construction. Clearly identify illustration as illustration; do not fake live interfaces, integrations, customers or metrics.
 - The approved visual plays once when visible; scenario choices start independent examples. It supports true pause/resume, replay, keyboard selection, hidden-page pause and cancellation. Reduced motion and no-JS retain a meaningful static explanation.
 - Show concise notice/consent on the request page and link full privacy information. Keep identities, applicant data and credentials out of public assets.
-- Legacy technical routes retain their existing document layout and capability inventory. Do not treat that scoped exception as permission to add a feature wall to the landing.
+- All public HTML routes, including the error page, share the approved shell, type and light palette. Reading layouts retain complete technical content and capability inventory; do not move a feature wall onto the homepage.

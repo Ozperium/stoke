@@ -6,7 +6,7 @@ Source tokens: ../DESIGN.md. Shared shell/forms: landing/presentation.css. Appro
 - `/`: short promise, approved content-transformation scene, independent Privacy/Budget/Local fallback examples, self-host and optional Cloud actions. No form or promoted film.
 - `/cloud/`: same visual language and compact optional-access scene; request-access handoff. No form or readiness essay.
 - `/join/`: dedicated real request form; existing notice/consent/no-JS/error contracts unchanged.
-- Gateway/Guides/legal/security: existing technical document layout intentionally preserved.
+- Gateway, all Guides, Contact, Legal, Security and the error page share the homepage shell and light document system in landing/document.css; retain technical content and literal commands.
 
 ## Control budgets and states
 - Buttons: primary, secondary, compact navigation action, illustration playback, scenario choice (maximum5 rendered variants; selected is a state).

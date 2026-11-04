@@ -1,32 +1,61 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/route.css">
-<meta name="robots" content="noindex, follow">
-<link rel="canonical" href="https://stokegate.com/legal/">
-<title>Legal — Stoke</title>
-<meta name="description" content="License and legal scope for Stoke.">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#FCFCFC">
+  <meta name="robots" content="noindex, follow">
+  <link rel="canonical" href="https://stokegate.com/legal/">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>Legal — Stoke</title>
+  <meta name="description" content="License and legal scope for Stoke.">
+  <link rel="stylesheet" href="/presentation.css">
+  <link rel="stylesheet" href="/document.css">
 </head>
-<body>
-<nav><div class="nav-inner"><a class="logo" href="/">⬡ Stoke</a><div class="nav-links"><a href="/guides/">Guides</a><a data-track="github_clicked" href="https://github.com/Ozperium/stoke">GitHub</a></div></div></nav>
-<main>
-  <div class="crumb"><a href="/">Stoke</a> / Legal</div>
-  <h1>Legal</h1>
-  <p class="lede">Stoke is open-source software, not a hosted inference service.</p>
-  <div class="card">
-    <h2>License</h2>
-    <p>The Stoke data plane is released under the MIT License. You run it on infrastructure you control, and you are responsible for its configuration, providers, credentials, and network exposure.</p>
-    <a class="btn" data-track="github_clicked" href="https://github.com/Ozperium/stoke/blob/main/LICENSE">Read the MIT License</a>
-  </div>
-  <h2>Scope</h2>
-  <p>Stoke's self-hosted data plane does not receive or retain your prompts, provider credentials, or model traffic. The public site contains documentation and installation files; it does not provide a hosted gateway or account service.</p>
-  <p>If you submit the Cloud waitlist, the separate endpoint receives your email address, selected solo/team persona, optional use-case description, and consent so a request can be reviewed. The linked <a href="/api/waitlist">server privacy notice</a> explains that purpose, retention for up to 90 days with daily cleanup, Cloudflare processing, and hashed anti-abuse handling. Deleted records may remain in Cloudflare recovery backups under its retention policies. Waitlist requests are reviewed manually; approval does not automatically grant, start, or email Cloud access. The form remains unavailable until the server confirms the matching privacy-notice version.</p>
-  <p>Nothing on this site is a warranty that a configuration is secure or suitable for a particular workload. Review the source, test your configuration, and keep credentials out of configuration files where environment variables are available.</p>
-</main>
-<footer>MIT licensed · <a href="https://stokegate.com">stokegate.com</a> · <a data-track="github_clicked" href="https://github.com/Ozperium/stoke">GitHub</a></footer>
-<script src="/tracking.js" defer></script>
+<body class="document-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-nav">
+    <div class="nav-inner">
+      <a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a>
+      <button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button>
+      <nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation">
+        <a href="/gateway/">Gateway</a>
+        <a href="/cloud/">Cloud</a>
+        <a href="/guides/">Guides</a>
+        <a href="https://github.com/Ozperium/stoke">GitHub</a>
+        <a class="nav-cta button button-secondary" href="/join/">Try Cloud</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="document-shell">
+    <section class="document-hero">
+      <div class="crumb"><a href="/">Stoke</a> / Legal</div>
+      <h1>Legal</h1>
+      <p class="lede">Stoke is open-source software, not a hosted inference service.</p>
+    </section>
+
+    <section class="document-content">
+      <div class="card">
+        <h2>License</h2>
+        <p>The Stoke data plane is released under the MIT License. You run it on infrastructure you control, and you are responsible for its configuration, providers, credentials, and network exposure.</p>
+        <div class="doc-actions"><a class="button button-primary" data-track="github_clicked" href="https://github.com/Ozperium/stoke/blob/main/LICENSE">Read the MIT License</a></div>
+      </div>
+      <h2>Scope</h2>
+      <p>Stoke's self-hosted data plane does not receive or retain your prompts, provider credentials, or model traffic. The public site contains documentation and installation files; it does not provide a hosted gateway or account service.</p>
+      <p>If you submit the Cloud waitlist, the separate endpoint receives your email address, selected solo/team persona, optional use-case description, and consent so a request can be reviewed. The linked <a href="/api/waitlist">server privacy notice</a> explains that purpose, retention for up to 90 days with daily cleanup, Cloudflare processing, and hashed anti-abuse handling. Deleted records may remain in Cloudflare recovery backups under its retention policies. Waitlist requests are reviewed manually; approval does not automatically grant, start, or email Cloud access. The form remains unavailable until the server confirms the matching privacy-notice version.</p>
+      <p>Nothing on this site is a warranty that a configuration is secure or suitable for a particular workload. Review the source, test your configuration, and keep credentials out of configuration files where environment variables are available.</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a>
+      <nav aria-label="Footer navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/">Guides</a><a href="/security/">Security</a><a href="/legal/">Legal</a><a href="/contact/">Contact</a><a href="https://github.com/Ozperium/stoke">GitHub</a></nav>
+      <span>© <span data-year>2026</span> Stoke</span>
+    </div>
+  </footer>
+  <script src="/presentation.js" defer></script>
+  <script src="/tracking.js" defer></script>
 </body>
 </html>
