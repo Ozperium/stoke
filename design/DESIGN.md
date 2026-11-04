@@ -10,7 +10,8 @@ The source-of-truth token specification is ../DESIGN.md; the implemented theme i
 
 ## Control budget
 - Action: primary / secondary.
-- Navigation: plain link / outlined navigation action.
+- Navigation: plain link / compact secondary action.
+- Link roles: inverse skip link / brand wordmark / regular navigation or inline link / emphasized path link. Regular links share one 16px type treatment across navigation, film, footer and consent.
 - Film: plain trigger link / close icon.
 - Inputs: email / multiline optional text; native radio and checkbox.
 
