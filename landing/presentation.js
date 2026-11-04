@@ -50,6 +50,9 @@
     });
   }
 
+  const missingPath = document.querySelector('[data-missing-path]');
+  if (missingPath) missingPath.textContent = window.location.pathname.slice(0, 120);
+
   document.querySelectorAll('[data-year]').forEach((node) => {
     node.textContent = String(new Date().getFullYear());
   });

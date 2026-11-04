@@ -148,5 +148,6 @@ missing_media = sorted(name for name in NEW_MEDIA if not (LANDING / name).is_fil
 assert not missing_media, "missing presentation media: " + ", ".join(missing_media)
 media_note = "new presentation media present"
 runpy.run_path(str(ROOT / "scripts/check_landing_regressions.py"))
+runpy.run_path(str(ROOT / "scripts/test_site_style.py"), run_name="__main__")
 subprocess.run(["node", "--test", str(ROOT / "scripts/test_product_visual_model.mjs")], check=True, cwd=ROOT)
 print(f"landing checks passed: {len(route_paths)} routes, sparse marketing copy, join form semantics, metadata, links, and sitemap verified; {media_note}")
