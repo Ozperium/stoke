@@ -1,0 +1,52 @@
+.drawn-shell{width:min(var(--max),calc(100% - 2 * var(--pad)));margin-inline:auto}
+.drawn-hero{display:grid;grid-template-columns:1.1fr 1fr;gap:clamp(2rem,7vw,7rem);align-items:end;padding:clamp(3rem,6vw,5.5rem) 0 2.6rem}
+.drawn-hero h1{font-size:clamp(3rem,5.3vw,4.8rem);line-height:1.04;letter-spacing:-.03em;text-wrap:initial}
+.drawn-intro p{max-width:29ch;font-size:clamp(1.1rem,1.7vw,1.35rem);line-height:1.35;margin:0 0 1.6rem}
+.drawn-story{border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:0;position:relative}
+.story-heading{display:flex;justify-content:space-between;gap:1rem;align-items:center;padding:1.15rem 0 0}
+.story-heading h2{font-family:'Source Sans 3',Arial,sans-serif;font-size:1rem;font-weight:600;letter-spacing:0;line-height:1.4}
+.story-heading span{color:var(--muted);font-size:.9rem}
+.story-art{margin:0;padding:0}
+.story-svg{display:block;width:100%;height:auto;overflow:visible}
+.story-mobile{display:none}
+.story-svg [data-policy=pending] .policy-check{display:none}
+.story-svg [data-policy=blocked] .policy-check{display:none}
+.story-svg [data-policy=blocked] .policy-stop{display:block}
+.story-svg [data-node-state=failed] .node-failure{display:block}
+.story-svg [data-path][data-failed=true]{stroke:#B7331D;stroke-dasharray:5 9!important;opacity:.65!important}
+.story-svg [data-node-state=selected] .scene-label{font-weight:700}
+.story-toolbar{display:none;align-items:center;justify-content:space-between;gap:1rem;padding:0 0 1.2rem}
+.illustration-ready .story-toolbar{display:flex}
+.story-tabs{display:flex;gap:.25rem;padding:.25rem;border:1px solid var(--line);border-radius:999px}
+.story-tab{min-height:44px;padding:.5rem 1.15rem;border:0;border-radius:999px;background:transparent;color:var(--ink);cursor:pointer;transition:background-color 140ms ease-out,color 140ms ease-out}
+.story-tab[aria-selected=true]{background:var(--ink);color:var(--paper)}
+.story-play{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:.5rem 1rem;border:1px solid var(--ink);border-radius:999px;background:transparent;color:var(--ink);cursor:pointer;transition:background-color 140ms ease-out,color 140ms ease-out}
+.story-tab:active,.story-play:active{transform:translateY(1px)}
+.story-status{color:var(--muted);margin:0;font-size:1rem;min-height:1.45em;flex:1;text-align:center}
+.story-static{display:flex;gap:2rem;justify-content:space-between;padding:0 0 1.2rem;color:var(--muted);font-size:.95rem}
+.story-static p{margin:0;max-width:34ch}
+.illustration-ready .story-static{display:none}
+.drawn-paths{display:grid;grid-template-columns:1fr 1fr;gap:clamp(2rem,9vw,10rem);padding:4.8rem 0 5.5rem}
+.drawn-paths section{border-top:1px solid var(--ink);padding-top:1.2rem}
+.drawn-paths h2{font-size:clamp(1.7rem,3vw,2.6rem);line-height:1.1;letter-spacing:-.03em;margin:0 0 .5rem}
+.drawn-paths p{margin:0 0 1.2rem;color:var(--muted)}
+.drawn-paths a{font-weight:650;text-decoration:none}
+.drawn-paths a span{color:var(--red)}
+.drawn-cloud{padding-bottom:5rem}
+.drawn-cloud .drawn-hero h1{font-size:clamp(2.7rem,5.3vw,4.6rem)}
+.cloud-drawing{display:block;width:100%;height:auto;max-height:460px;object-fit:contain;border-top:1px solid var(--line)}
+@media(hover:hover){.story-tab:not([aria-selected=true]):hover{background:#ECECE8}.story-play:hover{background:var(--ink);color:var(--paper)}}
+@media(max-width:700px){
+ .drawn-hero{display:block;padding:2.75rem 0 2rem}
+ .drawn-hero h1{font-size:clamp(2.6rem,11.5vw,3.8rem);line-height:1.06;margin-bottom:1.35rem;letter-spacing:-.025em}
+ .drawn-intro p{font-size:1.15rem;max-width:30ch;margin-bottom:1.35rem}
+ .story-heading{padding-top:.9rem}.story-heading span{font-size:.8rem}
+ .story-desktop{display:none}.story-mobile{display:block}
+ .story-toolbar{flex-wrap:wrap;gap:1rem;padding-bottom:1.2rem}
+ .story-tabs{flex:1;justify-content:space-between}.story-tab{padding:.5rem .85rem}
+ .story-play{flex:1}.story-status{flex-basis:100%;order:3;text-align:left}
+ .story-static{display:block}.story-static p+p{margin-top:.6rem}
+ .drawn-paths{display:block;padding:3.5rem 0 4rem}.drawn-paths section+section{margin-top:2.5rem}
+ .drawn-cloud{padding-bottom:3rem}.cloud-drawing{max-height:600px}
+}
+@media(prefers-reduced-motion:reduce){.story-tab,.story-play{transition:none}}

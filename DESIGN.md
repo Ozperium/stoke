@@ -1,7 +1,7 @@
 ---
 version: alpha
-name: Stoke Signal Studio
-description: Sparse product storytelling with original studio-lit model-routing illustrations.
+name: Stoke Drawn Gateway
+description: Editorial product storytelling with a drawn policy-first request path.
 colors:
   primary: "#191919"
   secondary: "#FCFCFC"
@@ -12,7 +12,7 @@ typography:
     fontSize: "4.8rem"
     fontWeight: 620
     lineHeight: 1.05
-    letterSpacing: "-0.04em"
+    letterSpacing: "-0.03em"
   body:
     fontFamily: "Source Sans 3"
     fontSize: "1.05rem"
@@ -41,7 +41,7 @@ components:
 
 ## Overview
 
-Design before copy, copy before implementation. The homepage explains one outcome with original illustration and a short authored film, not a wall of features or screenshots. Keep its body copy under90 words. Technical detail remains in Gateway and Guides.
+Design before copy, copy before implementation. The homepage explains routing, policy enforcement and permitted connection fallback through one continuous interactive drawing, not a wall of features or screenshots. Keep its body copy under90 words. Technical detail remains in Gateway and Guides.
 
 ## Colors
 
@@ -53,7 +53,7 @@ Sora display and Source Sans 3 body, self-hosted with their OFL licenses. Geomet
 
 ## Layout
 
-The product illustration has the larger visual role in an asymmetric hero. Mobile gets purpose-made vertical art, not a miniature desktop diagram. Signup is a dedicated `/join/` task, never embedded in `/` or `/cloud/`.
+A balanced editorial promise leads into a large, continuous explanatory illustration. Mobile gets purpose-made vertical art, not a miniature desktop diagram. Signup is a dedicated `/join/` task, never embedded in `/` or `/cloud/`.
 
 ## Components
 
@@ -63,6 +63,6 @@ Two action variants: primary filled and secondary outlined. Navigation, film lin
 
 - Use concrete user outcomes and short sentences. Cloud is an optional path, not an operational readiness essay.
 - Use original motion graphics, meaningful close-ups and progressive construction. Clearly identify illustration as illustration; do not fake live interfaces, integrations, customers or metrics.
-- Film begins after a user action, preserves native controls and supports pause, seek, Escape, and restored focus. The link works directly when JavaScript is absent.
+- Illustration playback begins after a user action and supports true pause/resume, replay, keyboard scenario selection and cancellation. Reduced motion and no-JS retain a meaningful static explanation.
 - Show concise notice/consent on the request page and link full privacy information. Keep identities, applicant data and credentials out of public assets.
 - Legacy technical routes retain their existing document layout and capability inventory. Do not treat that scoped exception as permission to add a feature wall to the landing.

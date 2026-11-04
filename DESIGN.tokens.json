@@ -1,6 +1,6 @@
 {
   "$schema": "https://www.designtokens.org/schemas/2025.10/format.json",
-  "$description": "Sparse product storytelling with original studio-lit model-routing illustrations.",
+  "$description": "Editorial product storytelling with a drawn policy-first request path.",
   "color": {
     "$type": "color",
     "primary": {
@@ -90,7 +90,7 @@
         },
         "fontWeight": 620,
         "letterSpacing": {
-          "value": -0.04,
+          "value": -0.03,
           "unit": "em"
         }
       }

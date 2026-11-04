@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 import json
 import runpy
+import subprocess
 import re
 import xml.etree.ElementTree as ET
 
@@ -12,10 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 LANDING = ROOT / "landing"
 DYNAMIC_PATHS = {"/api/waitlist"}
 NEW_MEDIA = {
-    "stoke-hero.svg",
-    "stoke-hero-mobile.svg",
-    "stoke-presentation.mp4",
-    "stoke-presentation-poster.jpg",
+    "stoke-drawn-desktop.svg",
+    "stoke-drawn-mobile.svg",
 }
 
 
@@ -81,25 +80,26 @@ home, cloud, join = pages[home_path], pages[cloud_path], pages[join_path]
 assert home.ids and sum(tag == "h1" for tag, _ in home.tags) == 1
 assert sum(tag == "h1" for tag, _ in cloud.tags) == 1
 assert sum(tag == "h1" for tag, _ in join.tags) == 1
-assert "Your models." in " ".join(home.text) and "Where you work." in " ".join(home.text)
+assert "Your models." in " ".join(home.text) and "Your rules." in " ".join(home.text)
 assert "Your models." in " ".join(cloud.text) and "Beyond your desk." in " ".join(cloud.text)
-main_copy = re.sub(r"<[^>]+>", " ", home_path.read_text().split("<main", 1)[1].split("</main>", 1)[0])
+main_html = home_path.read_text().split("<main", 1)[1].split("</main>", 1)[0]
+main_html = re.sub(r"<svg\b.*?</svg>|<figcaption\b.*?</figcaption>", " ", main_html, flags=re.S)
+main_copy = re.sub(r"<[^>]+>", " ", main_html)
 assert len(main_copy.split()) < 90, "homepage body copy exceeds the sparse-copy budget"
 assert not any(tag == "form" for tag, _ in home.tags + cloud.tags), "marketing pages must not embed the signup form"
 assert "preparing" not in (home_path.read_text() + cloud_path.read_text()).lower()
 assert "prelaunch" not in (home_path.read_text() + cloud_path.read_text()).lower()
 
-home_videos = tags(home, "video")
-assert len(home_videos) == 1
-video = home_videos[0]
-for attr in ("controls", "playsinline", "poster", "aria-label"):
-    assert attr in video, f"film video missing {attr}"
-assert "autoplay" not in video and video["preload"] == "none"
-assert video["poster"] == "/media/stoke-presentation-poster.jpg"
-assert "/media/stoke-presentation.mp4" in home_path.read_text()
-assert any(tag == "source" and attrs.get("srcset") == "/media/stoke-hero-mobile.svg" for tag, attrs in home.tags)
-assert any(tag == "img" and attrs.get("src") == "/media/stoke-hero.svg" for tag, attrs in home.tags)
-assert any(tag == "img" and attrs.get("src") == "/media/stoke-hero.svg" for tag, attrs in cloud.tags)
+assert not tags(home, "video"), "rejected film must not remain promoted"
+assert {a.get("data-layout") for tag, a in home.tags if tag == "svg"} == {"desktop", "mobile"}
+assert {a.get("data-scenario") for tag, a in home.tags if a.get("role") == "tab"} == {"routing", "policy", "fallback"}
+assert any("data-play-example" in a and a.get("type") == "button" for tag, a in home.tags if tag == "button")
+assert "/illustration.mjs" in home_path.read_text() and "/drawn.css" in home_path.read_text()
+assert "/media/stoke-drawn-desktop.svg" in cloud_path.read_text() and "/media/stoke-drawn-mobile.svg" in cloud_path.read_text()
+controller = (LANDING / "illustration.mjs").read_text()
+for marker in ("cancelAnimationFrame", "aria-selected", "visibilitychange", "prefers-reduced-motion", "aria-labelledby"):
+    assert marker in controller, f"missing illustration behavior: {marker}"
+assert "fetch(" not in controller and "setTimeout(" not in controller
 
 forms = [attrs for tag, attrs in join.tags if tag == "form"]
 assert len(forms) == 1 and forms[0].get("action") == "/api/waitlist" and forms[0].get("method") == "post"
@@ -140,11 +140,12 @@ sitemap = LANDING / "sitemap.xml"
 sitemap_root = ET.fromstring(sitemap.read_text())
 urls = {urlparse(child.text).path for node in sitemap_root if node.tag.endswith("url") for child in node if child.tag.endswith("loc")}
 route_paths = {"/" if path == home_path else "/" + str(path.relative_to(LANDING).parent).replace("\\", "/") + "/" for path in pages}
-assert route_paths <= urls, f"routes missing from sitemap: {sorted(route_paths - urls)}"
-assert len(urls) == 17 and "/join/" in urls
+assert route_paths - {"/join/"} == urls, "sitemap must contain every indexable route"
+assert len(urls) == 16 and "/join/" not in urls, "noindex signup must stay out of sitemap"
 
 missing_media = sorted(name for name in NEW_MEDIA if not (LANDING / "media" / name).is_file())
 assert not missing_media, "missing presentation media: " + ", ".join(missing_media)
 media_note = "new presentation media present"
 runpy.run_path(str(ROOT / "scripts/check_landing_regressions.py"))
+subprocess.run(["node", "--test", str(ROOT / "scripts/test_illustration_model.mjs")], check=True, cwd=ROOT)
 print(f"landing checks passed: {len(route_paths)} routes, sparse marketing copy, join form semantics, metadata, links, and sitemap verified; {media_note}")
