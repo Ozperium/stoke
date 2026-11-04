@@ -108,7 +108,7 @@ assert any(attrs.get("name") == "email" and attrs.get("type") == "email" and "re
 assert sum(attrs.get("name") == "persona" and attrs.get("type") == "radio" for attrs in fields) == 2
 assert all("required" in attrs for attrs in fields if attrs.get("name") == "persona")
 assert any(attrs.get("name") == "consent" and attrs.get("value") == "yes" and "required" in attrs for attrs in fields)
-assert any(attrs.get("name") == "notice_version" and attrs.get("value") == "waitlist-v1" for attrs in fields)
+assert any(attrs.get("name") == "notice_version" and attrs.get("value") == "waitlist-v2" for attrs in fields)
 assert any(attrs.get("name") == "website" and attrs.get("value") == "" for attrs in fields)
 assert 'href="/api/waitlist"' in cloud_page.read_text() and "<noscript>" in cloud_page.read_text()
 waitlist_js = (LANDING / "newwaitlist.js").read_text()
@@ -121,7 +121,11 @@ assert "console." not in waitlist_js and "sendBeacon" not in waitlist_js and "da
 assert local_target("/api/waitlist") is None and local_target("/api/unknown") == LANDING / "api" / "unknown"
 legal_text = (LANDING / "legal" / "index.html").read_text()
 assert "email address" in legal_text and "solo/team persona" in legal_text and "use-case description" in legal_text and "consent" in legal_text
-assert "/api/waitlist" in legal_text and "90-day expiry" in legal_text and "daily cleanup" in legal_text and "Cloudflare" in legal_text
+assert "90 days" in legal_text and "daily cleanup" in legal_text and "Cloudflare" in legal_text and "hashed anti-abuse" in legal_text
+assert "controller_name" not in cloud_page.read_text() and "privacy_email" not in waitlist_js
+assert "data-notice-controller" not in cloud_page.read_text() and "data-notice-email" not in cloud_page.read_text()
+assert "invitation" not in cloud_page.read_text().lower() and "invitation" not in waitlist_js.lower()
+assert "manual pilot review" in cloud_page.read_text() and "approval does not automatically grant, start, or email Cloud access" in cloud_page.read_text()
 
 # All rendered routes must have titles and resolve their first-party links.
 for page_path in sorted(LANDING.rglob("index.html")):

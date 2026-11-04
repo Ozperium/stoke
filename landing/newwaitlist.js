@@ -10,8 +10,6 @@
   const status = form.querySelector("[data-waitlist-status]");
   const error = form.querySelector("[data-waitlist-error]");
   const note = form.querySelector("[data-waitlist-note]");
-  const controller = form.querySelector("[data-notice-controller]");
-  const privacyEmail = form.querySelector("[data-notice-email]");
   const noticeVersion = form.querySelector("[data-notice-version]");
   const noticeInput = form.elements.namedItem("notice_version");
   let open = false;
@@ -30,8 +28,6 @@
   };
 
   const setNotice = (config) => {
-    if (controller) controller.textContent = config.controller_name;
-    if (privacyEmail) privacyEmail.textContent = config.privacy_email;
     if (noticeVersion) noticeVersion.textContent = config.notice_version;
   };
 
@@ -55,8 +51,6 @@
       if (!response.ok) throw new Error("availability request failed");
       const config = await response.json();
       const configured = config && config.open === true
-        && configuredText(config.controller_name)
-        && configuredText(config.privacy_email)
         && configuredText(config.notice_version)
         && config.notice_version === noticeInput.value;
       if (!configured) {
@@ -70,7 +64,7 @@
       fields.disabled = false;
       if (submit) submit.disabled = false;
       setStatus("The waitlist is open. Requests are reviewed manually; submitting is not acceptance.");
-      if (note) note.textContent = "If approved, you will receive an invitation when Cloud is ready. There is no automatic acceptance.";
+      if (note) note.textContent = "A request starts manual review; approval does not automatically grant, start, or email Cloud access.";
     } catch (_error) {
       closeWaitlist("The waitlist is unavailable right now. The form is disabled; no information was submitted.");
     }
@@ -99,8 +93,8 @@
       });
       if (response.status !== 202) throw new Error("waitlist submission failed");
       form.reset();
-      setStatus("Application received for manual review. This is not acceptance; approved participants will be invited when Cloud is ready.");
-      if (note) note.textContent = "Your request was received. The first 10 accepted participants may receive 30 days from activation; acceptance is not automatic.";
+      setStatus("Application received for manual review. This is not acceptance; approval does not automatically grant, start, or email Cloud access.");
+      if (note) note.textContent = "Your request was received. The first 10 accepted participants may receive 30 days from activation; approval is not automatic.";
     } catch (_error) {
       fields.disabled = false;
       submit.disabled = false;
