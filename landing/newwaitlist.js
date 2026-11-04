@@ -1,21 +1,19 @@
 (() => {
-  "use strict";
+  'use strict';
 
-  const form = document.querySelector("#waitlist-form");
+  const form = document.querySelector('#waitlist-form');
   if (!form) return;
 
-  const endpoint = "/api/waitlist";
-  const fields = form.querySelector("[data-waitlist-fields]");
-  const submit = form.querySelector("[data-waitlist-submit]");
-  const status = form.querySelector("[data-waitlist-status]");
-  const error = form.querySelector("[data-waitlist-error]");
-  const note = form.querySelector("[data-waitlist-note]");
-  const noticeVersion = form.querySelector("[data-notice-version]");
-  const noticeInput = form.elements.namedItem("notice_version");
+  const endpoint = '/api/waitlist';
+  const fields = form.querySelector('[data-waitlist-fields]');
+  const submit = form.querySelector('[data-waitlist-submit]');
+  const status = form.querySelector('[data-waitlist-status]');
+  const error = form.querySelector('[data-waitlist-error]');
+  const note = form.querySelector('[data-waitlist-note]');
+  const noticeVersion = form.querySelector('[data-notice-version]');
+  const noticeInput = form.elements.namedItem('notice_version');
   let open = false;
   let pending = false;
-
-  const configuredText = (value) => typeof value === "string" && value.trim() !== "";
 
   const setStatus = (message) => {
     status.textContent = message;
@@ -27,79 +25,77 @@
     error.hidden = !message;
   };
 
-  const setNotice = (config) => {
-    if (noticeVersion) noticeVersion.textContent = config.notice_version;
-  };
-
   const closeWaitlist = (message) => {
     open = false;
     fields.disabled = true;
-    if (submit) submit.disabled = true;
+    submit.disabled = true;
     setStatus(message);
-    if (note) note.textContent = "No information was submitted. Check back when the waitlist is available.";
+    note.textContent = 'No information was submitted. Check back when requests are available.';
   };
 
   const loadAvailability = async () => {
     fields.disabled = true;
-    if (submit) submit.disabled = true;
-    setStatus("Checking waitlist availability…");
+    submit.disabled = true;
+    setStatus('Checking request availability…');
     try {
       const response = await fetch(`${endpoint}?format=json`, {
-        headers: { Accept: "application/json" },
-        credentials: "same-origin"
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin'
       });
-      if (!response.ok) throw new Error("availability request failed");
+      if (!response.ok) throw new Error('availability request failed');
       const config = await response.json();
       const configured = config && config.open === true
-        && configuredText(config.notice_version)
+        && typeof config.notice_version === 'string'
+        && config.notice_version.trim() !== ''
         && config.notice_version === noticeInput.value;
       if (!configured) {
         closeWaitlist(config && config.open === false
-          ? "The waitlist is currently closed. The form is disabled."
-          : "The waitlist is unavailable until its service and privacy notice are configured.");
+          ? 'Requests are currently closed. The form is disabled.'
+          : 'Requests are unavailable until the service and privacy notice are configured.');
         return;
       }
-      setNotice(config);
+      noticeVersion.textContent = config.notice_version;
       open = true;
       fields.disabled = false;
-      if (submit) submit.disabled = false;
-      setStatus("The waitlist is open. Requests are reviewed manually; submitting is not acceptance.");
-      if (note) note.textContent = "A request starts manual review; approval does not automatically grant, start, or email Cloud access.";
+      submit.disabled = false;
+      setStatus('Requests are open.');
+      note.textContent = 'Requests are reviewed manually.';
     } catch (_error) {
-      closeWaitlist("The waitlist is unavailable right now. The form is disabled; no information was submitted.");
+      closeWaitlist('Requests are unavailable right now. The form is disabled; no information was submitted.');
     }
   };
 
-  form.addEventListener("submit", async (event) => {
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (!open || pending) return;
+    if (!open || pending || !form.reportValidity()) return;
 
-    setError("");
+    setError('');
     const body = new URLSearchParams(new FormData(form));
     pending = true;
     fields.disabled = true;
     submit.disabled = true;
-    setStatus("Sending your request for manual review…");
+    setStatus('Sending your request for manual review…');
 
     try {
       const response = await fetch(endpoint, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          Accept: "application/json",
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
         },
-        credentials: "same-origin",
+        credentials: 'same-origin',
         body
       });
-      if (response.status !== 202) throw new Error("waitlist submission failed");
+      if (response.status !== 202) throw new Error('waitlist submission failed');
       form.reset();
-      setStatus("Application received for manual review. This is not acceptance; approval does not automatically grant, start, or email Cloud access.");
-      if (note) note.textContent = "Your request was received. The first 10 accepted participants may receive 30 days from activation; approval is not automatic.";
+      fields.disabled = true;
+      setStatus("Request received. We'll review it.");
+      note.textContent = '';
     } catch (_error) {
       fields.disabled = false;
       submit.disabled = false;
-      setError("We could not submit your request. Your entries are still here; check the fields and try again.");
-      setStatus("Submission failed. Your entries are kept for a retry.");
+      setError("Couldn't send your request. Your details are still here. Try again.");
+      setStatus('Submission failed. Your details are kept for a retry.');
     } finally {
       pending = false;
     }

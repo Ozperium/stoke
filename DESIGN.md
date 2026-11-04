@@ -1,68 +1,68 @@
 ---
 version: alpha
-name: Stoke Public Launch
-description: Premium graphite-and-ivory product storytelling with a restrained ember accent.
+name: Stoke Signal Studio
+description: Sparse product storytelling with original studio-lit model-routing illustrations.
 colors:
-  primary: "#171716"
-  secondary: "#F4F0E8"
-  tertiary: "#EF774F"
+  primary: "#191919"
+  secondary: "#FCFCFC"
+  tertiary: "#F15332"
 typography:
   display:
-    fontFamily: "Arial Narrow, Avenir Next Condensed, Inter, sans-serif"
-    fontSize: "6.4rem"
-    fontWeight: 800
-    lineHeight: 0.91
-    letterSpacing: "-0.075em"
+    fontFamily: "Sora"
+    fontSize: "4.8rem"
+    fontWeight: 620
+    lineHeight: 1.05
+    letterSpacing: "-0.04em"
   body:
-    fontFamily: "Inter, ui-sans-serif, sans-serif"
-    fontSize: 1rem
+    fontFamily: "Source Sans 3"
+    fontSize: "1.05rem"
     fontWeight: 400
-    lineHeight: 1.55
-  mono:
-    fontFamily: "SFMono-Regular, Consolas, monospace"
-    fontSize: 0.75rem
-    fontWeight: 700
-    lineHeight: 1.4
+    lineHeight: 1.45
 rounded:
-  sm: 12px
-  md: 18px
-  lg: 22px
+  sm: "0px"
+  md: "8px"
+  lg: "999px"
 spacing:
-  sm: 12px
-  md: 24px
-  lg: 56px
+  sm: "12px"
+  md: "24px"
+  lg: "64px"
 components:
   button-primary:
-    backgroundColor: "{colors.secondary}"
-    textColor: "{colors.primary}"
-    rounded: "99px"
-    padding: "12px 18px"
-  button-ember:
     backgroundColor: "{colors.tertiary}"
     textColor: "{colors.primary}"
-    rounded: "99px"
+    rounded: "{rounded.lg}"
+    padding: "12px 18px"
+  button-secondary:
+    backgroundColor: "{colors.secondary}"
+    textColor: "{colors.primary}"
+    rounded: "{rounded.lg}"
     padding: "12px 18px"
 ---
 
 ## Overview
 
-Stoke's public launch uses editorial product storytelling rather than generic SaaS card grids. The dark hero establishes the model-layer promise; ivory sections explain the product and its limits; ember is reserved for actions, state, and pilot status.
+Design before copy, copy before implementation. The homepage explains one outcome with original illustration and a short authored film, not a wall of features or screenshots. Keep its body copy under90 words. Technical detail remains in Gateway and Guides.
 
 ## Colors
 
-- **Graphite (#171716):** primary surface for the hero and product sections.
-- **Ivory (#F4F0E8):** readable page surface and high-contrast primary action.
-- **Ember (#EF774F):** restrained accent for focus, links, pilot labels, and directional emphasis.
-- **Sage (#B8CFB5):** secondary status color in clearly labeled preview surfaces.
+True white, ink and Stoke red-orange. Studio-lit illustration may use neutral materials and shadows; no default beige page field, purple glow, glass panels or gradient headlines. Primary orange buttons use ink text for contrast.
 
 ## Typography
 
-Use the condensed display stack for large statements and the system sans stack for body copy. Monospace is limited to labels, boundary notes, and technical surfaces.
+Sora display and Source Sans 3 body, self-hosted with their OFL licenses. Geometric display contrasts with a humanist reading face. Do not collapse spaces or over-tighten tracking.
 
 ## Layout
 
-Keep wide editorial margins, thin rules, and asymmetric two-column hero sections. On small screens, collapse to one column at 720px and keep every primary action full width below 420px.
+The product illustration has the larger visual role in an asymmetric hero. Mobile gets purpose-made vertical art, not a miniature desktop diagram. Signup is a dedicated `/join/` task, never embedded in `/` or `/cloud/`.
 
-## Accessibility
+## Components
 
-Lead with the real product interface: a large, user-initiated native video and useful UI stills rather than abstract flow boxes. Label all sample-data frames as preview, not a live Cloud session. Preserve native controls and a poster without autoplay. Navigation progressively enhances a visible no-JS menu; focus stays visible and reduced-motion preferences disable nonessential motion.
+Two action variants: primary filled and secondary outlined. Navigation, film link and close control have explicit focus-visible treatment. Form states cover checking, unavailable, ready, pending, error/retry and received. Only HTTP202 confirms a request. A received request is not an automatically activated account.
+
+## Do's and Don'ts
+
+- Use concrete user outcomes and short sentences. Cloud is an optional path, not an operational readiness essay.
+- Use original motion graphics, meaningful close-ups and progressive construction. Clearly identify illustration as illustration; do not fake live interfaces, integrations, customers or metrics.
+- Film begins after a user action, preserves native controls and supports pause, seek, Escape, and restored focus. The link works directly when JavaScript is absent.
+- Show concise notice/consent on the request page and link full privacy information. Keep identities, applicant data and credentials out of public assets.
+- Legacy technical routes retain their existing document layout and capability inventory. Do not treat that scoped exception as permission to add a feature wall to the landing.

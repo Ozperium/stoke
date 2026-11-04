@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#FCFCFC">
+  <meta name="robots" content="noindex, follow">
+  <meta name="description" content="Request access to the Stoke Cloud pilot.">
+  <link rel="canonical" href="https://stokegate.com/join/">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Stoke">
+  <meta property="og:title" content="Try Stoke Cloud">
+  <meta property="og:description" content="Request access to the Stoke Cloud pilot.">
+  <meta property="og:url" content="https://stokegate.com/join/">
+  <meta property="og:image" content="https://stokegate.com/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Stoke — your models, where you work.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Try Stoke Cloud">
+  <meta name="twitter:description" content="Request access to the Stoke Cloud pilot.">
+  <meta name="twitter:image" content="https://stokegate.com/og-image.png">
+  <meta name="twitter:image:alt" content="Stoke — your models, where you work.">
+  <title>Try Stoke Cloud — request access</title>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","name":"Try Stoke Cloud","description":"Request access to the Stoke Cloud pilot.","url":"https://stokegate.com/join/","isPartOf":{"@type":"WebSite","name":"Stoke","url":"https://stokegate.com/"}}</script>
+  <link rel="stylesheet" href="/presentation.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-nav">
+    <div class="nav-inner">
+      <a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a>
+      <button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button>
+      <nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation">
+        <a href="/gateway/">Gateway</a>
+        <a href="/cloud/">Cloud</a>
+        <a href="/guides/">Guides</a>
+        <a href="https://github.com/Ozperium/stoke">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="join-main">
+    <section class="join-layout" aria-labelledby="join-title">
+      <div class="join-intro">
+        
+        <h1 id="join-title">Try Stoke Cloud.</h1>
+        <p class="join-lede">Tell us who you're building for.</p>
+        <p class="offer-note">First 10 accepted participants: up to 30 days of Cloud access at no charge. Your compute and provider costs remain yours.</p>
+      </div>
+
+      <form class="waitlist-form" id="waitlist-form" action="/api/waitlist" method="post" accept-charset="UTF-8">
+        <p class="waitlist-status" data-waitlist-status role="status" aria-live="polite">Checking request availability…</p>
+        <p class="waitlist-notice" data-waitlist-notice>Used only for this request. Kept for up to 90 days. <a href="/legal/">Data-use notice</a><span class="sr-only" data-notice-version>waitlist-v2</span></p>
+        <p class="waitlist-error" data-waitlist-error role="alert" aria-live="assertive" hidden></p>
+        <fieldset data-waitlist-fields disabled>
+          <legend>Request access</legend>
+          <label for="waitlist-email">Email <span aria-hidden="true">*</span></label>
+          <input id="waitlist-email" name="email" type="email" autocomplete="email" required aria-describedby="email-hint">
+          <p class="field-hint" id="email-hint">We use this to follow up on your request.</p>
+
+          <fieldset class="persona-fieldset">
+            <legend>Who are you building for? <span aria-hidden="true">*</span></legend>
+            <label class="choice"><input type="radio" name="persona" value="solo" required>Just me</label>
+            <label class="choice"><input type="radio" name="persona" value="team" required>My team</label>
+          </fieldset>
+
+          <details class="use-case-details">
+            <summary>Add a use case <span>(optional)</span></summary>
+            <label for="waitlist-use-case">What would you like to connect?</label>
+            <textarea id="waitlist-use-case" name="use_case" rows="5" maxlength="800" aria-describedby="use-case-hint"></textarea>
+            <p class="field-hint" id="use-case-hint">800 characters max.</p>
+          </details>
+
+          <label class="consent-choice"><input type="checkbox" name="consent" value="yes" required><span>I agree to the <a href="/legal/">data-use notice</a>. <span aria-hidden="true">*</span></span></label>
+          <input type="hidden" name="notice_version" value="waitlist-v2">
+          <label class="honeypot" aria-hidden="true" hidden>Website<input name="website" type="text" value="" autocomplete="off" tabindex="-1"></label>
+          <button class="button button-primary" type="submit" data-waitlist-submit>Request access</button>
+        </fieldset>
+        <noscript><p class="form-note"><a href="/api/waitlist">Open the request form without JavaScript</a>.</p></noscript>
+        <p class="form-note" data-waitlist-note></p>
+      </form>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a>
+      <nav aria-label="Footer navigation"><a href="/">Home</a><a href="/cloud/">Cloud</a><a href="/gateway/">Gateway</a><a href="/guides/">Guides</a><a href="/legal/">Legal</a><a href="/contact/">Contact</a></nav>
+      <span>© <span data-year>2026</span> Stoke</span>
+    </div>
+  </footer>
+  <script src="/presentation.js" defer></script>
+  <script src="/newwaitlist.js" defer></script>
+</body>
+</html>
