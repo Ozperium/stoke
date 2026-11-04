@@ -1,10 +1,10 @@
-# Stoke drawn presentation contract
+# Stoke approved OpenDesign presentation contract
 
-Source tokens: ../DESIGN.md. Shared shell/forms: landing/presentation.css. Drawn presentation: landing/drawn.css.
+Source tokens: ../DESIGN.md. Shared shell/forms: landing/presentation.css. Approved visual: landing/product-visual.css and product-visual.mjs with a deterministic product-visual-model.mjs.
 
 ## Routes
-- `/`: short promise, continuous original drawing, user-controlled routing/policy/fallback examples, self-host and optional Cloud actions. No form or promoted film.
-- `/cloud/`: same visual language and original static drawing; request-access handoff. No form or readiness essay.
+- `/`: short promise, approved content-transformation scene, independent Privacy/Budget/Local fallback examples, self-host and optional Cloud actions. No form or promoted film.
+- `/cloud/`: same visual language and compact optional-access scene; request-access handoff. No form or readiness essay.
 - `/join/`: dedicated real request form; existing notice/consent/no-JS/error contracts unchanged.
 - Gateway/Guides/legal/security: existing technical document layout intentionally preserved.
 

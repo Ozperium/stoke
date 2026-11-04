@@ -10,7 +10,7 @@ from xml.etree import ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1] / "landing"
 DYNAMIC_PATHS = {"/api/waitlist"}
-EXPECTED_MEDIA = {"stoke-drawn-desktop.svg", "stoke-drawn-mobile.svg"}
+EXPECTED_MEDIA = {"product-visual.css", "product-visual.mjs", "product-visual-model.mjs"}
 
 
 class Document(HTMLParser):
@@ -97,10 +97,10 @@ def main():
     check("Your models." in home and "Your rules." in home, "homepage promise missing")
     check("Your models." in cloud and "Beyond your desk." in cloud, "Cloud promise missing")
     check(not home_doc.videos, "rejected film must not be promoted")
-    check('data-illustration' in home and 'data-layout="desktop"' in home and 'data-layout="mobile"' in home, "drawn responsive illustration missing")
-    check('/illustration.mjs' in home and '/drawn.css' in home, "illustration runtime/style missing")
-    check(all(f'data-scenario="{name}"' in home for name in ["routing", "policy", "fallback"]), "scenario controls missing")
-    check('/media/stoke-drawn-desktop.svg' in cloud and '/media/stoke-drawn-mobile.svg' in cloud, "Cloud drawing assets missing")
+    check('data-product-visual' in home and 'data-visual-canvas' in home, "approved responsive visual missing")
+    check('/product-visual.mjs' in home and '/product-visual.css' in home, "visual runtime/style missing")
+    check(all(f'data-scenario="{name}"' in home for name in ["privacy", "budget", "local"]), "scenario controls missing")
+    check('data-visual-mode="cloud"' in cloud and '/product-visual.mjs' in cloud, "Cloud visual missing")
     check("<form" not in home.lower() and "<form" not in cloud.lower(), "marketing pages must not add a signup form")
     check("preparing" not in (home + cloud).lower() and "prelaunch" not in (home + cloud).lower(), "marketing readiness wall remains")
     check("id=\"waitlist-form\"" in join and "action=\"/api/waitlist\"" in join and "method=\"post\"" in join, "join form contract missing")
@@ -123,13 +123,12 @@ def main():
     route_paths = {"/" if p == ROOT / "index.html" else "/" + str(p.relative_to(ROOT).parent).replace("\\", "/") + "/" for p in ROOT.rglob("index.html")}
     check(route_paths - {"/join/"} == sitemap_paths and len(sitemap_paths) == 16, "sitemap must include every indexable route")
 
-    missing_media = sorted(name for name in EXPECTED_MEDIA if not (ROOT / "media" / name).is_file())
-    for name in EXPECTED_MEDIA:
-        asset = (ROOT / "media" / name).read_text()
-        check('font-family="Source Sans 3,Arial,sans-serif"' not in asset, "SVG family containing numeral must be quoted")
-        check('font-family="\'Source Sans 3\',Arial,sans-serif"' in asset, "portable SVG sans-serif fallback missing")
-    check(not missing_media, "missing drawing assets: " + ", ".join(missing_media))
-    media_note = "drawing assets present and referenced"
+    missing_media = sorted(name for name in EXPECTED_MEDIA if not (ROOT / name).is_file())
+    check(not missing_media, "missing visual assets: " + ", ".join(missing_media))
+    controller = (ROOT / "product-visual.mjs").read_text()
+    check(".style." not in controller and "fetch(" not in controller, "visual must not mutate inline styles or make inference requests")
+    check("'Source Sans 3'" in (ROOT / "presentation.css").read_text(), "self-hosted font family missing")
+    media_note = "approved HTML/SVG component assets present and referenced"
     print(f"STATIC CHECKS PASSED: {len(pages)} selected pages, join semantics, visual routes, accessibility hooks, sitemap, XML, JSON-LD, and links verified; {media_note}")
 
 

@@ -12,10 +12,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 LANDING = ROOT / "landing"
 DYNAMIC_PATHS = {"/api/waitlist"}
-NEW_MEDIA = {
-    "stoke-drawn-desktop.svg",
-    "stoke-drawn-mobile.svg",
-}
+NEW_MEDIA = {"product-visual.css", "product-visual.mjs", "product-visual-model.mjs"}
 
 
 class Page(HTMLParser):
@@ -83,7 +80,7 @@ assert sum(tag == "h1" for tag, _ in join.tags) == 1
 assert "Your models." in " ".join(home.text) and "Your rules." in " ".join(home.text)
 assert "Your models." in " ".join(cloud.text) and "Beyond your desk." in " ".join(cloud.text)
 main_html = home_path.read_text().split("<main", 1)[1].split("</main>", 1)[0]
-main_html = re.sub(r"<svg\b.*?</svg>|<figcaption\b.*?</figcaption>", " ", main_html, flags=re.S)
+main_html = main_html.split('<div class="product-visual__frame"', 1)[0]  # Scene labels are explanatory inventory, not marketing copy.
 main_copy = re.sub(r"<[^>]+>", " ", main_html)
 assert len(main_copy.split()) < 90, "homepage body copy exceeds the sparse-copy budget"
 assert not any(tag == "form" for tag, _ in home.tags + cloud.tags), "marketing pages must not embed the signup form"
@@ -91,12 +88,16 @@ assert "preparing" not in (home_path.read_text() + cloud_path.read_text()).lower
 assert "prelaunch" not in (home_path.read_text() + cloud_path.read_text()).lower()
 
 assert not tags(home, "video"), "rejected film must not remain promoted"
-assert {a.get("data-layout") for tag, a in home.tags if tag == "svg"} == {"desktop", "mobile"}
-assert {a.get("data-scenario") for tag, a in home.tags if a.get("role") == "tab"} == {"routing", "policy", "fallback"}
-assert any("data-play-example" in a and a.get("type") == "button" for tag, a in home.tags if tag == "button")
-assert "/illustration.mjs" in home_path.read_text() and "/drawn.css" in home_path.read_text()
-assert "/media/stoke-drawn-desktop.svg" in cloud_path.read_text() and "/media/stoke-drawn-mobile.svg" in cloud_path.read_text()
-controller = (LANDING / "illustration.mjs").read_text()
+assert any("data-product-visual" in a for _, a in home.tags), "approved visual missing"
+assert {a.get("data-scenario") for tag, a in home.tags if a.get("role") == "tab"} == {"privacy", "budget", "local"}
+assert any(a.get("data-role") == "visual-play" and a.get("type") == "button" for tag, a in home.tags if tag == "button")
+for page in (home_path, cloud_path):
+    assert "/product-visual.mjs" in page.read_text() and "/product-visual.css" in page.read_text()
+    assert "/drawn.css" not in page.read_text() and "/illustration.mjs" not in page.read_text()
+    assert not re.search(r"\bstyle\s*=", page.read_text(), re.I), "visual must support strict style CSP"
+controller = (LANDING / "product-visual.mjs").read_text()
+assert ".style." not in controller, "use SVG presentation attributes, not inline style mutation"
+assert "./product-visual-model.mjs" in controller
 for marker in ("cancelAnimationFrame", "aria-selected", "visibilitychange", "prefers-reduced-motion", "aria-labelledby"):
     assert marker in controller, f"missing illustration behavior: {marker}"
 assert "fetch(" not in controller and "setTimeout(" not in controller
@@ -143,9 +144,9 @@ route_paths = {"/" if path == home_path else "/" + str(path.relative_to(LANDING)
 assert route_paths - {"/join/"} == urls, "sitemap must contain every indexable route"
 assert len(urls) == 16 and "/join/" not in urls, "noindex signup must stay out of sitemap"
 
-missing_media = sorted(name for name in NEW_MEDIA if not (LANDING / "media" / name).is_file())
+missing_media = sorted(name for name in NEW_MEDIA if not (LANDING / name).is_file())
 assert not missing_media, "missing presentation media: " + ", ".join(missing_media)
 media_note = "new presentation media present"
 runpy.run_path(str(ROOT / "scripts/check_landing_regressions.py"))
-subprocess.run(["node", "--test", str(ROOT / "scripts/test_illustration_model.mjs")], check=True, cwd=ROOT)
+subprocess.run(["node", "--test", str(ROOT / "scripts/test_product_visual_model.mjs")], check=True, cwd=ROOT)
 print(f"landing checks passed: {len(route_paths)} routes, sparse marketing copy, join form semantics, metadata, links, and sitemap verified; {media_note}")

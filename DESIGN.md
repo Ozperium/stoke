@@ -1,7 +1,7 @@
 ---
 version: alpha
-name: Stoke Drawn Gateway
-description: Editorial product storytelling with a drawn policy-first request path.
+name: Stoke Request Control
+description: Approved OpenDesign request-content visual with policy-first causal motion.
 colors:
   primary: "#191919"
   secondary: "#FCFCFC"
@@ -41,7 +41,7 @@ components:
 
 ## Overview
 
-Design before copy, copy before implementation. The homepage explains routing, policy enforcement and permitted connection fallback through one continuous interactive drawing, not a wall of features or screenshots. Keep its body copy under90 words. Technical detail remains in Gateway and Guides.
+Design before copy, copy before implementation. The homepage explains opt-in content masking, pre-dispatch budget refusal and permitted local connection fallback through one continuous HTML/SVG scene, not a wall of features or screenshots. Keep its body copy under90 words. Technical detail remains in Gateway and Guides.
 
 ## Colors
 
@@ -63,6 +63,6 @@ Two action variants: primary filled and secondary outlined. Navigation, film lin
 
 - Use concrete user outcomes and short sentences. Cloud is an optional path, not an operational readiness essay.
 - Use original motion graphics, meaningful close-ups and progressive construction. Clearly identify illustration as illustration; do not fake live interfaces, integrations, customers or metrics.
-- Illustration playback begins after a user action and supports true pause/resume, replay, keyboard scenario selection and cancellation. Reduced motion and no-JS retain a meaningful static explanation.
+- The approved visual plays once when visible; scenario choices start independent examples. It supports true pause/resume, replay, keyboard selection, hidden-page pause and cancellation. Reduced motion and no-JS retain a meaningful static explanation.
 - Show concise notice/consent on the request page and link full privacy information. Keep identities, applicant data and credentials out of public assets.
 - Legacy technical routes retain their existing document layout and capability inventory. Do not treat that scoped exception as permission to add a feature wall to the landing.
