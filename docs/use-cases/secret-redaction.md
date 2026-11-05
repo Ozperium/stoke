@@ -2,8 +2,8 @@
 title: The error log came with an API key
 description: Keep useful troubleshooting context while filtering recognized secrets from supported message content before an approved cloud request.
 slug: secret-redaction
-image: /media/use-cases/secret-redaction-v2.webp
-og_image: /media/use-cases/secret-redaction-og-v3.png
+image: /media/use-cases/secret-redaction-v3.webp
+og_image: /media/use-cases/secret-redaction-og-v4.png
 image_alt: A timeout error stays in the log while Stoke replaces a dummy API key before forwarding.
 image_layout: editorial
 persona: Engineering & support teams

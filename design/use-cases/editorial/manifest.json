@@ -6,21 +6,21 @@
       "slug": "local-models",
       "method": "Deterministic explanatory SVG, Sora font rasterization; no model-generated interface",
       "source": "design/use-cases/editorial/local-models-v2.svg",
-      "hero": "landing/media/use-cases/local-models-v2.webp",
-      "social": "landing/media/use-cases/local-models-og-v3.png",
-      "source_sha256": "dbf0fae8d9abe6711163b360cefa2a2d637bd139305dfa04412dddd55e17f028",
-      "hero_sha256": "e1dd510aa9b597af1ee576b5d69ef463219ea68cf0e155d3f02c7afd8956b316",
-      "social_sha256": "75dc3b151ce545f8c11aef91b1b82c4bf7499ee630bfa88fb91659df807e2f84"
+      "hero": "landing/media/use-cases/local-models-v3.webp",
+      "social": "landing/media/use-cases/local-models-og-v4.png",
+      "source_sha256": "10243f64216de984e17d97e785475c7a4dc79fb002303b09e98d0a1e632f3193",
+      "hero_sha256": "aa6192a4120ef55bba275be96f3406a703d1aed8887a217ee60265ef62afb842",
+      "social_sha256": "16a35f02a8b022483be831405613f09186a6fa70ce46907205e53bc9f89515ac"
     },
     {
       "slug": "secret-redaction",
       "method": "Deterministic explanatory SVG, Sora font rasterization; no model-generated interface",
       "source": "design/use-cases/editorial/secret-redaction-v2.svg",
-      "hero": "landing/media/use-cases/secret-redaction-v2.webp",
-      "social": "landing/media/use-cases/secret-redaction-og-v3.png",
-      "source_sha256": "75959d74dbd3124edf0e8e738de4606e4be9ab526e65560c6f1f8f1813f5de61",
-      "hero_sha256": "dcd73b4ab6f3105279caa8df2a68f016113604c95ba68c7e65dc50648457bbdf",
-      "social_sha256": "f4717c4a0b464a7940e65ab4e8b7540ce253f078946a8f625ce4b1a48e5a587c"
+      "hero": "landing/media/use-cases/secret-redaction-v3.webp",
+      "social": "landing/media/use-cases/secret-redaction-og-v4.png",
+      "source_sha256": "c0a72f90aabfa38f83b91bd8c4aeaccd85e9520ad249478df2e3de9ed098845a",
+      "hero_sha256": "eed9b553a652c10182c07fa24bcd7e1b6718ce9bb64e1e1fef4a2d4cd0d1b742",
+      "social_sha256": "7259a3b7746bf16a3303a382db5a7db65de683a4394f02cf74bfac1d6a634df7"
     }
   ]
 }

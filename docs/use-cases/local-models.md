@@ -2,8 +2,8 @@
 title: Give your idle computer a job
 description: Your laptop is busy. Your other computer has room. Send separate model requests to the machines you already own through one Stoke endpoint.
 slug: local-models
-image: /media/use-cases/local-models-v2.webp
-og_image: /media/use-cases/local-models-og-v3.png
+image: /media/use-cases/local-models-v3.webp
+og_image: /media/use-cases/local-models-og-v4.png
 image_alt: Requests from a laptop pass through Stoke to a workstation and a spare computer.
 image_layout: editorial
 persona: Developers & small teams
