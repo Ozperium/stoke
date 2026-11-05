@@ -1,40 +1,36 @@
 ---
-title: Use models across your machines
-description: One endpoint for developers and small teams using local models across their own computers. Keep model access steady as available machines change.
+title: Give your idle computer a job
+description: Your laptop is busy. Your other computer has room. Send separate model requests to the machines you already own through one Stoke endpoint.
 slug: local-models
 image: /media/use-cases/local-models-v1.webp
-og_image: /media/use-cases/local-models-og-v1.png
-image_alt: Concept illustration of several personal computers using a shared model connection.
+og_image: /media/use-cases/local-models-og-v2.png
+image_alt: Several personal computers using a shared model connection.
 persona: Developers & small teams
 icon: nodes
 order: 1
 ---
-# Use models across your machines
+# Give your idle computer a job
 
-## A day-to-day case
+Your coding assistant is waiting for a model response on the laptop you are also using to work. Across the room, a desktop with a suitable model is doing nothing.
 
-Your workstation has the model you need. Your laptop is where you work. A second machine has spare capacity, but switching every application between endpoints turns that capacity into another thing to manage.
+You could move the whole workflow to the desktop. Or keep changing endpoints whenever a machine gets busy. Neither is a good use of the hardware you already bought.
 
-You want one place to send model requests, without moving the whole agent or development environment to another computer.
+## Keep the editor here, run the model over there
 
-## With Stoke
+Point your compatible app at Stoke and register your approved inference machines. Your editor stays on the laptop. Stoke sends each model request to an eligible destination, considering available models, node health, warm capacity and current load.
 
-Connect compatible applications to one gateway endpoint. Configure the machines you own as inference destinations, directly through Ollama or through another Stoke gateway.
+One machine can handle a coding request while another serves a document-summary request. The applications keep the same gateway address instead of following individual computers around the network.
 
-Stoke checks eligible models and node health, prefers warm capacity, and uses live load when choosing where to send a request. Separate requests can use separate machines. Where supported, another permitted node can serve a request when the first is unavailable before streaming begins.
+## More places to run requests, not one bigger GPU
 
-Your application keeps the gateway address. You keep control of which models and destinations are eligible.
+This is request routing, not combined GPU memory. A model still has to fit on the machine serving it. Adding another host is useful when you have separate requests it can handle, not when you need to squeeze one oversized model across two computers.
 
-## Know the boundary
+Compare completed work and latency on your actual workload before buying more equipment. Local inference still costs hardware and electricity, and a slow network or unsuitable model can erase the benefit.
 
-This is request routing, not combined GPU memory: several computers do not become one machine capable of loading a larger model. Better throughput depends on your actual models and workload; hardware and electricity still cost money.
+## Give the spare machine one real task
 
-A remote inference host can access the request it processes. Use machines and network access you trust. A private-only route must refuse an unavailable destination rather than silently use cloud inference. Do not assume interrupted streams can resume on another node.
+Start with two trusted machines and a task you already run. Send requests through the same endpoint, check which host serves them, then compare the result with your single-machine setup.
 
-## Try this setup
+Keep sensitive work on approved private destinations. A remote host can read what it processes; spare capacity is not permission to send it confidential data.
 
-Start with two machines and one compatible application. Send a request through the same endpoint, then take one eligible node offline and inspect the outcome. Compare completed work and latency with your original single-node setup.
-
-[Set up Ollama across two machines](/guides/run-ollama-across-two-machines/)
-
-[Install the self-hosted gateway](/gateway/#install)
+[Connect Ollama across two machines](/guides/run-ollama-across-two-machines/)

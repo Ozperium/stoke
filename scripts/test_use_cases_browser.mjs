@@ -10,12 +10,12 @@ const root = fileURLToPath(new URL('../landing/', import.meta.url));
 const proof = process.env.STOKE_PROOF_DIR;
 if (proof) await mkdir(proof, {recursive: true});
 const cases = [
-  ['local-models', 'Use models across your machines'],
-  ['private-data', 'Keep private requests private'],
-  ['agent-spend', 'Put limits around agent spend'],
-  ['private-model-access', 'Share models, not provider keys'],
-  ['node-failover', 'Recover when a model node goes offline'],
-  ['secret-redaction', 'Redact recognized secrets before sending'],
+  ['local-models', 'Give your idle computer a job'],
+  ['private-data', 'Keep client documents off the cloud'],
+  ['agent-spend', 'Stop funding an agent’s retry loop'],
+  ['private-model-access', 'Connect apps without copying provider keys'],
+  ['node-failover', 'A model host went offline. Now what?'],
+  ['secret-redaction', 'The error log came with an API key'],
 ];
 const types = {'.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2'};
 const server = createServer(async (request, response) => {
@@ -92,7 +92,9 @@ for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
           await illustration.evaluate(img => img.decode());
           assert.deepEqual(await illustration.evaluate(img => [img.naturalWidth, img.naturalHeight]), [1152, 720]);
           assert.equal(await page.locator('.use-cases-menu [aria-current="page"]').count(), 1);
-          assert.ok((await page.locator('.document-content').innerText()).includes('Know the boundary'));
+          assert.ok(await page.locator('.document-content h2').count() >= 3);
+          assert.equal(await page.locator('.use-case-figure figcaption').count(), 0);
+          assert.ok(!(await page.locator('body').innerText()).includes('not a product screenshot'));
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
           if (proof && name === 'chromium' && slug === 'private-data' && [390, 1280].includes(width)) {
             await page.screenshot({path: join(proof, `${width}-private-data.png`), fullPage: true});
@@ -146,7 +148,7 @@ for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
         assert.equal(await page.locator('.use-cases-menu__item').count(), 6);
         await page.locator('.use-cases-menu a[href="/use-cases/private-data/"]').click();
         await page.waitForURL(base + '/use-cases/private-data/');
-        assert.equal(await page.locator('h1').innerText(), 'Keep private requests private');
+        assert.equal(await page.locator('h1').innerText(), 'Keep client documents off the cloud');
         assert.equal(await page.locator('#nav-menu').isVisible(), true);
       }
     } finally {

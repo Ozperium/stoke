@@ -1,40 +1,38 @@
 ---
-title: Put limits around agent spend
-description: Bound metered API exposure for unattended agents with pre-dispatch budget checks, rate limits and loop protection, without relying only on billing alerts.
+title: Stop funding an agent’s retry loop
+description: A coding agent can keep paying to revisit the same error. Put a metered budget and loop protection in front of its next model request.
 slug: agent-spend
 image: /media/use-cases/agent-spend-v1.webp
-og_image: /media/use-cases/agent-spend-og-v1.png
-image_alt: Concept illustration of a mechanical usage gauge stopped at a spending boundary.
+og_image: /media/use-cases/agent-spend-og-v2.png
+image_alt: A mechanical usage gauge stopped at a spending boundary.
 persona: Agent builders & agencies
 icon: gauge
 order: 3
 ---
-# Put limits around agent spend
+# Stop funding an agent’s retry loop
 
-## A day-to-day case
+You leave an agent fixing a failing test while you do something else. The next attempt fails too. If the agent keeps asking the model for another explanation, how long should it be allowed to keep spending?
 
-An agent is working while you are away. A failed attempt turns into repeated model calls. By the time you inspect the provider dashboard, the requests have already happened.
+A billing alert can tell you what happened. For unattended work, you also need a point where the next paid request does not happen.
 
-For a developer or agency running client work, the question is practical: how much metered API exposure are you willing to allow before another request should stop?
+## Give the project an allowance before you leave
 
-## With Stoke
+Use a dedicated gateway key with a configured budget for metered API calls. Before dispatch, Stoke reserves the estimated maximum request cost against that allowance. Concurrent requests cannot all claim the same remaining balance.
 
-Give a project its own configured gateway key and metered budget. Stoke checks admission before provider dispatch, reserving estimated maximum request cost against the allowance so concurrent requests cannot all spend the same remaining balance.
+Rate limits control request frequency. Loop protection can refuse repeated model traffic. The caller receives a refusal when a request is not admitted, giving you a place to investigate instead of silently approving another provider execution.
 
-Rate limits bound request frequency. Loop detection can refuse repeated traffic with an explanation. When a request cannot be admitted, the application receives a refusal rather than another provider execution.
+## Stop the loop, then decide whether it deserves another attempt
 
-Use the reason and usage record to decide whether to repair the agent, adjust an approved limit or stop the run. A refusal is a boundary, not a successful task completion.
+A refusal does not mean the agent finished the task. It means you can inspect the reason, repair the workflow and deliberately approve more work if needed.
 
-## Know the boundary
+Set model prices and output bounds correctly. The allowance depends on those estimates; it is not a reconciled provider invoice. Dollar budgets cover metered API usage, not subscription allowances, shell commands or charges from tools outside Stoke's model-request path.
 
-Dollar budgets apply to metered API usage, not subscription allowances. Configure model prices and output bounds correctly; cost estimates are not a reconciled provider invoice. Test the exact protocol and streaming behavior used by your application.
+## Check that useful repetition still works
 
-Loop detection can also interrupt legitimate repeated work. Tune and evaluate the overall workflow rather than treating fewer calls as automatic savings. Stoke does not stop shell commands, browser actions or external API charges outside its model-request path.
+Start with a small test allowance. Submit concurrent requests and a controlled repeated-request canary, then inspect provider dispatches and refusals. Also run ordinary work through the same setup: an agent that legitimately revisits a problem should not be mistaken for a runaway loop.
 
-## Try this setup
+The useful outcome is a task completed within an approved allowance, not merely fewer model calls.
 
-Use a test key and a small metered budget. Submit concurrent requests and a controlled repeated-request canary. Inspect refused requests, provider dispatches and recorded usage, then confirm that normal work still completes correctly.
+[Cap Claude Code API spend](/guides/cap-claude-code-api-spend/)
 
-[Set a budget for Claude Code API usage](/guides/cap-claude-code-api-spend/)
-
-[Stop a runaway AI agent](/guides/stop-a-runaway-ai-agent/)
+[Test a runaway-agent stop](/guides/stop-a-runaway-ai-agent/)

@@ -384,7 +384,7 @@ def build_use_cases():
             f'<h1>{heading}</h1><p class="lede">{esc(meta["description"])}</p>'
             '<figure class="use-case-figure">'
             f'<img data-use-case-image src="{attr(meta["image"])}" alt="{attr(meta["image_alt"])}" width="1152" height="720" decoding="async">'
-            '<figcaption>Concept illustration — not a product screenshot.</figcaption></figure></section>'
+            '</figure></section>'
         )
         page = template.format(
             title=attr(meta["title"]), description=attr(meta["description"]),
@@ -416,7 +416,7 @@ def build_use_cases():
     body = (
         '<section class="document-hero"><div class="crumb"><a href="/">Stoke</a> / Use cases</div>'
         '<h1>Your work.<br>Your use case.</h1>'
-        '<p class="lede">Start with what you need to do. See where Stoke fits, what it controls, and where its boundaries are.</p></section>'
+        '<p class="lede">A spare computer, a confidential document, an agent that will not stop retrying. Start with the problem you need to solve.</p></section>'
         f'<div class="document-content"><div class="gwrap">{cards}</div></div>'
     )
     page = template.format(

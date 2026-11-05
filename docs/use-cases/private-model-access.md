@@ -1,38 +1,36 @@
 ---
-title: Share models, not provider keys
-description: Give internal applications one authenticated path to private models, keeping upstream provider credentials at the gateway instead of copying them into every client.
+title: Connect apps without copying provider keys
+description: The next internal assistant needs model access, not another copy of an upstream credential. Keep provider keys at the gateway.
 slug: private-model-access
 image: /media/use-cases/private-model-access-v1.webp
-og_image: /media/use-cases/private-model-access-og-v1.png
-image_alt: Concept illustration of a central credential kept behind a gateway with separate application access passes.
+og_image: /media/use-cases/private-model-access-og-v2.png
+image_alt: A central credential kept behind a gateway with separate application access passes.
 persona: IT & internal AI teams
 icon: shield
 order: 4
 ---
-# Share models, not provider keys
+# Connect apps without copying provider keys
 
-## A day-to-day case
+Your internal document assistant works. Now a developer wants to connect a coding tool, and someone else has a reporting script that could use the same model.
 
-A team has a private model server and several applications that need it. One is a development assistant; another summarizes internal documents. Connecting each app directly means repeating credentials and network configuration every time a backend changes.
+You can paste the provider key into each application and remember all those copies when it changes. Or give the applications a gateway credential and keep the upstream secret in one place.
 
-The operator wants a controlled front door, not an unprotected inference server or another copy of a provider secret in every application.
+## Let the app call Stoke, not the provider directly
 
-## With Stoke
+Keep the model service behind a self-hosted Stoke gateway. Compatible applications use its endpoint and authenticate with accepted gateway credentials. If the upstream provider needs a key, the gateway holds it; the client does not need its own copy.
 
-Keep the model service on the trusted side of a self-hosted gateway. Compatible applications call the Stoke endpoint and authenticate with accepted gateway credentials. When the upstream provider needs its own key, keep that credential at the gateway rather than distributing it to clients.
+You can change eligible backends without changing every application's endpoint. Distinct configured client keys also let you separate supported metered budgets and rate limits, rather than making every experiment spend against the same allowance.
 
-Distinct configured client keys let the operator separate metered budgets and rate limits where supported. Applications retain the gateway address when eligible backends change. Review the configured routes and network access before making the endpoint available to the team.
+## A separate key is not a separate tenant
 
-## Know the boundary
+This is gateway authentication, not per-user RBAC. Separate keys do not automatically limit each caller to one model or route, and they do not create complete tenant isolation.
 
-This is gateway authentication, not per-user RBAC or complete tenant isolation. Separate keys do not automatically restrict each caller to one model or route. A gateway credential is still a secret: distribute it securely and remove it from accepted configuration when access must end.
+A gateway key still needs secure distribution and an offboarding process. Sharing permitted model or API access is not subscription lending: this setup does not turn personal subscription accounts into a shared team plan.
 
-This case covers models and API-backed access you are permitted to provide, not subscription lending. It does not promise SSO, team invitations, automatic per-user permissions or a publicly exposed model server that needs no network hardening.
+## Onboard one app, then remove its access
 
-## Try this setup
+Connect a test application with its own configured gateway key. Confirm that it works without an upstream provider key and that an unauthenticated request is refused.
 
-Connect one existing compatible application with a dedicated test gateway key. Confirm an unauthenticated request is refused and the application does not need the upstream provider key. Remove the test key from accepted configuration, restart the test gateway and confirm subsequent requests are refused.
+Then remove the test key from accepted configuration, restart the test gateway and confirm the app can no longer call it. Doing that once is more useful than assuming you'll know how to revoke access when it matters.
 
-[Connect an inference server without leaving it unprotected](/guides/expose-ollama-to-your-network-safely/)
-
-[Review the self-hosted gateway capabilities](/gateway/)
+[Put an authenticated gateway in front of your model server](/guides/expose-ollama-to-your-network-safely/)

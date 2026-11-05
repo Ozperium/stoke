@@ -11,12 +11,12 @@ from xml.etree import ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 LANDING = ROOT / 'landing'
 CASES = {
-    'local-models': ('Developers & small teams', 'Use models across your machines'),
-    'private-data': ('Teams handling confidential data', 'Keep private requests private'),
-    'agent-spend': ('Agent builders & agencies', 'Put limits around agent spend'),
-    'private-model-access': ('IT & internal AI teams', 'Share models, not provider keys'),
-    'node-failover': ('Platform & DevEx teams', 'Recover when a model node goes offline'),
-    'secret-redaction': ('Engineering & support teams', 'Redact recognized secrets before sending'),
+    'local-models': ('Developers & small teams', 'Give your idle computer a job'),
+    'private-data': ('Teams handling confidential data', 'Keep client documents off the cloud'),
+    'agent-spend': ('Agent builders & agencies', 'Stop funding an agent’s retry loop'),
+    'private-model-access': ('IT & internal AI teams', 'Connect apps without copying provider keys'),
+    'node-failover': ('Platform & DevEx teams', 'A model host went offline. Now what?'),
+    'secret-redaction': ('Engineering & support teams', 'The error log came with an API key'),
 }
 
 
@@ -66,8 +66,9 @@ class UseCasesTests(unittest.TestCase):
                 self.assertEqual(sum(tag == 'h1' for tag, _ in page.tags), 1)
                 self.assertIn(title, raw)
                 self.assertIn(persona.replace('&', '&amp;'), raw)
-                for section in ('A day-to-day case', 'With Stoke', 'Know the boundary', 'Try this setup'):
-                    self.assertIn(section, raw)
+                self.assertGreaterEqual(sum(tag == 'h2' for tag, _ in page.tags), 3)
+                for filler in ('A day-to-day case', 'With Stoke', 'Know the boundary', 'Try this setup'):
+                    self.assertNotIn(f'>{filler}</h2>', raw)
                 self.assertIn('href="/use-cases/"', raw)
                 self.assertRegex(raw, r'href="/guides/[^\"]+/"')
                 canonical = f'https://stokegate.com/use-cases/{slug}/'
@@ -116,7 +117,9 @@ class UseCasesTests(unittest.TestCase):
                 social_hashes.add(hashlib.sha256(png).hexdigest())
                 schema = json.loads(re.findall(r'<script type="application/ld\+json">(.*?)</script>', raw)[0])
                 self.assertEqual(schema['image'], social)
-                self.assertIn('Concept illustration', raw)
+                self.assertNotIn('Concept illustration', raw)
+                self.assertNotIn('not a product screenshot', raw)
+                self.assertNotIn('<figcaption>', raw)
         self.assertEqual(len(social_hashes), 6, 'Every use case needs its own social card')
 
     def test_new_routes_are_in_generated_sitemap(self):

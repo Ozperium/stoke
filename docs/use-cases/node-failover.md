@@ -1,40 +1,36 @@
 ---
-title: Recover when a model node goes offline
-description: Keep compatible applications on one endpoint and recover eligible requests through another approved node when the first fails before streaming begins.
+title: A model host went offline. Now what?
+description: A teammate closes the laptop serving your model. Give eligible requests another approved destination without reconfiguring every app.
 slug: node-failover
 image: /media/use-cases/node-failover-v1.webp
-og_image: /media/use-cases/node-failover-og-v1.png
-image_alt: Concept illustration of a connection moving from an unavailable model server to an available node.
+og_image: /media/use-cases/node-failover-og-v2.png
+image_alt: A connection moving from an unavailable model server to an available node.
 persona: Platform & DevEx teams
 icon: nodes
 order: 5
 ---
-# Recover when a model node goes offline
+# A model host went offline. Now what?
 
-## A day-to-day case
+A teammate closes their laptop after a demo. It is also the machine the team's assistant has been calling. The next request fails, although another approved computer could serve the same model.
 
-A model machine is restarted for an update just as an application sends a request. Another approved machine has the model, but the application is still pointed at the first server.
+Pointing every app at a particular host makes that host everyone's problem. A shared gateway address gives you somewhere to handle the failure instead.
 
-You want to recover that request without asking every user to change an endpoint, relax a privacy rule or accept an unannounced model substitution.
+## Give the request another approved destination
 
-## With Stoke
+Configure eligible model hosts behind Stoke. It tracks node health and excludes unreachable nodes. On supported paths, a failed connection can be retried against another eligible destination before streaming begins.
 
-Configure eligible model destinations behind one gateway address. Stoke tracks node health and excludes unreachable nodes. On supported failover paths, a failed connection can be tried against another configured eligible destination before streaming begins.
+With the intended model on two approved nodes, the application can keep its existing gateway endpoint when one cannot connect. There is no need to ask every teammate to edit a server URL just because a laptop disappeared from the network.
 
-For example, two approved nodes serve the same requested model. If the first cannot connect, the second can serve the request while the application keeps its existing endpoint. Route restrictions still apply: a private-only request must not escape to a cloud provider just to avoid an error.
+## A fallback must still obey the original rule
 
-## Know the boundary
+A private-only request must not go to a cloud provider simply to avoid returning an error. If every permitted destination is unavailable, the correct outcome is a refusal, not an unannounced change of policy.
 
-This is connection-level recovery, not seamless mid-stream recovery. A response interrupted after streaming starts may still fail. Not every upstream error is eligible for another attempt, and no fallback can help if every permitted destination is unavailable.
+This is connection-level recovery, not seamless mid-stream recovery. Once a response is streaming, an interruption can still fail the request. A different or smaller model is not automatically a suitable replacement either; approve and test intended substitutions explicitly.
 
-Do not assume a smaller or different model is equivalent. Configure and test intended destinations, preserve the requested model where required, and disclose any explicitly permitted substitution. Recovery is not a promise of zero downtime or a published latency improvement.
+## Close the laptop before someone depends on it
 
-## Try this setup
+Test with two approved hosts and the intended model. Make one host unreachable before sending a request, then inspect which destination actually served it and confirm that no forbidden provider was called.
 
-Use two approved nodes with the intended model and one compatible application. Make one node unreachable before a test request. Confirm the successful destination, inspect the returned route evidence and verify that no forbidden provider was called.
+Interrupt a second response after streaming starts. Your application should handle that failure deliberately, rather than expecting Stoke to resume an answer halfway through.
 
-Then interrupt a response after streaming starts so the application's failure behavior is understood rather than mistaken for transparent recovery.
-
-[Configure a two-machine inference setup](/guides/run-ollama-across-two-machines/)
-
-[Review routing and fallback scope](/gateway/)
+[Configure a two-machine model setup](/guides/run-ollama-across-two-machines/)

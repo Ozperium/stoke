@@ -1,38 +1,36 @@
 ---
-title: Keep private requests private
-description: Give confidential AI requests an approved private route. Refuse cloud fallback when policy forbids it, with optional pattern-based redaction for permitted routes.
+title: Keep client documents off the cloud
+description: Summarize a client’s unreleased plans on approved private infrastructure, without a cloud fallback quietly changing where the document goes.
 slug: private-data
 image: /media/use-cases/private-data-v1.webp
-og_image: /media/use-cases/private-data-og-v1.png
-image_alt: Concept illustration of private documents kept inside a boundary, separate from a cloud destination.
+og_image: /media/use-cases/private-data-og-v2.png
+image_alt: Private documents kept inside a boundary, separate from a cloud destination.
 persona: Teams handling confidential data
 icon: shield
 order: 2
 ---
-# Keep private requests private
+# Keep client documents off the cloud
 
-## A day-to-day case
+A client sends you an unreleased product plan. You need a short briefing before the next meeting. Pasting it into your usual cloud assistant would be convenient, but the client has not approved sending it there.
 
-Your team wants to summarize client documents or troubleshoot internal code. Some requests may use an approved cloud model. Others must stay on infrastructure you control, even when a private model is unavailable.
+The difficult part is not choosing a private model. It is making sure a busy or unavailable private model does not turn into an accidental cloud request.
 
-You need a deliberate boundary, not a promise that the normal route will usually stay private.
+## Make the destination part of the rule
 
-## With Stoke
+Connect your compatible application to a Stoke route restricted to approved private destinations. That restriction applies before dispatch and during fallback. If no permitted destination can serve the request, it is refused.
 
-Point the existing compatible application at a configured private route. Restrict its eligible provider tiers to your approved private destinations. Stoke checks this policy before dispatch, including fallback. If no permitted destination can serve the request, it is refused instead of being sent to a cloud model.
+An unavailable summary is inconvenient. Sending the document somewhere you did not approve is a different problem. Decide which outcome you want before the first request, not after checking a provider dashboard.
 
-For a separately approved cloud route, opt-in, pattern-based redaction can remove recognized secrets and email patterns from supported message content before forwarding. That is a different decision: redact and continue, rather than deny a destination.
+## Removing an email address does not make a plan public
 
-## Know the boundary
+For work already approved for a cloud model, pattern-based redaction can remove recognized secrets from supported message content. It is not complete DLP or anonymization. The surrounding product plan can still be confidential even after every email address is gone.
 
-Destination tiers are configuration, not a certificate of trust. Verify the actual hosts behind them. Redaction is not complete DLP, anonymization or a guarantee that confidential information cannot leave. Test the exact protocol and fields you intend to use; do not assume attachment, tool-argument or response coverage.
+Use a private route when the material itself must stay private. Use redaction as an additional safeguard for permitted traffic, not as permission to send it anywhere.
 
-Stoke controls model traffic that passes through it. Application telemetry, logs, caches and agent tools need their own review. This setup is not a blanket compliance certification.
+## Test the route when the private model is unavailable
 
-## Try this setup
+Use synthetic documents, take the private destination offline and confirm that the request is refused without any cloud dispatch. Also inspect the actual hosts behind your configured destination tiers; a label does not establish trust.
 
-Configure an approved private route, then make its model unavailable. Confirm that the request is refused and no cloud provider receives it. Test redaction separately with synthetic data by inspecting what the upstream destination actually receives.
+Review the application's own telemetry, logs and tools separately. Stoke controls the model requests that pass through it, not every way a document might leave your machine.
 
-[Review the routing and redaction capability boundaries](/gateway/)
-
-[Connect an inference server without exposing it unprotected](/guides/expose-ollama-to-your-network-safely/)
+[Set up an authenticated private model endpoint](/guides/expose-ollama-to-your-network-safely/)
