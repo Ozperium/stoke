@@ -122,6 +122,15 @@ class UseCasesTests(unittest.TestCase):
                 self.assertNotIn('<figcaption>', raw)
         self.assertEqual(len(social_hashes), 6, 'Every use case needs its own social card')
 
+    def test_every_use_case_uses_editorial_art(self):
+        for slug in CASES:
+            with self.subTest(case=slug):
+                raw = (LANDING / 'use-cases' / slug / 'index.html').read_text()
+                self.assertIn('use-case-hero--editorial', raw)
+                images = [attrs for tag, attrs in Page(raw).tags if tag == 'img' and 'data-use-case-image' in attrs]
+                self.assertEqual(len(images), 1)
+                self.assertNotIn('-v1.webp', images[0]['src'])
+
     def test_new_routes_are_in_generated_sitemap(self):
         # Parse only our generated XML; reject declarations before stdlib parsing.
         raw = (LANDING / 'sitemap.xml').read_text()

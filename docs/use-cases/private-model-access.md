@@ -2,9 +2,10 @@
 title: Connect apps without copying provider keys
 description: The next internal assistant needs model access, not another copy of an upstream credential. Keep provider keys at the gateway.
 slug: private-model-access
-image: /media/use-cases/private-model-access-v1.webp
-og_image: /media/use-cases/private-model-access-og-v2.png
-image_alt: A central credential kept behind a gateway with separate application access passes.
+image: /media/use-cases/private-model-access-v2.webp
+og_image: /media/use-cases/private-model-access-og-v3.png
+image_alt: Apps use separate gateway keys while the upstream provider key stays at Stoke.
+image_layout: editorial
 persona: IT & internal AI teams
 icon: shield
 order: 4

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="720" viewBox="0 0 480 300" fill="none">
+  <title>Keep a client document on an approved private route</title>
+  <desc>A client document goes through Stoke to a configured private model while a cloud fallback is refused.</desc>
+  <g font-family="Sora, Arial, sans-serif" font-size="20" fill="#191A18">
+    <ellipse cx="84" cy="238" rx="70" ry="9" fill="#F4EEE9"/>
+
+    <rect x="18" y="82" width="132" height="102" rx="8" fill="#FCFCFC" stroke="#191A18" stroke-width="2.5"/>
+    <rect x="29" y="94" width="110" height="64" rx="3" fill="#F7E6DF"/>
+    <path fill="none" d="M43 110h73M43 126h57M43 142h67" stroke="#191A18" stroke-width="2.4" stroke-linecap="round"/>
+    <path fill="none" d="M126 94v18h13" stroke="#191A18" stroke-width="2.4" stroke-linejoin="round"/>
+    <text x="84" y="214" text-anchor="middle">Client plan</text>
+
+    <path fill="none" d="M150 133H187" stroke="#F15332" stroke-width="3" stroke-linecap="round"/>
+    <path fill="none" d="m178 126 9 7-9 7" stroke="#F15332" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <circle cx="220" cy="133" r="29" fill="#FCFCFC"/>
+    <g transform="translate(196 109) scale(1.5)" fill="#F15332">
+      <path d="M5.229 12.164 L8.454 12.213 L13.335 13.404 L17.875 13.436 L22.276 14.458 L26.774 14.788 L27.300 16.073 L26.571 19.101 L25.371 19.741 L20.758 18.789 L16.218 18.757 L10.319 17.625 L5.014 17.284 L4.614 15.107 Z"/>
+      <path d="M15.108 5.364 L15.930 8.789 L18.024 13.667 L19.717 18.904 L21.727 25.302 L20.360 26.225 L17.054 26.790 L16.036 23.117 L13.664 17.914 L12.539 13.216 L10.171 7.586 L11.366 6.193 Z"/>
+      <path d="M24.661 9.669 L22.683 12.463 L18.914 16.201 L16.534 19.442 L12.297 23.700 L10.379 24.933 L8.424 22.770 L7.986 21.164 L11.354 17.872 L14.670 13.591 L18.454 10.136 L20.886 6.539 L22.766 7.290 Z"/>
+    </g>
+    <text x="220" y="184" text-anchor="middle" font-weight="600">Stoke</text>
+
+    <path fill="none" d="M249 133H302" stroke="#F15332" stroke-width="3" stroke-linecap="round"/>
+    <path fill="none" d="m293 126 9 7-9 7" stroke="#F15332" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <rect x="307" y="101" width="155" height="72" rx="9" fill="#F7E6DF" stroke="#191A18" stroke-width="2.5"/>
+    <path fill="none" d="M326 125h42m-42 15h66" stroke="#191A18" stroke-width="2.4" stroke-linecap="round"/>
+    <circle cx="442" cy="139" r="4" fill="#F15332"/>
+    <text x="394" y="159" text-anchor="middle" font-size="20">Private model</text>
+    <text x="384" y="204" text-anchor="middle" font-size="20">Private route</text>
+
+
+    <rect x="307" y="28" width="155" height="42" rx="8" fill="#FCFCFC" stroke="#E3DED8" stroke-width="1.8"/>
+    <text x="384" y="55" text-anchor="middle" font-size="20">Cloud model</text>
+    <path fill="none" d="M249 119H277C292 119 292 70 307 70" stroke="#F15332" stroke-width="3" stroke-linecap="round" stroke-dasharray="6 7"/>
+    <circle cx="278" cy="88" r="12" fill="#F15332"/>
+    <path fill="none" d="m273 83 10 10m0-10-10 10" stroke="#FCFCFC" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="384" y="91" text-anchor="middle" font-size="20" fill="#B63019">No fallback</text>
+  </g>
+</svg>

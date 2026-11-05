@@ -17,7 +17,7 @@ const cases = [
   ['node-failover', 'A model host went offline. Now what?'],
   ['secret-redaction', 'The error log came with an API key'],
 ];
-const editorialCases = ['local-models', 'secret-redaction'];
+const editorialCases = cases.map(([slug]) => slug);
 const types = {'.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2'};
 const server = createServer(async (request, response) => {
   const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
@@ -158,7 +158,7 @@ for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
   });
 
   for (const width of [390, 768, 1024, 1280]) {
-    test(`${name}: editorial pilot layout at ${width}px`, {timeout: 90000}, async () => {
+    test(`${name}: editorial layout at ${width}px`, {timeout: 90000}, async () => {
       const browser = await engine.launch({headless: true});
       try {
         const page = await browser.newPage({viewport: {width, height: 950}, reducedMotion: 'reduce'});

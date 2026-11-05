@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="720" viewBox="0 0 480 300" fill="none"><g font-family="Sora,Arial,sans-serif" font-size="20" fill="#191A18"><title>Refuse the next paid retry</title><desc>Repeated agent requests reach Stoke, where a configured metered API limit refuses the next call before dispatch.</desc>
+<text x="253" y="39" text-anchor="middle" font-weight="600">Limit reached</text>
+<path fill="none" d="M129 94C179 94 174 132 214 132M129 132H214M129 170C179 170 174 132 214 132M267 132H320" stroke="#F15332" stroke-width="2.5" stroke-linecap="round"/>
+<rect x="31" y="68" width="98" height="48" rx="7" fill="#FFF" stroke="#191A18" stroke-width="2"/>
+<rect x="25" y="107" width="104" height="50" rx="7" fill="#FFF" stroke="#191A18" stroke-width="2"/>
+<rect x="19" y="146" width="110" height="52" rx="7" fill="#F7E6DF" stroke="#191A18" stroke-width="2"/>
+<path fill="none" d="m44 161-9 10 9 10m57-20 9 10-9 10m-20-22-9 26" stroke="#191A18" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="84" y="231" text-anchor="middle">Retrying agent</text>
+<circle cx="240" cy="132" r="29" fill="#FCFCFC"/>
+<g transform="translate(216 108) scale(1.5)" fill="#F15332"><path d="M5.229 12.164 L8.454 12.213 L13.335 13.404 L17.875 13.436 L22.276 14.458 L26.774 14.788 L27.300 16.073 L26.571 19.101 L25.371 19.741 L20.758 18.789 L16.218 18.757 L10.319 17.625 L5.014 17.284 L4.614 15.107 Z"/><path d="M15.108 5.364 L15.930 8.789 L18.024 13.667 L19.717 18.904 L21.727 25.302 L20.360 26.225 L17.054 26.790 L16.036 23.117 L13.664 17.914 L12.539 13.216 L10.171 7.586 L11.366 6.193 Z"/><path d="M24.661 9.669 L22.683 12.463 L18.914 16.201 L16.534 19.442 L12.297 23.700 L10.379 24.933 L8.424 22.770 L7.986 21.164 L11.354 17.872 L14.670 13.591 L18.454 10.136 L20.886 6.539 L22.766 7.290 Z"/></g>
+<text x="240" y="187" text-anchor="middle" font-weight="600">Stoke</text>
+<path fill="none" d="M328 88v88m-8-44h8" stroke="#F15332" stroke-width="5" stroke-linecap="round"/>
+<rect x="373" y="92" width="82" height="81" rx="8" fill="#FFF" stroke="#A8A39D" stroke-width="2"/>
+<path fill="none" d="M388 111h31m-31 12h46m-46 12h31" stroke="#A8A39D" stroke-width="2" stroke-linecap="round"/>
+<text x="414" y="207" text-anchor="middle" fill="#6A655F">Metered API</text>
+<rect x="180" y="235" width="268" height="11" rx="5.5" fill="#F7E6DF"/>
+<rect x="180" y="235" width="260" height="11" rx="5.5" fill="#F15332"/>
+<path fill="none" d="M445 228v25" stroke="#191A18" stroke-width="2.5" stroke-linecap="round"/>
+<text x="314" y="281" text-anchor="middle">Next call refused</text>
+</g></svg>

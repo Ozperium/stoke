@@ -2,9 +2,10 @@
 title: Keep client documents off the cloud
 description: Summarize a client’s unreleased plans on approved private infrastructure, without a cloud fallback quietly changing where the document goes.
 slug: private-data
-image: /media/use-cases/private-data-v1.webp
-og_image: /media/use-cases/private-data-og-v2.png
-image_alt: Private documents kept inside a boundary, separate from a cloud destination.
+image: /media/use-cases/private-data-v2.webp
+og_image: /media/use-cases/private-data-og-v3.png
+image_alt: A client plan goes through a configured private route while cloud fallback is refused.
+image_layout: editorial
 persona: Teams handling confidential data
 icon: shield
 order: 2
