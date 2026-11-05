@@ -69,7 +69,7 @@ def check():
         assert 'brand-period' not in text and 'class="brand-mark" aria-hidden="true">•</span>' not in text, route + ': trailing-dot or legacy mark remains'
         if route not in SPECIAL:
             assert 'document-page' in (p.body.get('class') or '').split(), route + ': reading surface missing'
-            assert '/document.css' in p.styles and 'document-shell' in text
+            assert '/document.css' in {urlparse(ref).path for ref in p.styles} and 'document-shell' in text
         if route in {'/legal/','/security/','/contact/','/join/','/404.html'}:
             assert p.meta.get('robots') == 'noindex, follow', route + ': noindex changed'
     mark = (SITE / 'stoke-mark.svg').read_text()

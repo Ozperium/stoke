@@ -1,0 +1,26 @@
+{
+  "status": "Two-page visual pilot; not approved for production",
+  "articles_unchanged": true,
+  "items": [
+    {
+      "slug": "local-models",
+      "method": "Deterministic explanatory SVG, Sora font rasterization; no model-generated interface",
+      "source": "design/use-cases/editorial/local-models-v2.svg",
+      "hero": "landing/media/use-cases/local-models-v2.webp",
+      "social": "landing/media/use-cases/local-models-og-v3.png",
+      "source_sha256": "dbf0fae8d9abe6711163b360cefa2a2d637bd139305dfa04412dddd55e17f028",
+      "hero_sha256": "e1dd510aa9b597af1ee576b5d69ef463219ea68cf0e155d3f02c7afd8956b316",
+      "social_sha256": "75dc3b151ce545f8c11aef91b1b82c4bf7499ee630bfa88fb91659df807e2f84"
+    },
+    {
+      "slug": "secret-redaction",
+      "method": "Deterministic explanatory SVG, Sora font rasterization; no model-generated interface",
+      "source": "design/use-cases/editorial/secret-redaction-v2.svg",
+      "hero": "landing/media/use-cases/secret-redaction-v2.webp",
+      "social": "landing/media/use-cases/secret-redaction-og-v3.png",
+      "source_sha256": "75959d74dbd3124edf0e8e738de4606e4be9ab526e65560c6f1f8f1813f5de61",
+      "hero_sha256": "dcd73b4ab6f3105279caa8df2a68f016113604c95ba68c7e65dc50648457bbdf",
+      "social_sha256": "f4717c4a0b464a7940e65ab4e8b7540ce253f078946a8f625ce4b1a48e5a587c"
+    }
+  ]
+}

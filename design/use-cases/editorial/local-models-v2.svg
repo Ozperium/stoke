@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="720" viewBox="0 0 480 300" fill="none"><g font-family="Sora,Arial,sans-serif" font-size="20" fill="#191A18"><title>Your laptop, more than one model host</title><desc>Requests go from a laptop through Stoke to approved computing capacity on two separate machines.</desc>
+<path d="M164 146H219M261 146H284C300 146 301 79 323 79H342M284 146C303 146 303 226 323 226H342" stroke="#F15332" stroke-width="3" stroke-linecap="round"/>
+<path d="m335 73 8 6-8 6m0 135 8 6-8 6" stroke="#F15332" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<ellipse cx="95" cy="224" rx="78" ry="10" fill="#F4EEE9"/>
+<rect x="35" y="100" width="120" height="87" rx="8" fill="#FFF" stroke="#191A18" stroke-width="2.5"/>
+<rect x="44" y="109" width="102" height="67" rx="3" fill="#F6F4F1"/>
+<path d="M35 187 21 202C19 205 22 209 26 209H164C168 209 171 205 168 202L155 187Z" fill="#F6F4F1" stroke="#191A18" stroke-width="2.5"/>
+<path d="m62 134-11 9 11 9m64-18 11 9-11 9m-23-25-14 36" stroke="#191A18" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="95" y="262" text-anchor="middle">Your laptop</text>
+<circle cx="240" cy="146" r="27" fill="#FCFCFC"/>
+<g transform="translate(216 122) scale(1.5)" fill="#F15332"><path d="M5.229 12.164 L8.454 12.213 L13.335 13.404 L17.875 13.436 L22.276 14.458 L26.774 14.788 L27.300 16.073 L26.571 19.101 L25.371 19.741 L20.758 18.789 L16.218 18.757 L10.319 17.625 L5.014 17.284 L4.614 15.107 Z"/><path d="M15.108 5.364 L15.930 8.789 L18.024 13.667 L19.717 18.904 L21.727 25.302 L20.360 26.225 L17.054 26.790 L16.036 23.117 L13.664 17.914 L12.539 13.216 L10.171 7.586 L11.366 6.193 Z"/><path d="M24.661 9.669 L22.683 12.463 L18.914 16.201 L16.534 19.442 L12.297 23.700 L10.379 24.933 L8.424 22.770 L7.986 21.164 L11.354 17.872 L14.670 13.591 L18.454 10.136 L20.886 6.539 L22.766 7.290 Z"/></g>
+<text x="240" y="194" text-anchor="middle" font-weight="600">Stoke</text>
+<rect x="349" y="35" width="101" height="69" rx="6" fill="#FFF" stroke="#191A18" stroke-width="2.5"/>
+<rect x="358" y="44" width="83" height="50" rx="2" fill="#F7E6DF"/>
+<path d="M398 104v17m-20 0h40" stroke="#191A18" stroke-width="2.5" stroke-linecap="round"/>
+<path d="m374 62 8 7-8 7m50-14-8 7 8 7" stroke="#D13D22" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="399" y="154" text-anchor="middle">Workstation</text>
+<rect x="351" y="199" width="98" height="54" rx="9" fill="#F7E6DF" stroke="#191A18" stroke-width="2.5"/>
+<path d="M366 212h44m-44 9h30" stroke="#191A18" stroke-width="2.2" stroke-linecap="round"/>
+<circle cx="432" cy="239" r="3" fill="#F15332"/>
+<text x="398" y="287" text-anchor="middle">Spare machine</text>
+</g></svg>
