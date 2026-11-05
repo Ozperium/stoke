@@ -1,0 +1,22 @@
+[
+  {
+    "file": "openai.svg",
+    "url": "https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/openai.svg",
+    "sha256": "a595df6b423920c67a7f8f73c063e4bfb72d415948097b6cac063a2366bb5186"
+  },
+  {
+    "file": "anthropic.svg",
+    "url": "https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/anthropic.svg",
+    "sha256": "e833fdfa7e7187a86a05b870925067556a506dcd4239089aed73e1e58c9366a3"
+  },
+  {
+    "file": "ollama.svg",
+    "url": "https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/ollama.svg",
+    "sha256": "3a268218fb2e6e81fa31df70f70b51331625047794db81db21d35359428fae7a"
+  },
+  {
+    "file": "LobeHub-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/lobehub/lobe-icons/master/LICENSE",
+    "sha256": "add9d7531d1b21646317a8958e38fc727506fa39d24bdecb44154d943c82753a"
+  }
+]

@@ -23,7 +23,7 @@ Python worker/launcher owns the worker process. It must read `STOKE_HEADROOM_TOK
 
 ## Exact verification commands
 
-Run from `/Users/pawloz/projects/stoke-release-audit-974fbbf9/candidate`:
+Run from the Stoke repository root:
 
 ```sh
 cargo test --lib headroom -- --nocapture

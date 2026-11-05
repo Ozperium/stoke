@@ -268,11 +268,11 @@ PAGE = """<!doctype html>
 </head>
 <body class="document-page">
   <a class="skip-link" href="#main">Skip to content</a>
-  <header class="site-nav"><div class="nav-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a><button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button><nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/" aria-current="page">Guides</a><a href="https://github.com/Ozperium/stoke">GitHub</a><a class="nav-cta button button-secondary" href="/join/">Try Cloud</a></nav></div></header>
+  <header class="site-nav"><div class="nav-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true"><img src="/stoke-mark.svg" alt="" width="24" height="24"></span>stoke</a><button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button><nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/" aria-current="page">Guides</a><a href="https://github.com/Ozperium/stoke">GitHub</a><a class="nav-cta button button-secondary" href="/join/">Try Cloud</a></nav></div></header>
   <main id="main" class="document-shell">
     {body}
   </main>
-  <footer class="site-footer"><div class="footer-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a><nav aria-label="Footer navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/">Guides</a><a href="/security/">Security</a><a href="/legal/">Legal</a><a href="/contact/">Contact</a><a href="https://github.com/Ozperium/stoke">GitHub</a></nav><span>© <span data-year>2026</span> Stoke</span></div></footer>
+  <footer class="site-footer"><div class="footer-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true"><img src="/stoke-mark.svg" alt="" width="24" height="24"></span>stoke</a><nav aria-label="Footer navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/">Guides</a><a href="/security/">Security</a><a href="/legal/">Legal</a><a href="/contact/">Contact</a><a href="https://github.com/Ozperium/stoke">GitHub</a></nav><span>© <span data-year>2026</span> Stoke</span></div></footer>
   <script src="/presentation.js" defer></script>
   <script src="/tracking.js" defer></script>
 </body>

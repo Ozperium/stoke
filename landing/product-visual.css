@@ -117,3 +117,8 @@
 @media (prefers-reduced-motion: reduce) {
   .product-visual__tab, .product-visual__play, .product-visual__destination { transition: none; }
 }
+
+/* One broad, hand-cut log contour; live content is never clipped or rotated. */
+.product-visual__core { background: transparent; border-color: transparent; border-radius: 0; box-shadow: none; isolation: isolate; }
+.product-visual__core::before { content: none; }
+.log-panel-surface { position: absolute; left: -1px; top: -1px; width: calc(100% + 2px); height: calc(100% + 2px); z-index: -1; overflow: visible; pointer-events: none; filter: drop-shadow(0 8px 15px rgba(241,83,50,.05)); }
