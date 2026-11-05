@@ -2,6 +2,9 @@
 title: Put limits around agent spend
 description: Bound metered API exposure for unattended agents with pre-dispatch budget checks, rate limits and loop protection, without relying only on billing alerts.
 slug: agent-spend
+image: /media/use-cases/agent-spend-v1.webp
+og_image: /media/use-cases/agent-spend-og-v1.png
+image_alt: Concept illustration of a mechanical usage gauge stopped at a spending boundary.
 persona: Agent builders & agencies
 icon: gauge
 order: 3

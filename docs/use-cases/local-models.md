@@ -2,6 +2,9 @@
 title: Use models across your machines
 description: One endpoint for developers and small teams using local models across their own computers. Keep model access steady as available machines change.
 slug: local-models
+image: /media/use-cases/local-models-v1.webp
+og_image: /media/use-cases/local-models-og-v1.png
+image_alt: Concept illustration of several personal computers using a shared model connection.
 persona: Developers & small teams
 icon: nodes
 order: 1

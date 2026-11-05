@@ -2,6 +2,9 @@
 title: Share models, not provider keys
 description: Give internal applications one authenticated path to private models, keeping upstream provider credentials at the gateway instead of copying them into every client.
 slug: private-model-access
+image: /media/use-cases/private-model-access-v1.webp
+og_image: /media/use-cases/private-model-access-og-v1.png
+image_alt: Concept illustration of a central credential kept behind a gateway with separate application access passes.
 persona: IT & internal AI teams
 icon: shield
 order: 4

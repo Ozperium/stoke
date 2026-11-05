@@ -2,6 +2,9 @@
 title: Keep private requests private
 description: Give confidential AI requests an approved private route. Refuse cloud fallback when policy forbids it, with optional pattern-based redaction for permitted routes.
 slug: private-data
+image: /media/use-cases/private-data-v1.webp
+og_image: /media/use-cases/private-data-og-v1.png
+image_alt: Concept illustration of private documents kept inside a boundary, separate from a cloud destination.
 persona: Teams handling confidential data
 icon: shield
 order: 2

@@ -87,6 +87,10 @@ for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
           await link.click();
           await page.waitForURL(base + `/use-cases/${slug}/`);
           assert.equal(await page.locator('h1').innerText(), title);
+          const illustration = page.locator('[data-use-case-image]');
+          await illustration.scrollIntoViewIfNeeded();
+          await illustration.evaluate(img => img.decode());
+          assert.deepEqual(await illustration.evaluate(img => [img.naturalWidth, img.naturalHeight]), [1152, 720]);
           assert.equal(await page.locator('.use-cases-menu [aria-current="page"]').count(), 1);
           assert.ok((await page.locator('.document-content').innerText()).includes('Know the boundary'));
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);

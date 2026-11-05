@@ -2,6 +2,9 @@
 title: Recover when a model node goes offline
 description: Keep compatible applications on one endpoint and recover eligible requests through another approved node when the first fails before streaming begins.
 slug: node-failover
+image: /media/use-cases/node-failover-v1.webp
+og_image: /media/use-cases/node-failover-og-v1.png
+image_alt: Concept illustration of a connection moving from an unavailable model server to an available node.
 persona: Platform & DevEx teams
 icon: nodes
 order: 5

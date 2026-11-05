@@ -2,6 +2,9 @@
 title: Redact recognized secrets before sending
 description: Keep an approved cloud workflow useful while opt-in, pattern-based filtering removes recognized secrets from supported message content before forwarding.
 slug: secret-redaction
+image: /media/use-cases/secret-redaction-v1.webp
+og_image: /media/use-cases/secret-redaction-og-v1.png
+image_alt: Concept illustration of document content preserved while selected lines are covered by redaction bars.
 persona: Engineering & support teams
 icon: filter
 order: 6

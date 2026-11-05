@@ -1,4 +1,8 @@
 /* Shared reading surfaces for guides and document routes. */
+body.document-page .use-case-figure { margin: 2rem 0 0; }
+body.document-page .use-case-figure img { display: block; width: 100%; height: auto; aspect-ratio: 8 / 5; border: 1px solid var(--line); border-radius: .6rem; }
+body.document-page .use-case-figure figcaption { margin-top: .65rem; color: var(--muted); font-size: .82rem; line-height: 1.4; }
+
 body.document-page .document-hero,
 body.document-page .document-content {
   font-size: 17px;

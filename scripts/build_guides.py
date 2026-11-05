@@ -242,7 +242,7 @@ for filename in sorted(os.listdir(USE_CASES_SRC)):
     if filename.endswith(".md"):
         with open(os.path.join(USE_CASES_SRC, filename)) as source:
             meta, markdown = front_matter(source.read())
-        for field in ("title", "description", "slug", "persona", "icon", "order"):
+        for field in ("title", "description", "slug", "persona", "icon", "order", "image", "og_image", "image_alt"):
             if not meta.get(field):
                 raise ValueError(f"{filename}: missing {field}")
         if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", meta["slug"]):
@@ -347,6 +347,8 @@ def jsonld(meta, url, schema_type="TechArticle"):
         "dateModified": date.today().isoformat(),
     }
     data["name" if schema_type == "CollectionPage" else "headline"] = meta["title"]
+    if meta.get("og_image"):
+        data["image"] = SITE + meta["og_image"]
     return json.dumps(data, separators=(",", ":")).replace("<", "\\u003c")
 
 
@@ -369,12 +371,20 @@ def build_use_cases():
     template = PAGE.replace('href="/guides/" aria-current="page"', 'href="/guides/"')
     for meta, markdown in USE_CASES:
         heading, article = article_parts(markdown)
+        for field, extension in (("image", "webp"), ("og_image", "png")):
+            if not re.fullmatch(r"/media/use-cases/[a-z0-9-]+\." + extension, meta[field]):
+                raise ValueError(f"invalid use-case {field}: {meta[field]!r}")
+            if not os.path.isfile(os.path.join(ROOT, "landing", meta[field].lstrip("/"))):
+                raise ValueError(f"missing use-case asset: {meta[field]}")
         url = f'{SITE}/use-cases/{meta["slug"]}/'
         hero = (
             '<section class="document-hero">'
             '<div class="crumb"><a href="/">Stoke</a> / <a href="/use-cases/">Use cases</a></div>'
             f'<p class="eyebrow">{esc(meta["persona"])}</p>'
-            f'<h1>{heading}</h1><p class="lede">{esc(meta["description"])}</p></section>'
+            f'<h1>{heading}</h1><p class="lede">{esc(meta["description"])}</p>'
+            '<figure class="use-case-figure">'
+            f'<img data-use-case-image src="{attr(meta["image"])}" alt="{attr(meta["image_alt"])}" width="1152" height="720" decoding="async">'
+            '<figcaption>Concept illustration — not a product screenshot.</figcaption></figure></section>'
         )
         page = template.format(
             title=attr(meta["title"]), description=attr(meta["description"]),
@@ -383,6 +393,10 @@ def build_use_cases():
             body=hero + '<div class="document-content">' + render(article)
                  + '<div class="doc-actions"><a class="button button-secondary" href="/use-cases/">Explore other use cases</a></div></div>',
         )
+        social_image = SITE + meta["og_image"]
+        page = page.replace(SITE + "/og-image.png", attr(social_image))
+        page = page.replace("Your models. Wherever you work.", attr(meta["title"] + " — " + meta["image_alt"]))
+        page = page.replace('<meta property="og:image:width"', '<meta property="og:image:type" content="image/png">\n  <meta property="og:image:width"')
         page = page.replace(f'href="/use-cases/{meta["slug"]}/"', f'href="/use-cases/{meta["slug"]}/" aria-current="page"', 1)
         destination = os.path.join(ROOT, "landing", "use-cases", meta["slug"])
         os.makedirs(destination, exist_ok=True)
