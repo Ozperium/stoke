@@ -142,12 +142,13 @@ sitemap_root = ET.fromstring(sitemap.read_text())
 urls = {urlparse(child.text).path for node in sitemap_root if node.tag.endswith("url") for child in node if child.tag.endswith("loc")}
 route_paths = {"/" if path == home_path else "/" + str(path.relative_to(LANDING).parent).replace("\\", "/") + "/" for path in pages}
 assert route_paths - {"/join/"} == urls, "sitemap must contain every indexable route"
-assert len(urls) == 16 and "/join/" not in urls, "noindex signup must stay out of sitemap"
+assert len(urls) == 20 and "/join/" not in urls, "noindex signup must stay out of sitemap"
 
 missing_media = sorted(name for name in NEW_MEDIA if not (LANDING / name).is_file())
 assert not missing_media, "missing presentation media: " + ", ".join(missing_media)
 media_note = "new presentation media present"
 runpy.run_path(str(ROOT / "scripts/check_landing_regressions.py"))
 runpy.run_path(str(ROOT / "scripts/test_site_style.py"), run_name="__main__")
+subprocess.run(["python3", str(ROOT / "scripts/test_use_cases.py")], check=True, cwd=ROOT)
 subprocess.run(["node", "--test", str(ROOT / "scripts/test_product_visual_model.mjs")], check=True, cwd=ROOT)
 print(f"landing checks passed: {len(route_paths)} routes, sparse marketing copy, join form semantics, metadata, links, and sitemap verified; {media_note}")

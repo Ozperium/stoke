@@ -235,6 +235,35 @@ ICONS = {
 }
 
 
+# Persona-led use cases share the guide renderer and presentation shell.
+USE_CASES_SRC = os.path.join(ROOT, "docs", "use-cases")
+USE_CASES = []
+for filename in sorted(os.listdir(USE_CASES_SRC)):
+    if filename.endswith(".md"):
+        with open(os.path.join(USE_CASES_SRC, filename)) as source:
+            meta, markdown = front_matter(source.read())
+        for field in ("title", "description", "slug", "persona", "icon", "order"):
+            if not meta.get(field):
+                raise ValueError(f"{filename}: missing {field}")
+        if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", meta["slug"]):
+            raise ValueError(f"invalid use-case slug: {meta['slug']!r}")
+        USE_CASES.append((meta, markdown))
+USE_CASES.sort(key=lambda item: int(item[0]["order"]))
+USE_CASES_MENU = (
+    '<details class="nav-use-cases" data-use-cases>'
+    '<summary>Use cases<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary>'
+    '<div class="use-cases-menu">'
+    + ''.join(
+        f'<a class="use-cases-menu__item" href="/use-cases/{attr(meta["slug"])}/">'
+        f'<span class="use-cases-menu__who">{esc(meta["persona"])}</span>'
+        f'<strong>{esc(meta["title"])}</strong>'
+        '<span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a>'
+        for meta, _ in USE_CASES
+    )
+    + '<a class="use-cases-menu__all" href="/use-cases/">All use cases <span aria-hidden="true">→</span></a></div></details>'
+)
+
+
 # ── Shared presentation shell ─────────────────────────────────────────────
 # Guide pages deliberately load the same external shell as the approved landing.
 PAGE = """<!doctype html>
@@ -268,16 +297,16 @@ PAGE = """<!doctype html>
 </head>
 <body class="document-page">
   <a class="skip-link" href="#main">Skip to content</a>
-  <header class="site-nav"><div class="nav-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a><button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button><nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/" aria-current="page">Guides</a><a href="https://github.com/Ozperium/stoke">GitHub</a><a class="nav-cta button button-secondary" href="/join/">Try Cloud</a></nav></div></header>
+  <header class="site-nav"><div class="nav-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a><button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button><nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><!-- use-cases --><a href="/guides/" aria-current="page">Guides</a><a href="https://github.com/Ozperium/stoke">GitHub</a><a class="nav-cta button button-secondary" href="/join/">Try Cloud</a></nav></div></header>
   <main id="main" class="document-shell">
     {body}
   </main>
-  <footer class="site-footer"><div class="footer-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a><nav aria-label="Footer navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/">Guides</a><a href="/security/">Security</a><a href="/legal/">Legal</a><a href="/contact/">Contact</a><a href="https://github.com/Ozperium/stoke">GitHub</a></nav><span>© <span data-year>2026</span> Stoke</span></div></footer>
+  <footer class="site-footer"><div class="footer-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a><nav aria-label="Footer navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/">Guides</a><a href="/use-cases/">Use cases</a><a href="/security/">Security</a><a href="/legal/">Legal</a><a href="/contact/">Contact</a><a href="https://github.com/Ozperium/stoke">GitHub</a></nav><span>© <span data-year>2026</span> Stoke</span></div></footer>
   <script src="/presentation.js" defer></script>
   <script src="/tracking.js" defer></script>
 </body>
 </html>
-"""
+""".replace("<!-- use-cases -->", USE_CASES_MENU)
 
 def article_parts(md):
     """Keep the source's first heading in the shared document hero."""
@@ -333,6 +362,58 @@ def document_body(hero, content):
         '<div class="doc-actions"><a class="button button-primary" href="https://github.com/Ozperium/stoke">Get Stoke on GitHub</a></div>'
         '</aside></div>'
     )
+
+
+def build_use_cases():
+    urls = []
+    template = PAGE.replace('href="/guides/" aria-current="page"', 'href="/guides/"')
+    for meta, markdown in USE_CASES:
+        heading, article = article_parts(markdown)
+        url = f'{SITE}/use-cases/{meta["slug"]}/'
+        hero = (
+            '<section class="document-hero">'
+            '<div class="crumb"><a href="/">Stoke</a> / <a href="/use-cases/">Use cases</a></div>'
+            f'<p class="eyebrow">{esc(meta["persona"])}</p>'
+            f'<h1>{heading}</h1><p class="lede">{esc(meta["description"])}</p></section>'
+        )
+        page = template.format(
+            title=attr(meta["title"]), description=attr(meta["description"]),
+            canonical=attr(url), site=attr(SITE), og_type="article",
+            jsonld=jsonld(meta, url),
+            body=hero + '<div class="document-content">' + render(article)
+                 + '<div class="doc-actions"><a class="button button-secondary" href="/use-cases/">Explore other use cases</a></div></div>',
+        )
+        page = page.replace(f'href="/use-cases/{meta["slug"]}/"', f'href="/use-cases/{meta["slug"]}/" aria-current="page"', 1)
+        destination = os.path.join(ROOT, "landing", "use-cases", meta["slug"])
+        os.makedirs(destination, exist_ok=True)
+        with open(os.path.join(destination, "index.html"), "w") as output:
+            output.write(page)
+        urls.append(url)
+
+    cards = ''.join(
+        f'<a class="gcard" href="/use-cases/{attr(meta["slug"])}/">'
+        f'<div class="gart" aria-hidden="true">{ICONS[meta["icon"]]}</div><div class="gbody">'
+        f'<p class="eyebrow">{esc(meta["persona"])}</p><h2>{esc(meta["title"])}</h2>'
+        f'<p>{esc(meta["description"])}</p><span class="go">Explore use case →</span></div></a>'
+        for meta, _ in USE_CASES
+    )
+    meta = {"title": "Use cases", "description": "Find your Stoke use case: connect models across your machines, keep private requests private, or put limits around agent spend."}
+    url = f"{SITE}/use-cases/"
+    body = (
+        '<section class="document-hero"><div class="crumb"><a href="/">Stoke</a> / Use cases</div>'
+        '<h1>Your work.<br>Your use case.</h1>'
+        '<p class="lede">Start with what you need to do. See where Stoke fits, what it controls, and where its boundaries are.</p></section>'
+        f'<div class="document-content"><div class="gwrap">{cards}</div></div>'
+    )
+    page = template.format(
+        title=attr(meta["title"]), description=attr(meta["description"]),
+        canonical=attr(url), site=attr(SITE), og_type="website",
+        jsonld=jsonld(meta, url, "CollectionPage"), body=body,
+    ).replace('class="use-cases-menu__all" href="/use-cases/"', 'class="use-cases-menu__all" href="/use-cases/" aria-current="page"', 1)
+    with open(os.path.join(ROOT, "landing", "use-cases", "index.html"), "w") as output:
+        output.write(page)
+    print(f"  use cases -> {len(USE_CASES)} details and index")
+    return [url] + urls
 
 
 def main():
@@ -393,6 +474,7 @@ def main():
     print(f"  index -> landing/guides/index.html ({len(built)} guides)")
 
     urls = [f"{SITE}/", f"{SITE}/guides/"] + [f"{SITE}/guides/{m['slug']}/" for m in built]
+    urls += build_use_cases()
     urls += [f"{SITE}/{route}/" for route in ("cloud", "gateway", "security", "legal", "contact")
              if os.path.isfile(os.path.join(ROOT, "landing", route, "index.html"))]
     today = date.today().isoformat()
