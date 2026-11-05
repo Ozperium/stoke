@@ -35,10 +35,16 @@ for path, html, page in ((home_path, home_html, home), (cloud_path, cloud_html, 
     assert html.count('class="log-panel-surface"') == 1, f"one log surface required: {path}"
     assert 'M3 3 L25 1 L50 0' in html and 'L100 50' in html and 'L50 100' in html and 'L0 50' in html
     assert 'brand-period' not in html, f"trailing brand period remains: {path}"
+    assert 'class="product-visual__note"' not in html, 'removed visible caption returned'
+    assert 'class="sr-only" id="visual-context"' in html
+    assert 'aria-describedby="visual-context"' in html
     assert 'style=' not in html.lower(), f"inline style violates CSP: {path}"
     brands = [attrs for tag, attrs in page.tags if tag == 'a' and attrs.get('class') == 'brand']
     assert len(brands) == 2, f"header/footer brand count changed: {path}"
     assert html.count('<span class="brand-mark" aria-hidden="true"><img src="/stoke-mark.svg" alt="" width="24" height="24"></span>stoke') == 2
+
+gateway_html = (LANDING / 'gateway' / 'index.html').read_text()
+assert 'Release scope:' not in gateway_html and 'Read it in context' not in gateway_html, 'removed editorial boilerplate returned'
 
 assert 'class="provider-strip"' in home_html
 assert 'OpenAI API' in home_html and 'Anthropic API' in home_html and 'Ollama' in home_html
