@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#FCFCFC">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="mask-icon" href="/favicon.svg" color="#F15332">
+  <title>Redact recognized secrets before sending — Stoke</title>
+  <meta name="description" content="Keep an approved cloud workflow useful while opt-in, pattern-based filtering removes recognized secrets from supported message content before forwarding.">
+  <link rel="canonical" href="https://stokegate.com/use-cases/secret-redaction/">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Stoke">
+  <meta property="og:title" content="Redact recognized secrets before sending">
+  <meta property="og:description" content="Keep an approved cloud workflow useful while opt-in, pattern-based filtering removes recognized secrets from supported message content before forwarding.">
+  <meta property="og:url" content="https://stokegate.com/use-cases/secret-redaction/">
+  <meta property="og:image" content="https://stokegate.com/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Your models. Wherever you work.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Redact recognized secrets before sending">
+  <meta name="twitter:description" content="Keep an approved cloud workflow useful while opt-in, pattern-based filtering removes recognized secrets from supported message content before forwarding.">
+  <meta name="twitter:image" content="https://stokegate.com/og-image.png">
+  <meta name="twitter:image:alt" content="Your models. Wherever you work.">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","description":"Keep an approved cloud workflow useful while opt-in, pattern-based filtering removes recognized secrets from supported message content before forwarding.","url":"https://stokegate.com/use-cases/secret-redaction/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-11-05","headline":"Redact recognized secrets before sending"}</script>
+  <link rel="stylesheet" href="/presentation.css">
+  <link rel="stylesheet" href="/document.css">
+</head>
+<body class="document-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-nav"><div class="nav-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a><button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button><nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><details class="nav-use-cases" data-use-cases><summary>Use cases<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary><div class="use-cases-menu"><a class="use-cases-menu__item" href="/use-cases/local-models/"><span class="use-cases-menu__who">Developers &amp; small teams</span><strong>Use models across your machines</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/private-data/"><span class="use-cases-menu__who">Teams handling confidential data</span><strong>Keep private requests private</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/agent-spend/"><span class="use-cases-menu__who">Agent builders &amp; agencies</span><strong>Put limits around agent spend</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/private-model-access/"><span class="use-cases-menu__who">IT &amp; internal AI teams</span><strong>Share models, not provider keys</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/node-failover/"><span class="use-cases-menu__who">Platform &amp; DevEx teams</span><strong>Recover when a model node goes offline</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/secret-redaction/" aria-current="page"><span class="use-cases-menu__who">Engineering &amp; support teams</span><strong>Redact recognized secrets before sending</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__all" href="/use-cases/">All use cases <span aria-hidden="true">→</span></a></div></details><a href="/guides/">Guides</a><a href="https://github.com/Ozperium/stoke">GitHub</a><a class="nav-cta button button-secondary" href="/join/">Try Cloud</a></nav></div></header>
+  <main id="main" class="document-shell">
+    <section class="document-hero"><div class="crumb"><a href="/">Stoke</a> / <a href="/use-cases/">Use cases</a></div><p class="eyebrow">Engineering &amp; support teams</p><h1>Redact recognized secrets before sending</h1><p class="lede">Keep an approved cloud workflow useful while opt-in, pattern-based filtering removes recognized secrets from supported message content before forwarding.</p></section><div class="document-content"><h2 id="a-day-to-day-case">A day-to-day case</h2>
+<p>A support engineer wants a cloud model to help explain an error log. The error is useful context, but the pasted text may also contain an email address or a recognizable credential.</p>
+<p>Keeping the entire task private is one option. When cloud use is already approved for this material, removing recognized secret patterns can be an additional safeguard without discarding the surrounding troubleshooting context.</p>
+<h2 id="with-stoke">With Stoke</h2>
+<p>Enable the built-in redaction filter on the supported route and configure the patterns appropriate to the workflow. Before the request is forwarded, matching values in inspected message content are replaced with labeled redaction markers.</p>
+<p>In a synthetic example, an email address in a log becomes an email redaction marker while the error text stays available to the model. The request continues to the permitted destination; this is different from a private-route policy that refuses a destination altogether.</p>
+<h2 id="know-the-boundary">Know the boundary</h2>
+<p>This is pattern-based filtering, not complete DLP, anonymization or permission to send otherwise confidential data. It can miss sensitive information, and even redacted surrounding text may identify a person or disclose a company secret.</p>
+<p>Verify the exact protocol, route and payload fields before relying on the filter. Do not assume that attachments, tool arguments, responses, application logs or every nested field receive the same inspection. Redaction can also remove text needed to solve the task.</p>
+<h2 id="try-this-setup">Try this setup</h2>
+<p>Use synthetic logs, never real credentials, in an isolated test. Include multiple known matches as well as nonmatching examples. Inspect the actual upstream payload and record both missed matches and unnecessary removals. Confirm that the sanitized request still supports a correct troubleshooting answer.</p>
+<p>If the task cannot tolerate residual disclosure, use an approved private route instead of relying on redaction.</p>
+<p><a href="/guides/block-prompt-injection-at-the-gateway/">Understand the request-filtering integration</a></p>
+<p><a href="/use-cases/private-data/">Compare redaction with a private-data boundary</a></p><div class="doc-actions"><a class="button button-secondary" href="/use-cases/">Explore other use cases</a></div></div>
+  </main>
+  <footer class="site-footer"><div class="footer-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a><nav aria-label="Footer navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/">Guides</a><a href="/use-cases/">Use cases</a><a href="/security/">Security</a><a href="/legal/">Legal</a><a href="/contact/">Contact</a><a href="https://github.com/Ozperium/stoke">GitHub</a></nav><span>© <span data-year>2026</span> Stoke</span></div></footer>
+  <script src="/presentation.js" defer></script>
+  <script src="/tracking.js" defer></script>
+</body>
+</html>

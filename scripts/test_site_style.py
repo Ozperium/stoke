@@ -43,8 +43,8 @@ def parsed(text):
 def check():
     files = sorted(SITE.rglob('*.html'))
     routes = {'/' if p == SITE/'index.html' else '/' + p.relative_to(SITE).as_posix().removesuffix('index.html'): p for p in files}
-    assert len(routes) == 22 and '/404.html' in routes, 'include all public HTML, not only directory indexes'
-    primary = ['/gateway/', '/cloud/', '/use-cases/local-models/', '/use-cases/private-data/', '/use-cases/agent-spend/', '/use-cases/', '/guides/', 'https://github.com/Ozperium/stoke', '/join/']
+    assert len(routes) == 25 and '/404.html' in routes, 'include all public HTML, not only directory indexes'
+    primary = ['/gateway/', '/cloud/', '/use-cases/local-models/', '/use-cases/private-data/', '/use-cases/agent-spend/', '/use-cases/private-model-access/', '/use-cases/node-failover/', '/use-cases/secret-redaction/', '/use-cases/', '/guides/', 'https://github.com/Ozperium/stoke', '/join/']
     footer = ['/gateway/', '/cloud/', '/guides/', '/use-cases/', '/security/', '/legal/', '/contact/', 'https://github.com/Ozperium/stoke']
     for route, path in routes.items():
         text = path.read_text(); p = parsed(text)

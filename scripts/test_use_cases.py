@@ -14,6 +14,9 @@ CASES = {
     'local-models': ('Developers & small teams', 'Use models across your machines'),
     'private-data': ('Teams handling confidential data', 'Keep private requests private'),
     'agent-spend': ('Agent builders & agencies', 'Put limits around agent spend'),
+    'private-model-access': ('IT & internal AI teams', 'Share models, not provider keys'),
+    'node-failover': ('Platform & DevEx teams', 'Recover when a model node goes offline'),
+    'secret-redaction': ('Engineering & support teams', 'Redact recognized secrets before sending'),
 }
 
 
@@ -43,9 +46,9 @@ class UseCasesTests(unittest.TestCase):
                     self.assertIn(persona.replace('&', '&amp;'), menu)
                     self.assertIn(title, menu)
                 self.assertIn('href="/use-cases/"', menu)
-                self.assertEqual(len(re.findall(r'<a\b', menu)), 4)
+                self.assertEqual(len(re.findall(r'<a\b', menu)), 7)
 
-    def test_index_and_exact_three_detail_routes(self):
+    def test_index_and_exact_six_detail_routes(self):
         directory = LANDING / 'use-cases'
         self.assertTrue((directory / 'index.html').is_file())
         self.assertEqual({p.parent.name for p in directory.glob('*/index.html')}, set(CASES))
@@ -95,6 +98,15 @@ class UseCasesTests(unittest.TestCase):
         local = (LANDING / 'use-cases/local-models/index.html').read_text()
         self.assertIn('not combined GPU memory', local)
         self.assertIn('hardware and electricity', local)
+        access = (LANDING / 'use-cases/private-model-access/index.html').read_text()
+        self.assertIn('not per-user RBAC', access)
+        self.assertIn('not subscription lending', access)
+        failover = (LANDING / 'use-cases/node-failover/index.html').read_text()
+        self.assertIn('before streaming begins', failover)
+        self.assertIn('not seamless mid-stream recovery', failover)
+        redaction = (LANDING / 'use-cases/secret-redaction/index.html').read_text()
+        self.assertIn('not complete DLP', redaction)
+        self.assertIn('synthetic', redaction)
 
 
 if __name__ == '__main__':

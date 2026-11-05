@@ -13,6 +13,9 @@ const cases = [
   ['local-models', 'Use models across your machines'],
   ['private-data', 'Keep private requests private'],
   ['agent-spend', 'Put limits around agent spend'],
+  ['private-model-access', 'Share models, not provider keys'],
+  ['node-failover', 'Recover when a model node goes offline'],
+  ['secret-redaction', 'Redact recognized secrets before sending'],
 ];
 const types = {'.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2'};
 const server = createServer(async (request, response) => {
@@ -49,6 +52,7 @@ async function geometry(page) {
     const panel = document.querySelector('.use-cases-menu').getBoundingClientRect();
     return {overflow: document.documentElement.scrollWidth > width, width,
       summaryHeight: summary.height, panelLeft: panel.left, panelRight: panel.right,
+      columns: getComputedStyle(document.querySelector('.use-cases-menu')).gridTemplateColumns.split(' ').length,
       brandRight: brand.right, navLeft: nav.left, summaryLeft: summary.left,
       touchSizes: [...document.querySelectorAll('.use-cases-menu a')].map(a => a.getBoundingClientRect().height)};
   });
@@ -56,7 +60,10 @@ async function geometry(page) {
   assert.ok(result.panelLeft >= 0 && result.panelRight <= result.width, JSON.stringify(result));
   assert.ok(result.summaryHeight >= 44, JSON.stringify(result));
   assert.ok(result.touchSizes.every(h => h >= 44), JSON.stringify(result));
-  if (result.width > 800) assert.ok(result.summaryLeft > result.brandRight, JSON.stringify(result));
+  if (result.width > 800) {
+    assert.ok(result.summaryLeft > result.brandRight, JSON.stringify(result));
+    assert.equal(result.columns, 2, 'Six entries must use the compact two-column desktop panel');
+  }
 }
 
 for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
@@ -64,7 +71,7 @@ for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
     test(`${name}: persona links and detail navigation at ${width}px`, {timeout: 90000}, async () => {
       const browser = await engine.launch({headless: true});
       try {
-        const page = await browser.newPage({viewport: {width, height: 950}, reducedMotion: 'reduce'});
+        const page = await browser.newPage({viewport: {width, height: width <= 800 ? 667 : 950}, reducedMotion: 'reduce'});
         const errors = [];
         page.on('pageerror', error => errors.push(error.message));
         assert.equal((await page.goto(base + '/')).status(), 200);
@@ -90,7 +97,7 @@ for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
         await openCases(page, width);
         await page.locator('.use-cases-menu__all').click();
         await page.waitForURL(base + '/use-cases/');
-        assert.equal(await page.locator('.gcard').count(), 3);
+        assert.equal(await page.locator('.gcard').count(), 6);
         if (proof && name === 'chromium' && width === 1280) {
           await page.screenshot({path: join(proof, '1280-use-cases-index.png'), fullPage: true});
         }
@@ -132,7 +139,7 @@ for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
         await page.setViewportSize({width, height: 950});
         await page.goto(base + '/');
         await page.locator('[data-use-cases] summary').click();
-        assert.equal(await page.locator('.use-cases-menu__item').count(), 3);
+        assert.equal(await page.locator('.use-cases-menu__item').count(), 6);
         await page.locator('.use-cases-menu a[href="/use-cases/private-data/"]').click();
         await page.waitForURL(base + '/use-cases/private-data/');
         assert.equal(await page.locator('h1').innerText(), 'Keep private requests private');

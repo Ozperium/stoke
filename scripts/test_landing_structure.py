@@ -121,7 +121,7 @@ def main():
     sitemap = parse_sitemap(ROOT / "sitemap.xml")
     sitemap_paths = {urlparse(child.text).path for node in sitemap if node.tag.endswith("url") for child in node if child.tag.endswith("loc")}
     route_paths = {"/" if p == ROOT / "index.html" else "/" + str(p.relative_to(ROOT).parent).replace("\\", "/") + "/" for p in ROOT.rglob("index.html")}
-    check(route_paths - {"/join/"} == sitemap_paths and len(sitemap_paths) == 20, "sitemap must include every indexable route")
+    check(route_paths - {"/join/"} == sitemap_paths and len(sitemap_paths) == 23, "sitemap must include every indexable route")
 
     missing_media = sorted(name for name in EXPECTED_MEDIA if not (ROOT / name).is_file())
     check(not missing_media, "missing visual assets: " + ", ".join(missing_media))

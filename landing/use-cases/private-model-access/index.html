@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#FCFCFC">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="mask-icon" href="/favicon.svg" color="#F15332">
+  <title>Share models, not provider keys — Stoke</title>
+  <meta name="description" content="Give internal applications one authenticated path to private models, keeping upstream provider credentials at the gateway instead of copying them into every client.">
+  <link rel="canonical" href="https://stokegate.com/use-cases/private-model-access/">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Stoke">
+  <meta property="og:title" content="Share models, not provider keys">
+  <meta property="og:description" content="Give internal applications one authenticated path to private models, keeping upstream provider credentials at the gateway instead of copying them into every client.">
+  <meta property="og:url" content="https://stokegate.com/use-cases/private-model-access/">
+  <meta property="og:image" content="https://stokegate.com/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Your models. Wherever you work.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Share models, not provider keys">
+  <meta name="twitter:description" content="Give internal applications one authenticated path to private models, keeping upstream provider credentials at the gateway instead of copying them into every client.">
+  <meta name="twitter:image" content="https://stokegate.com/og-image.png">
+  <meta name="twitter:image:alt" content="Your models. Wherever you work.">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","description":"Give internal applications one authenticated path to private models, keeping upstream provider credentials at the gateway instead of copying them into every client.","url":"https://stokegate.com/use-cases/private-model-access/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-11-05","headline":"Share models, not provider keys"}</script>
+  <link rel="stylesheet" href="/presentation.css">
+  <link rel="stylesheet" href="/document.css">
+</head>
+<body class="document-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-nav"><div class="nav-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a><button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button><nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><details class="nav-use-cases" data-use-cases><summary>Use cases<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary><div class="use-cases-menu"><a class="use-cases-menu__item" href="/use-cases/local-models/"><span class="use-cases-menu__who">Developers &amp; small teams</span><strong>Use models across your machines</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/private-data/"><span class="use-cases-menu__who">Teams handling confidential data</span><strong>Keep private requests private</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/agent-spend/"><span class="use-cases-menu__who">Agent builders &amp; agencies</span><strong>Put limits around agent spend</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/private-model-access/" aria-current="page"><span class="use-cases-menu__who">IT &amp; internal AI teams</span><strong>Share models, not provider keys</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/node-failover/"><span class="use-cases-menu__who">Platform &amp; DevEx teams</span><strong>Recover when a model node goes offline</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/secret-redaction/"><span class="use-cases-menu__who">Engineering &amp; support teams</span><strong>Redact recognized secrets before sending</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__all" href="/use-cases/">All use cases <span aria-hidden="true">→</span></a></div></details><a href="/guides/">Guides</a><a href="https://github.com/Ozperium/stoke">GitHub</a><a class="nav-cta button button-secondary" href="/join/">Try Cloud</a></nav></div></header>
+  <main id="main" class="document-shell">
+    <section class="document-hero"><div class="crumb"><a href="/">Stoke</a> / <a href="/use-cases/">Use cases</a></div><p class="eyebrow">IT &amp; internal AI teams</p><h1>Share models, not provider keys</h1><p class="lede">Give internal applications one authenticated path to private models, keeping upstream provider credentials at the gateway instead of copying them into every client.</p></section><div class="document-content"><h2 id="a-day-to-day-case">A day-to-day case</h2>
+<p>A team has a private model server and several applications that need it. One is a development assistant; another summarizes internal documents. Connecting each app directly means repeating credentials and network configuration every time a backend changes.</p>
+<p>The operator wants a controlled front door, not an unprotected inference server or another copy of a provider secret in every application.</p>
+<h2 id="with-stoke">With Stoke</h2>
+<p>Keep the model service on the trusted side of a self-hosted gateway. Compatible applications call the Stoke endpoint and authenticate with accepted gateway credentials. When the upstream provider needs its own key, keep that credential at the gateway rather than distributing it to clients.</p>
+<p>Distinct configured client keys let the operator separate metered budgets and rate limits where supported. Applications retain the gateway address when eligible backends change. Review the configured routes and network access before making the endpoint available to the team.</p>
+<h2 id="know-the-boundary">Know the boundary</h2>
+<p>This is gateway authentication, not per-user RBAC or complete tenant isolation. Separate keys do not automatically restrict each caller to one model or route. A gateway credential is still a secret: distribute it securely and remove it from accepted configuration when access must end.</p>
+<p>This case covers models and API-backed access you are permitted to provide, not subscription lending. It does not promise SSO, team invitations, automatic per-user permissions or a publicly exposed model server that needs no network hardening.</p>
+<h2 id="try-this-setup">Try this setup</h2>
+<p>Connect one existing compatible application with a dedicated test gateway key. Confirm an unauthenticated request is refused and the application does not need the upstream provider key. Remove the test key from accepted configuration, restart the test gateway and confirm subsequent requests are refused.</p>
+<p><a href="/guides/expose-ollama-to-your-network-safely/">Connect an inference server without leaving it unprotected</a></p>
+<p><a href="/gateway/">Review the self-hosted gateway capabilities</a></p><div class="doc-actions"><a class="button button-secondary" href="/use-cases/">Explore other use cases</a></div></div>
+  </main>
+  <footer class="site-footer"><div class="footer-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true">•</span>stoke<span class="brand-period" aria-hidden="true">.</span></a><nav aria-label="Footer navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/">Guides</a><a href="/use-cases/">Use cases</a><a href="/security/">Security</a><a href="/legal/">Legal</a><a href="/contact/">Contact</a><a href="https://github.com/Ozperium/stoke">GitHub</a></nav><span>© <span data-year>2026</span> Stoke</span></div></footer>
+  <script src="/presentation.js" defer></script>
+  <script src="/tracking.js" defer></script>
+</body>
+</html>

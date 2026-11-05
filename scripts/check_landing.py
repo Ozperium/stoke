@@ -142,7 +142,7 @@ sitemap_root = ET.fromstring(sitemap.read_text())
 urls = {urlparse(child.text).path for node in sitemap_root if node.tag.endswith("url") for child in node if child.tag.endswith("loc")}
 route_paths = {"/" if path == home_path else "/" + str(path.relative_to(LANDING).parent).replace("\\", "/") + "/" for path in pages}
 assert route_paths - {"/join/"} == urls, "sitemap must contain every indexable route"
-assert len(urls) == 20 and "/join/" not in urls, "noindex signup must stay out of sitemap"
+assert len(urls) == 23 and "/join/" not in urls, "noindex signup must stay out of sitemap"
 
 missing_media = sorted(name for name in NEW_MEDIA if not (LANDING / name).is_file())
 assert not missing_media, "missing presentation media: " + ", ".join(missing_media)

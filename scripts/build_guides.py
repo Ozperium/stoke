@@ -475,6 +475,25 @@ def main():
 
     urls = [f"{SITE}/", f"{SITE}/guides/"] + [f"{SITE}/guides/{m['slug']}/" for m in built]
     urls += build_use_cases()
+    # Static marketing pages keep the same source-driven menu as generated pages.
+    for directory, _, filenames in os.walk(os.path.join(ROOT, "landing")):
+        if directory == OUT or directory.startswith(OUT + os.sep):
+            continue
+        cases_out = os.path.join(ROOT, "landing", "use-cases")
+        if directory == cases_out or directory.startswith(cases_out + os.sep):
+            continue
+        for filename in filenames:
+            if not filename.endswith(".html"):
+                continue
+            path = os.path.join(directory, filename)
+            with open(path) as source:
+                original = source.read()
+            updated, count = re.subn(r'<details\b[^>]*data-use-cases[^>]*>.*?</details>', lambda _: USE_CASES_MENU, original, flags=re.S)
+            if count != 1:
+                raise ValueError(f"{path}: expected one use-case navigation")
+            if updated != original:
+                with open(path, "w") as output:
+                    output.write(updated)
     urls += [f"{SITE}/{route}/" for route in ("cloud", "gateway", "security", "legal", "contact")
              if os.path.isfile(os.path.join(ROOT, "landing", route, "index.html"))]
     today = date.today().isoformat()
