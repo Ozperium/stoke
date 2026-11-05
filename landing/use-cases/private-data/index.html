@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#FCFCFC">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="mask-icon" href="/favicon.svg" color="#F15332">
+  <title>Keep client documents off the cloud — Stoke</title>
+  <meta name="description" content="Summarize a client’s unreleased plans on approved private infrastructure, without a cloud fallback quietly changing where the document goes.">
+  <link rel="canonical" href="https://stokegate.com/use-cases/private-data/">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Stoke">
+  <meta property="og:title" content="Keep client documents off the cloud">
+  <meta property="og:description" content="Summarize a client’s unreleased plans on approved private infrastructure, without a cloud fallback quietly changing where the document goes.">
+  <meta property="og:url" content="https://stokegate.com/use-cases/private-data/">
+  <meta property="og:image" content="https://stokegate.com/media/use-cases/private-data-og-v2.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Keep client documents off the cloud — Private documents kept inside a boundary, separate from a cloud destination.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Keep client documents off the cloud">
+  <meta name="twitter:description" content="Summarize a client’s unreleased plans on approved private infrastructure, without a cloud fallback quietly changing where the document goes.">
+  <meta name="twitter:image" content="https://stokegate.com/media/use-cases/private-data-og-v2.png">
+  <meta name="twitter:image:alt" content="Keep client documents off the cloud — Private documents kept inside a boundary, separate from a cloud destination.">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","description":"Summarize a client\u2019s unreleased plans on approved private infrastructure, without a cloud fallback quietly changing where the document goes.","url":"https://stokegate.com/use-cases/private-data/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-11-05","headline":"Keep client documents off the cloud","image":"https://stokegate.com/media/use-cases/private-data-og-v2.png"}</script>
+  <link rel="stylesheet" href="/presentation.css?v=f04f3e9d5490">
+  <link rel="stylesheet" href="/document.css">
+</head>
+<body class="document-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-nav"><div class="nav-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true"><img src="/stoke-mark.svg" alt="" width="24" height="24"></span>stoke</a><button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button><nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><details class="nav-use-cases" data-use-cases><summary>Use cases<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary><div class="use-cases-menu"><a class="use-cases-menu__item" href="/use-cases/local-models/"><span class="use-cases-menu__who">Developers &amp; small teams</span><strong>Give your idle computer a job</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/private-data/" aria-current="page"><span class="use-cases-menu__who">Teams handling confidential data</span><strong>Keep client documents off the cloud</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/agent-spend/"><span class="use-cases-menu__who">Agent builders &amp; agencies</span><strong>Stop funding an agent’s retry loop</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/private-model-access/"><span class="use-cases-menu__who">IT &amp; internal AI teams</span><strong>Connect apps without copying provider keys</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/node-failover/"><span class="use-cases-menu__who">Platform &amp; DevEx teams</span><strong>A model host went offline. Now what?</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/secret-redaction/"><span class="use-cases-menu__who">Engineering &amp; support teams</span><strong>The error log came with an API key</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__all" href="/use-cases/">All use cases <span aria-hidden="true">→</span></a></div></details><a href="/guides/">Guides</a><a href="https://github.com/Ozperium/stoke">GitHub</a><a class="nav-cta button button-secondary" href="/join/">Try Cloud</a></nav></div></header>
+  <main id="main" class="document-shell">
+    <section class="document-hero"><div class="crumb"><a href="/">Stoke</a> / <a href="/use-cases/">Use cases</a></div><p class="eyebrow">Teams handling confidential data</p><h1>Keep client documents off the cloud</h1><p class="lede">Summarize a client’s unreleased plans on approved private infrastructure, without a cloud fallback quietly changing where the document goes.</p><figure class="use-case-figure"><img data-use-case-image src="/media/use-cases/private-data-v1.webp" alt="Private documents kept inside a boundary, separate from a cloud destination." width="1152" height="720" decoding="async"></figure></section><div class="document-content"><p>A client sends you an unreleased product plan. You need a short briefing before the next meeting. Pasting it into your usual cloud assistant would be convenient, but the client has not approved sending it there.</p>
+<p>The difficult part is not choosing a private model. It is making sure a busy or unavailable private model does not turn into an accidental cloud request.</p>
+<h2 id="make-the-destination-part-of-the-rule">Make the destination part of the rule</h2>
+<p>Connect your compatible application to a Stoke route restricted to approved private destinations. That restriction applies before dispatch and during fallback. If no permitted destination can serve the request, it is refused.</p>
+<p>An unavailable summary is inconvenient. Sending the document somewhere you did not approve is a different problem. Decide which outcome you want before the first request, not after checking a provider dashboard.</p>
+<h2 id="removing-an-email-address-does-not-make-a-plan-public">Removing an email address does not make a plan public</h2>
+<p>For work already approved for a cloud model, pattern-based redaction can remove recognized secrets from supported message content. It is not complete DLP or anonymization. The surrounding product plan can still be confidential even after every email address is gone.</p>
+<p>Use a private route when the material itself must stay private. Use redaction as an additional safeguard for permitted traffic, not as permission to send it anywhere.</p>
+<h2 id="test-the-route-when-the-private-model-is-unavailable">Test the route when the private model is unavailable</h2>
+<p>Use synthetic documents, take the private destination offline and confirm that the request is refused without any cloud dispatch. Also inspect the actual hosts behind your configured destination tiers; a label does not establish trust.</p>
+<p>Review the application's own telemetry, logs and tools separately. Stoke controls the model requests that pass through it, not every way a document might leave your machine.</p>
+<p><a href="/guides/expose-ollama-to-your-network-safely/">Set up an authenticated private model endpoint</a></p><div class="doc-actions"><a class="button button-secondary" href="/use-cases/">Explore other use cases</a></div></div>
+  </main>
+  <footer class="site-footer"><div class="footer-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true"><img src="/stoke-mark.svg" alt="" width="24" height="24"></span>stoke</a><nav aria-label="Footer navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/">Guides</a><a href="/use-cases/">Use cases</a><a href="/security/">Security</a><a href="/legal/">Legal</a><a href="/contact/">Contact</a><a href="https://github.com/Ozperium/stoke">GitHub</a></nav><span>© <span data-year>2026</span> Stoke</span></div></footer>
+  <script src="/presentation.js?v=31de542d9b64" defer></script>
+  <script src="/tracking.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#FCFCFC">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="mask-icon" href="/favicon.svg" color="#F15332">
+  <title>The error log came with an API key — Stoke</title>
+  <meta name="description" content="Keep useful troubleshooting context while filtering recognized secrets from supported message content before an approved cloud request.">
+  <link rel="canonical" href="https://stokegate.com/use-cases/secret-redaction/">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Stoke">
+  <meta property="og:title" content="The error log came with an API key">
+  <meta property="og:description" content="Keep useful troubleshooting context while filtering recognized secrets from supported message content before an approved cloud request.">
+  <meta property="og:url" content="https://stokegate.com/use-cases/secret-redaction/">
+  <meta property="og:image" content="https://stokegate.com/media/use-cases/secret-redaction-og-v2.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The error log came with an API key — Document content preserved while selected lines are covered by redaction bars.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="The error log came with an API key">
+  <meta name="twitter:description" content="Keep useful troubleshooting context while filtering recognized secrets from supported message content before an approved cloud request.">
+  <meta name="twitter:image" content="https://stokegate.com/media/use-cases/secret-redaction-og-v2.png">
+  <meta name="twitter:image:alt" content="The error log came with an API key — Document content preserved while selected lines are covered by redaction bars.">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","description":"Keep useful troubleshooting context while filtering recognized secrets from supported message content before an approved cloud request.","url":"https://stokegate.com/use-cases/secret-redaction/","author":{"@type":"Organization","name":"Stoke"},"publisher":{"@type":"Organization","name":"Stoke"},"dateModified":"2026-11-05","headline":"The error log came with an API key","image":"https://stokegate.com/media/use-cases/secret-redaction-og-v2.png"}</script>
+  <link rel="stylesheet" href="/presentation.css?v=f04f3e9d5490">
+  <link rel="stylesheet" href="/document.css">
+</head>
+<body class="document-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-nav"><div class="nav-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true"><img src="/stoke-mark.svg" alt="" width="24" height="24"></span>stoke</a><button class="nav-toggle" type="button" data-nav-toggle aria-controls="nav-menu" aria-expanded="false">Menu</button><nav class="nav-links" id="nav-menu" data-nav-menu aria-label="Primary navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><details class="nav-use-cases" data-use-cases><summary>Use cases<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary><div class="use-cases-menu"><a class="use-cases-menu__item" href="/use-cases/local-models/"><span class="use-cases-menu__who">Developers &amp; small teams</span><strong>Give your idle computer a job</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/private-data/"><span class="use-cases-menu__who">Teams handling confidential data</span><strong>Keep client documents off the cloud</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/agent-spend/"><span class="use-cases-menu__who">Agent builders &amp; agencies</span><strong>Stop funding an agent’s retry loop</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/private-model-access/"><span class="use-cases-menu__who">IT &amp; internal AI teams</span><strong>Connect apps without copying provider keys</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/node-failover/"><span class="use-cases-menu__who">Platform &amp; DevEx teams</span><strong>A model host went offline. Now what?</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__item" href="/use-cases/secret-redaction/" aria-current="page"><span class="use-cases-menu__who">Engineering &amp; support teams</span><strong>The error log came with an API key</strong><span class="use-cases-menu__go">Explore use case <span aria-hidden="true">→</span></span></a><a class="use-cases-menu__all" href="/use-cases/">All use cases <span aria-hidden="true">→</span></a></div></details><a href="/guides/">Guides</a><a href="https://github.com/Ozperium/stoke">GitHub</a><a class="nav-cta button button-secondary" href="/join/">Try Cloud</a></nav></div></header>
+  <main id="main" class="document-shell">
+    <section class="document-hero"><div class="crumb"><a href="/">Stoke</a> / <a href="/use-cases/">Use cases</a></div><p class="eyebrow">Engineering &amp; support teams</p><h1>The error log came with an API key</h1><p class="lede">Keep useful troubleshooting context while filtering recognized secrets from supported message content before an approved cloud request.</p><figure class="use-case-figure"><img data-use-case-image src="/media/use-cases/secret-redaction-v1.webp" alt="Document content preserved while selected lines are covered by redaction bars." width="1152" height="720" decoding="async"></figure></section><div class="document-content"><p>The support ticket has the stack trace you need. It also has a customer email address and a credential someone copied from their environment. You want help understanding the error, not another destination holding that credential.</p>
+<p>If the material is already approved for a cloud workflow, stripping recognized secret patterns adds a check before the model request leaves. If the material is confidential as a whole, use a private route instead.</p>
+<h2 id="keep-the-error-replace-the-recognized-secret">Keep the error, replace the recognized secret</h2>
+<p>Enable Stoke's redaction filter for the supported workflow and configure the patterns it should inspect. Matching values in supported message content are replaced with labeled markers before forwarding to the permitted destination.</p>
+<p>In a synthetic log, that can mean keeping the timeout and stack trace while replacing a recognized email address. Unlike a private-route restriction, the sanitized request still continues to its approved model.</p>
+<h2 id="the-surrounding-text-can-still-give-the-secret-away">The surrounding text can still give the secret away</h2>
+<p>Pattern-based filtering is not complete DLP. It can miss sensitive information, and a company name, internal URL or unique incident description may be enough to identify the customer without an email address.</p>
+<p>Verify the protocol and fields you actually use. Do not assume attachments, tool arguments, responses or the application's own logs receive the same inspection. If residual disclosure is unacceptable, redaction is the wrong boundary for this task.</p>
+<h2 id="check-what-the-upstream-model-receives">Check what the upstream model receives</h2>
+<p>Use synthetic logs and dummy values in an isolated test, never real credentials. Include known matches, nonmatching text and context you need preserved. Inspect the actual upstream payload for missed matches and unnecessary removals.</p>
+<p>Then check the answer. Removing the secret is useful only if the remaining context still lets the model help with the error.</p>
+<p><a href="/guides/block-prompt-injection-at-the-gateway/">Review request-filtering integration</a></p>
+<p><a href="/use-cases/private-data/">Use a private destination for confidential material</a></p><div class="doc-actions"><a class="button button-secondary" href="/use-cases/">Explore other use cases</a></div></div>
+  </main>
+  <footer class="site-footer"><div class="footer-inner"><a class="brand" href="/" aria-label="Stoke home"><span class="brand-mark" aria-hidden="true"><img src="/stoke-mark.svg" alt="" width="24" height="24"></span>stoke</a><nav aria-label="Footer navigation"><a href="/gateway/">Gateway</a><a href="/cloud/">Cloud</a><a href="/guides/">Guides</a><a href="/use-cases/">Use cases</a><a href="/security/">Security</a><a href="/legal/">Legal</a><a href="/contact/">Contact</a><a href="https://github.com/Ozperium/stoke">GitHub</a></nav><span>© <span data-year>2026</span> Stoke</span></div></footer>
+  <script src="/presentation.js?v=31de542d9b64" defer></script>
+  <script src="/tracking.js" defer></script>
+</body>
+</html>
