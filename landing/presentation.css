@@ -16,9 +16,9 @@ button,a{ -webkit-tap-highlight-color:transparent }
 .site-nav{position:relative;z-index:5;background:var(--paper)}
 .nav-inner,.footer-inner{width:min(var(--max),calc(100% - 2 * var(--pad)));margin:auto}
 .nav-inner{min-height:5.5rem;display:flex;align-items:center;justify-content:space-between;gap:2rem;border-bottom:1px solid var(--line)}
-.brand{font-family:Sora,Arial,sans-serif;font-size:1.16rem;font-weight:650;letter-spacing:-.06em;text-decoration:none;white-space:nowrap}
-.brand-mark{display:inline-grid;place-items:center;width:1.05rem;height:1.05rem;margin-right:.1rem;border-radius:50%;background:var(--red);color:var(--red);font-size:.7rem;vertical-align:-.04em}
-.brand-period{color:var(--red)}
+.brand{font-family:Sora,Arial,sans-serif;font-size:1.45rem;font-weight:650;letter-spacing:-.06em;text-decoration:none;white-space:nowrap}
+.brand-mark{display:inline-grid;place-items:center;width:24px;height:24px;margin-right:.22rem;background:transparent;color:var(--red);vertical-align:-.18em}
+.brand-mark img,.brand-mark svg{display:block;width:24px;height:24px}
 .nav-links{display:flex;align-items:center;gap:clamp(1rem,2.4vw,2.25rem);font-size:1rem}
 .nav-links a{text-decoration:none}
 .nav-links .nav-cta{padding:.66rem 1rem;border:1px solid var(--ink);border-radius:999px}

@@ -8,6 +8,12 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / 'landing'
 SPECIAL = {'/', '/cloud/', '/join/'}
+BRAND_MARKUP = '<span class="brand-mark" aria-hidden="true"><img src="/stoke-mark.svg" alt="" width="24" height="24"></span>stoke'
+ACCEPTED_MARK_PATHS = [
+    'M5.229 12.164 L8.454 12.213 L13.335 13.404 L17.875 13.436 L22.276 14.458 L26.774 14.788 L27.300 16.073 L26.571 19.101 L25.371 19.741 L20.758 18.789 L16.218 18.757 L10.319 17.625 L5.014 17.284 L4.614 15.107 Z',
+    'M15.108 5.364 L15.930 8.789 L18.024 13.667 L19.717 18.904 L21.727 25.302 L20.360 26.225 L17.054 26.790 L16.036 23.117 L13.664 17.914 L12.539 13.216 L10.171 7.586 L11.366 6.193 Z',
+    'M24.661 9.669 L22.683 12.463 L18.914 16.201 L16.534 19.442 L12.297 23.700 L10.379 24.933 L8.424 22.770 L7.986 21.164 L11.354 17.872 L14.670 13.591 L18.454 10.136 L20.886 6.539 L22.766 7.290 Z',
+]
 
 class Page(HTMLParser):
     def __init__(self):
@@ -56,12 +62,21 @@ def check():
         assert not p.inline_style, route + ': inline styles prevent the external-style contract'
         assert 'data-nav-toggle' in text and 'aria-controls="nav-menu"' in text
         assert 'class="skip-link"' in text and 'id="main"' in text
+        assert text.count(BRAND_MARKUP) == 2, route + ': shared image wordmark missing or duplicated'
+        assert 'brand-period' not in text and 'class="brand-mark" aria-hidden="true">•</span>' not in text, route + ': trailing-dot or legacy mark remains'
         if route not in SPECIAL:
             assert 'document-page' in (p.body.get('class') or '').split(), route + ': reading surface missing'
             assert '/document.css' in p.styles and 'document-shell' in text
         if route in {'/legal/','/security/','/contact/','/join/','/404.html'}:
             assert p.meta.get('robots') == 'noindex, follow', route + ': noindex changed'
+    mark = (SITE / 'stoke-mark.svg').read_text()
+    assert re.findall(r'<path d="([^"]+)"', mark) == ACCEPTED_MARK_PATHS, 'approved mark paths changed'
+    assert '<circle' not in mark and '<rect' not in mark, 'approved mark acquired backing geometry'
+    presentation = (SITE / 'presentation.css').read_text()
+    assert 'font-size:1.45rem' in presentation and 'background:transparent' in presentation, 'shared wordmark styling drifted'
+    assert 'border-radius:50%' not in presentation, 'shared mark regained circular backing'
     renderer = runpy.run_path(str(ROOT/'scripts/build_guides.py'))
+    assert BRAND_MARKUP in renderer['PAGE'] and 'brand-period' not in renderer['PAGE'], 'guide generator brand contract drifted'
     for source in sorted((ROOT/'docs/guides').glob('*.md')):
         meta, body = renderer['front_matter'](source.read_text())
         expected = parsed(renderer['render'](body)).codes

@@ -1,0 +1,11 @@
+# Approved public brand presentation
+
+- Use the three irregular straight-axis log paths in `landing/stoke-mark.svg`; the same base is the favicon. The `stoke` wordmark has no trailing period. The shared header/footer and guide generator use the same asset.
+- Home adds a static supported-provider row: OpenAI API, Anthropic API, Ollama and other OpenAI-compatible endpoints. Marks identify supported destination types, not sponsorship or universal native-app compatibility. Vendor sources and MIT catalog notice are in `landing/brands/`.
+- Home alone has decorative, seeded numerical embers: cold charcoal, coral heat, then small fading fragments. These are not token usage, spend, energy measurements or request telemetry. Geometry and timeline are independent of product outcomes. Clear live text, controls, cards and semantic wire bounds.
+- The existing home and public Cloud illustrations use one log-inspired decision-panel surface with level, unclipped content and four stable cardinal attachment points. Do not substitute the whole crossed-log mark for a content container.
+- Preserve the approved product model and renderer; privacy, budget refusal and permitted local fallback remain separate illustrative scenarios. No backend, entitlement, auth or provisioning claims are added by the artwork.
+- Stop nonessential animation on pause, hidden pages, offscreen sections and reduced-motion; retain a seeded still. Resume correctly after page-cache restoration. The ambience control is exposed only after successful initialization and is absent without JavaScript. The accepted scene has its own playback controls.
+- All styles/modules are self-hosted; keep strict CSP and `style-src-attr 'none'`. Avoid runtime layout reads inside the animation tick. The static SVG social source and PNG use the same light palette and approved mark.
+
+Verify with `python3 scripts/check_landing.py`, `python3 scripts/test_landing_structure.py`, `node --test scripts/test_burning_numbers.mjs`, and opt-in product browser tests. Browser acceptance covers logo assets, log-outline content/ports, responsive scenarios, true ambience pause/resume, foreground pixel exclusions, reduced motion, hidden/offscreen states, history restoration, strict CSP and no-JS content.
