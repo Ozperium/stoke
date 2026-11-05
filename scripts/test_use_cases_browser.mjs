@@ -167,6 +167,7 @@ for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
           const result = await page.evaluate(async () => {
             const image = document.querySelector('[data-use-case-image]');
             await image.decode();
+            await document.fonts.ready;
             const copy = document.querySelector('.use-case-copy');
             const figure = document.querySelector('.use-case-figure');
             const heading = document.querySelector('h1');
@@ -183,17 +184,20 @@ for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
               grid: grid.getBoundingClientRect().toJSON(),
               heading: heading.getBoundingClientRect().toJSON(),
               main: document.querySelector('main').getBoundingClientRect().toJSON(),
+              body: document.querySelector('.document-content').getBoundingClientRect().toJSON(),
             };
           });
           assert.equal(result.imageDecoded, true, slug);
           assert.equal(result.overflow, false, `${slug}: ${JSON.stringify(result)}`);
           assert.equal(result.border, '0px', `${slug}: figure frame remains`);
           assert.equal(result.imageBorder, '0px', `${slug}: image frame remains`);
-          assert.ok(result.main.top < 950 && result.heading.bottom <= 950, `${slug}: body is not visible in viewport: ${JSON.stringify(result)}`);
+          assert.ok(result.body.top < 950, `${slug}: article body is not visible in viewport: ${JSON.stringify(result)}`);
           if (width <= 800) {
             assert.ok(result.figure.top >= result.copy.bottom - 1, `${slug}: image is not stacked below copy: ${JSON.stringify(result)}`);
             assert.equal(result.grid.width, result.copy.width, `${slug}: stacked grid width drift`);
           } else {
+            assert.ok(result.copy.width >= 360, `${slug}: headline column is squeezed: ${JSON.stringify(result)}`);
+            assert.ok(Math.abs(result.grid.width - result.main.width) < 1, `${slug}: editorial header is trapped in the reading-width column`);
             assert.ok(result.figure.left > result.copy.right, `${slug}: image is not beside copy: ${JSON.stringify(result)}`);
             assert.ok(result.figure.top < result.copy.bottom && result.figure.bottom > result.copy.top, `${slug}: columns do not share the editorial row: ${JSON.stringify(result)}`);
           }
