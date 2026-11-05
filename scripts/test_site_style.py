@@ -4,6 +4,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 import runpy
 import re
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / 'landing'
@@ -49,14 +50,16 @@ def parsed(text):
 def check():
     files = sorted(SITE.rglob('*.html'))
     routes = {'/' if p == SITE/'index.html' else '/' + p.relative_to(SITE).as_posix().removesuffix('index.html'): p for p in files}
-    assert len(routes) == 18 and '/404.html' in routes, 'include all public HTML, not only directory indexes'
-    primary = ['/gateway/', '/cloud/', '/guides/', 'https://github.com/Ozperium/stoke', '/join/']
-    footer = ['/gateway/', '/cloud/', '/guides/', '/security/', '/legal/', '/contact/', 'https://github.com/Ozperium/stoke']
+    assert len(routes) == 25 and '/404.html' in routes, 'include all public HTML, not only directory indexes'
+    primary = ['/gateway/', '/cloud/', '/use-cases/local-models/', '/use-cases/private-data/', '/use-cases/agent-spend/', '/use-cases/private-model-access/', '/use-cases/node-failover/', '/use-cases/secret-redaction/', '/use-cases/', '/guides/', 'https://github.com/Ozperium/stoke', '/join/']
+    footer = ['/gateway/', '/cloud/', '/guides/', '/use-cases/', '/security/', '/legal/', '/contact/', 'https://github.com/Ozperium/stoke']
     for route, path in routes.items():
         text = path.read_text(); p = parsed(text)
         assert p.h1 == 1, route + ': one page heading required'
-        assert '/presentation.css' in p.styles and '/presentation.js' in p.scripts, route + ': shared shell missing'
-        assert not set(p.styles + p.scripts) & {'/site.css','/route.css','/site.js'}, route + ': legacy theme linked'
+        style_paths = {urlparse(ref).path for ref in p.styles}
+        script_paths = {urlparse(ref).path for ref in p.scripts}
+        assert '/presentation.css' in style_paths and '/presentation.js' in script_paths, route + ': shared shell missing'
+        assert not (style_paths | script_paths) & {'/site.css','/route.css','/site.js'}, route + ': legacy theme linked'
         assert p.primary == primary, route + ': primary navigation drift'
         assert p.footer == footer, route + ': footer navigation drift'
         assert not p.inline_style, route + ': inline styles prevent the external-style contract'

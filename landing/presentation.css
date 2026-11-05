@@ -63,3 +63,37 @@ h1 span{color:var(--red)}
 @media (max-width:700px){.nav-inner{min-height:4.5rem}.nav-toggle{display:block}.nav-links{display:none;position:absolute;left:var(--pad);right:var(--pad);top:4.5rem;padding:1rem;background:var(--paper);border:1px solid var(--ink);box-shadow:.45rem .45rem 0 var(--red);flex-direction:column;align-items:stretch;gap:0}.nav-links.is-open{display:flex}.nav-links a{padding:.7rem 0}.nav-links .nav-cta{padding:.7rem 0;border:0;border-radius:0}.hero{display:flex;flex-direction:column;align-items:stretch;gap:1.5rem;min-height:auto;padding-top:4rem}.hero-copy{padding-bottom:0}.hero-stage{order:2;transform:none;margin-top:1.2rem}.hero-stage:after{right:4%;bottom:4%}.hero-lede{margin-top:1.5rem}.film-trigger{margin-top:2.5rem}.paths{display:block;padding-bottom:6rem}.path{margin-bottom:2rem}.path-cloud{transform:none;margin-top:3rem}.footer-inner{align-items:flex-start;flex-direction:column;gap:1.2rem}.footer-inner nav{gap:.65rem 1rem}.join-layout{display:block;padding-block:3.5rem 5rem}.join-intro{margin-bottom:3rem}.join-intro h1{font-size:2.2rem}.waitlist-form{padding-top:1rem}.cloud-hero{padding-bottom:5rem}}
 @media(max-width:700px){html:not(.js-ready) .nav-toggle{display:none}html:not(.js-ready) .nav-inner{flex-wrap:wrap;padding-bottom:1rem}html:not(.js-ready) .nav-links{display:flex;position:static;flex-direction:row;flex-wrap:wrap;padding:0;border:0;box-shadow:none;gap:.75rem;width:100%}}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.button{transition:none}.button:hover{transform:none}.hero-stage{transform:none}}
+/* Persona-first navigation. Native details keeps the links usable without JS. */
+.brand{flex-shrink:0}
+.nav-inner{position:relative}
+.nav-use-cases{position:static}
+.nav-use-cases summary{display:flex;align-items:center;gap:.35rem;min-height:44px;cursor:pointer;list-style:none;white-space:nowrap}
+.nav-use-cases summary::-webkit-details-marker{display:none}
+.nav-use-cases summary::marker{content:''}
+.nav-use-cases summary svg{width:1rem;height:1rem;stroke-width:1.5;transition:transform 140ms ease-out}
+.nav-use-cases[open] summary svg{transform:rotate(180deg)}
+.use-cases-menu{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));position:absolute;top:calc(100% + .6rem);right:0;width:46rem;max-width:calc(100vw - 2 * var(--pad));padding:.5rem;background:var(--paper);border:1px solid var(--line);border-radius:.65rem;box-shadow:0 14px 40px #19191914;font-size:1rem;line-height:1.3;text-transform:none;letter-spacing:normal}
+.nav-links .use-cases-menu__item{display:flex;flex-direction:column;gap:.35rem;padding:.9rem 1rem;border-radius:.3rem}
+.use-cases-menu__item:nth-child(n+3){border-top:1px solid var(--line)}
+.use-cases-menu__item:hover,.use-cases-menu__item:focus-visible{background:var(--soft)}
+.use-cases-menu__who{color:var(--muted);font-size:.84rem}
+.use-cases-menu__item strong{font-family:Sora,Arial,sans-serif;font-weight:550;font-size:.95rem;letter-spacing:-.025em}
+.use-cases-menu__go{color:var(--red-dark);font-size:.86rem}
+.nav-links .use-cases-menu__all{grid-column:1/-1;display:flex;justify-content:space-between;min-height:44px;padding:.7rem 1rem;border-top:1px solid var(--line)}
+.nav-links [aria-current=page]{text-decoration:underline;text-underline-offset:.2em}
+@media(max-width:800px){
+  .nav-toggle{display:block;min-height:44px;min-width:44px}
+  .nav-links{display:none;position:absolute;left:0;right:0;top:4.5rem;max-height:calc(100svh - 5rem);overflow-y:auto;padding:1rem;background:var(--paper);border:1px solid var(--ink);box-shadow:.45rem .45rem 0 var(--red);flex-direction:column;align-items:stretch;gap:0}
+  .nav-inner{min-height:4.5rem}
+  .nav-links.is-open{display:flex}
+  .nav-links a{padding:.7rem 0}
+  .nav-links .nav-cta{padding:.7rem 0;border:0;border-radius:0}
+  .nav-use-cases summary{padding:.7rem 0;justify-content:space-between}
+  .use-cases-menu{display:block;position:static;max-width:none;width:100%;padding:0 0 .4rem;border:0;border-left:2px solid var(--red);border-radius:0;box-shadow:none}
+  .nav-links .use-cases-menu__item{padding:.8rem 1rem}
+  .use-cases-menu__item + .use-cases-menu__item{border-top:1px solid var(--line)}
+  html:not(.js-ready) .nav-toggle{display:none}
+  html:not(.js-ready) .nav-inner{flex-wrap:wrap;padding-bottom:1rem}
+  html:not(.js-ready) .nav-links{display:flex;position:static;max-height:none;overflow:visible;flex-direction:column;padding:0;border:0;box-shadow:none;gap:.25rem;width:100%}
+}
+@media(prefers-reduced-motion:reduce){.nav-use-cases summary svg{transition:none}}

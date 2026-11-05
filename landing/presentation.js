@@ -6,7 +6,9 @@
   const toggle = document.querySelector('[data-nav-toggle]');
   const menu = document.querySelector('[data-nav-menu]');
   if (header && toggle && menu) {
+    const cases = menu.querySelector('[data-use-cases]');
     const setMenu = (open, restoreFocus) => {
+      if (!open && cases) cases.open = false;
       menu.classList.toggle('is-open', open);
       toggle.setAttribute('aria-expanded', String(open));
       if (!open && restoreFocus) toggle.focus();
@@ -16,12 +18,22 @@
       if (event.target.closest('a')) setMenu(false, false);
     });
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && menu.classList.contains('is-open')) {
+      if (event.key === 'Escape' && cases && cases.open) {
+        event.preventDefault();
+        cases.open = false;
+        cases.querySelector('summary').focus();
+      } else if (event.key === 'Escape' && menu.classList.contains('is-open')) {
         event.preventDefault();
         setMenu(false, true);
       }
     });
-    const media = window.matchMedia('(min-width: 701px)');
+    document.addEventListener('click', (event) => {
+      if (!header.contains(event.target)) setMenu(false, false);
+    });
+    document.addEventListener('focusin', (event) => {
+      if (cases && !cases.contains(event.target)) cases.open = false;
+    });
+    const media = window.matchMedia('(min-width: 801px)');
     const reset = (event) => { if (event.matches) setMenu(false, false); };
     if (media.addEventListener) media.addEventListener('change', reset);
     else media.addListener(reset);
