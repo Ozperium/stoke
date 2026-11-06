@@ -157,6 +157,55 @@ for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
     }
   });
 
+  for (const width of [390, 768, 1280]) {
+    test(`${name}: listing uses complete article illustrations at ${width}px`, {timeout: 90000}, async () => {
+      const browser = await engine.launch({headless: true});
+      try {
+        const page = await browser.newPage({viewport: {width, height: 950}, reducedMotion: 'reduce'});
+        await page.goto(base + '/use-cases/');
+        const cards = page.locator('.gcard--illustrated');
+        assert.equal(await cards.count(), cases.length);
+        assert.equal(await page.locator('.gcard .gart svg').count(), 0);
+        for (let i = 0; i < cases.length; i++) {
+          const card = cards.nth(i);
+          const image = card.locator('[data-use-case-card-image]');
+          await image.scrollIntoViewIfNeeded();
+          const result = await image.evaluate(async image => {
+            await image.decode();
+            await document.fonts.ready;
+            const card = image.closest('.gcard');
+            return {
+              natural: [image.naturalWidth, image.naturalHeight],
+              image: image.getBoundingClientRect().toJSON(),
+              body: card.querySelector('.gbody').getBoundingClientRect().toJSON(),
+              fit: getComputedStyle(image).objectFit,
+              overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+            };
+          });
+          assert.deepEqual(result.natural, [1152, 720]);
+          assert.equal(result.overflow, false);
+          assert.equal(result.fit, 'contain');
+          assert.ok(Math.abs(result.image.width / result.image.height - 1.6) < .01);
+          if (width <= 800) {
+            assert.ok(result.body.top >= result.image.bottom);
+            assert.ok(result.image.width >= 300);
+          } else {
+            assert.ok(result.body.left > result.image.right);
+            assert.ok(result.body.width >= 360);
+            assert.ok(result.image.width >= 300);
+          }
+        }
+        const first = cards.first();
+        const href = await first.getAttribute('href');
+        await first.locator('img').click();
+        await page.waitForURL(base + href);
+        assert.equal(await page.locator('h1').innerText(), cases[0][1]);
+      } finally {
+        await browser.close();
+      }
+    });
+  }
+
   for (const width of [390, 768, 1024, 1280]) {
     test(`${name}: editorial layout at ${width}px`, {timeout: 90000}, async () => {
       const browser = await engine.launch({headless: true});

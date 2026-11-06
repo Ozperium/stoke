@@ -2,7 +2,7 @@
 body.document-page .use-case-figure { margin: 2rem 0 0; }
 body.document-page .use-case-figure img { display: block; width: 100%; height: auto; aspect-ratio: 8 / 5; border: 1px solid var(--line); border-radius: .6rem; }
 
-/* Two pilot use cases use transparent, explanatory artwork beside the copy. */
+/* Use cases use transparent, explanatory artwork beside the copy. */
 body.document-page .document-hero.use-case-hero--editorial {
   max-width: none;
   padding-bottom: clamp(2rem, 5vw, 3.5rem);
@@ -294,6 +294,32 @@ body.document-page .gcard {
   text-decoration: none;
 }
 
+body.document-page .document-content.use-case-list {
+  max-width: none;
+}
+
+body.document-page .gcard.gcard--illustrated {
+  grid-template-columns: minmax(16rem, .85fr) minmax(0, 1.15fr);
+  gap: clamp(1.5rem, 4vw, 3rem);
+  align-items: center;
+  padding: 1.75rem 0;
+}
+
+body.document-page .use-case-card-art {
+  width: 100%;
+  max-width: 30rem;
+  min-width: 0;
+  justify-self: center;
+}
+
+body.document-page .use-case-card-art img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 8 / 5;
+  object-fit: contain;
+}
+
 body.document-page .gcard:hover {
   background: var(--soft);
   transform: none;
@@ -377,6 +403,11 @@ body.document-page .gcard .go {
 }
 
 @media (max-width: 800px) {
+  body.document-page .gcard.gcard--illustrated {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+  }
+
   body.document-page .use-case-editorial-grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 1.5rem;
