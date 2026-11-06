@@ -85,4 +85,5 @@ import subprocess
 subprocess.run(['node', '--test', str(ROOT / 'scripts/test_burning_numbers.mjs')], check=True)
 
 subprocess.run(['node', '--test', str(ROOT / 'scripts/test_ember_flow.mjs')], check=True)
+subprocess.run(['python3', str(ROOT / 'scripts/test_stoke_mark.py')], check=True)
 print('brand presentation checks passed: homepage-only providers/ember route, static atmosphere, shared log surface, CSP, lifecycle, and provenance')

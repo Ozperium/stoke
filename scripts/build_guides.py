@@ -44,6 +44,7 @@ def synchronize_shared_asset_urls(text):
         "/presentation.css": PRESENTATION_CSS_URL,
         "/presentation.js": PRESENTATION_JS_URL,
         "/document.css": DOCUMENT_CSS_URL,
+        "/favicon.svg": versioned_asset_url("/favicon.svg"),
     }
     for path, versioned in replacements.items():
         pattern = re.compile(rf'(?P<attribute>href|src)="{re.escape(path)}(?:\?[^\"]*)?"')
@@ -335,6 +336,7 @@ PAGE = """<!doctype html>
 PAGE = PAGE.replace('href="/presentation.css"', f'href="{PRESENTATION_CSS_URL}"')
 PAGE = PAGE.replace('src="/presentation.js"', f'src="{PRESENTATION_JS_URL}"')
 PAGE = PAGE.replace('href="/document.css"', f'href="{DOCUMENT_CSS_URL}"')
+PAGE = synchronize_shared_asset_urls(PAGE)
 
 def article_parts(md):
     """Keep the source's first heading in the shared document hero."""

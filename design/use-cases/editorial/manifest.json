@@ -8,9 +8,9 @@
       "source": "design/use-cases/editorial/local-models-v2.svg",
       "hero": "landing/media/use-cases/local-models-v3.webp",
       "social": "landing/media/use-cases/local-models-og-v4.png",
-      "source_sha256": "10243f64216de984e17d97e785475c7a4dc79fb002303b09e98d0a1e632f3193",
-      "hero_sha256": "aa6192a4120ef55bba275be96f3406a703d1aed8887a217ee60265ef62afb842",
-      "social_sha256": "16a35f02a8b022483be831405613f09186a6fa70ce46907205e53bc9f89515ac"
+      "source_sha256": "b8fc37e4a7e2ad1d58beae770ea8e90b51a75cdc51c5ca39fd76fe2ca7ca0cab",
+      "hero_sha256": "bd1f2e40ef7373bea0a544e880b39791fb774c621b3f5a9c5a8871bbc6720652",
+      "social_sha256": "64ef0b3a95fc5c6ef509b300e05b462b60ce5caa5133ec5462db97bb4cd3831b"
     },
     {
       "slug": "secret-redaction",
@@ -18,9 +18,9 @@
       "source": "design/use-cases/editorial/secret-redaction-v2.svg",
       "hero": "landing/media/use-cases/secret-redaction-v3.webp",
       "social": "landing/media/use-cases/secret-redaction-og-v4.png",
-      "source_sha256": "c0a72f90aabfa38f83b91bd8c4aeaccd85e9520ad249478df2e3de9ed098845a",
-      "hero_sha256": "eed9b553a652c10182c07fa24bcd7e1b6718ce9bb64e1e1fef4a2d4cd0d1b742",
-      "social_sha256": "7259a3b7746bf16a3303a382db5a7db65de683a4394f02cf74bfac1d6a634df7"
+      "source_sha256": "272e36ba774f59d32dfeb0caa9a4f8cbe761ccda86c89fcedde8cb6029d8cfd3",
+      "hero_sha256": "95e3c0a998a6a1d3d78254eb398a98619e1c2fae9cf71fd81ef59623d900fe7b",
+      "social_sha256": "05ed7c21e447b7b0fe9a2bc457113ef773dfd2e9f3434a53ba3139ec60ce1f42"
     },
     {
       "slug": "private-data",
@@ -28,9 +28,9 @@
       "source": "design/use-cases/editorial/private-data-v2.svg",
       "hero": "landing/media/use-cases/private-data-v2.webp",
       "social": "landing/media/use-cases/private-data-og-v3.png",
-      "source_sha256": "bdc1b8ac399f14c86e3ce03a153dafeb1daba4f71bd357ebae8fc40c3373cbdf",
-      "hero_sha256": "61d748c66490e96f9bc61e653bcce53745ef09230109eca91aa24f796f3f46e9",
-      "social_sha256": "c6ed87736e007277919eebf9a195643c4349fcb0da17b86d025a56b656ad375d"
+      "source_sha256": "5fad6d21d66f84dab3201b4407420fddaa644ea80a2241680bede2597bd039a5",
+      "hero_sha256": "9e24975e4c87e4eec0bdd2d95399216474480b9ab0fe28d27a0128f007960e54",
+      "social_sha256": "bd442d34a4033a614593be372046c7187ff23b3d4981bc985b04beb591f7a678"
     },
     {
       "slug": "agent-spend",
@@ -38,9 +38,9 @@
       "source": "design/use-cases/editorial/agent-spend-v2.svg",
       "hero": "landing/media/use-cases/agent-spend-v2.webp",
       "social": "landing/media/use-cases/agent-spend-og-v3.png",
-      "source_sha256": "73614714e187023de1eae542201765a11f33c7f9e3a23a870619ce46d19c5781",
-      "hero_sha256": "2111574f9e318841372024e544c6dfb26399821075c3a39c1305b18f5127c0bc",
-      "social_sha256": "d3d6881678f8f837dce5050b4cbfcbd36f7fb80ef260e8454414f66239ab3359"
+      "source_sha256": "6bb67a087e653ac178898b8973d6c8d5792b6ee8b02d697052c7522a3a4af917",
+      "hero_sha256": "5e68a0ddbfd57a6183a47ca7c3d4852fc2637b3c0a72fc2c112d75b42a1bbc3d",
+      "social_sha256": "3b8afcd7186d5c2277acfa4165f71c82ae9e6a3efe3866a5ca070ba94ad2d4de"
     },
     {
       "slug": "private-model-access",
@@ -48,9 +48,9 @@
       "source": "design/use-cases/editorial/private-model-access-v2.svg",
       "hero": "landing/media/use-cases/private-model-access-v2.webp",
       "social": "landing/media/use-cases/private-model-access-og-v3.png",
-      "source_sha256": "2e76877f9055ed8d16808eec5d7e69b5532f235055b2f58787baff5e0359a0e7",
-      "hero_sha256": "2f17a763895ae9db5bfb9436fa1ae16c84db1d799ddbc172a19b94b92328a00e",
-      "social_sha256": "23d07b2bcfd7aa29ed7d295b9a9bfc23ed61a22a81207abfd6b5f5bf73fa967e"
+      "source_sha256": "0ea9deeb283c3a418ee710d4e0798a47957648a4016bf2055b48a77406f586f0",
+      "hero_sha256": "1b05e289f8886e1da6bc5e7f8252b9cbe56d331a61b518fcd43fb7c9e30c43e0",
+      "social_sha256": "ffb414e6c0c8a6b35ce23a6cd5430ed45077b35ad8348731882ea7d4c3c57d84"
     },
     {
       "slug": "node-failover",
@@ -58,9 +58,9 @@
       "source": "design/use-cases/editorial/node-failover-v2.svg",
       "hero": "landing/media/use-cases/node-failover-v2.webp",
       "social": "landing/media/use-cases/node-failover-og-v3.png",
-      "source_sha256": "289413bea7227ea25800a6096c5daab90045f534b3d87366257279cce681f5a9",
-      "hero_sha256": "a2a46b5ad21f2c21826057c5c15981cb43ec5f6809224fa5c7c07815fad30e7c",
-      "social_sha256": "4126e0e24f0c9350abd34dadd85badfce64dbd63ad8f349a4b8ba42182a01811"
+      "source_sha256": "f6ae685a7e43e4c0121d3e81e8abf2788f943c4039647b3933cfcc8119d5f20a",
+      "hero_sha256": "531fdc8a24d29bea6168b5271d4a211b33df4d6b39bbd09f1e2b0f297f10c7f1",
+      "social_sha256": "a9a66621a5dcc58948caae683a9dd33ab4425823ea7930207b60e40390780dff"
     }
   ]
 }
