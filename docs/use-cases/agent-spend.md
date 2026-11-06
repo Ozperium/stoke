@@ -2,9 +2,10 @@
 title: Stop funding an agent’s retry loop
 description: A coding agent can keep paying to revisit the same error. Put a metered budget and loop protection in front of its next model request.
 slug: agent-spend
-image: /media/use-cases/agent-spend-v1.webp
-og_image: /media/use-cases/agent-spend-og-v2.png
-image_alt: A mechanical usage gauge stopped at a spending boundary.
+image: /media/use-cases/agent-spend-v2.webp
+og_image: /media/use-cases/agent-spend-og-v3.png
+image_alt: Repeated agent requests stop at a metered API limit before the next paid call.
+image_layout: editorial
 persona: Agent builders & agencies
 icon: gauge
 order: 3

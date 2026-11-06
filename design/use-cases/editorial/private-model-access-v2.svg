@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="720" viewBox="0 0 480 300" fill="none"><g font-family="Sora,Arial,sans-serif" font-size="20" fill="#191A18"><title>Apps use gateway keys while the provider key stays at Stoke</title><desc>Three apps have gateway credentials. The separate upstream provider key remains at Stoke before an approved model API call.</desc>
+<text x="78" y="20" text-anchor="middle" font-size="18" fill="#6A655F">Gateway keys</text>
+<rect x="16" y="31" width="124" height="64" rx="8" fill="#FFF" stroke="#191A18" stroke-width="2.5"/>
+<text x="78" y="57" text-anchor="middle">Coding</text><text x="78" y="82" text-anchor="middle" fill="#B63019">Key A</text>
+<rect x="16" y="126" width="124" height="64" rx="8" fill="#FFF" stroke="#191A18" stroke-width="2.5"/>
+<text x="78" y="152" text-anchor="middle">Reports</text><text x="78" y="177" text-anchor="middle" fill="#B63019">Key B</text>
+<rect x="16" y="221" width="124" height="64" rx="8" fill="#FFF" stroke="#191A18" stroke-width="2.5"/>
+<text x="78" y="247" text-anchor="middle">Assistant</text><text x="78" y="272" text-anchor="middle" fill="#B63019">Key C</text>
+<path fill="none" d="M140 63H179M140 158H179M140 253H179m-9-197 9 7-9 7m0 81 9 7-9 7m0 81 9 7-9 7" stroke="#F15332" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="179" y="42" width="144" height="225" rx="12" fill="#FCFCFC" stroke="#191A18" stroke-width="2.5"/>
+<g transform="translate(232 57) scale(1.2)" fill="#F15332"><path d="M5.229 12.164 L8.454 12.213 L13.335 13.404 L17.875 13.436 L22.276 14.458 L26.774 14.788 L27.300 16.073 L26.571 19.101 L25.371 19.741 L20.758 18.789 L16.218 18.757 L10.319 17.625 L5.014 17.284 L4.614 15.107 Z"/><path d="M15.108 5.364 L15.930 8.789 L18.024 13.667 L19.717 18.904 L21.727 25.302 L20.360 26.225 L17.054 26.790 L16.036 23.117 L13.664 17.914 L12.539 13.216 L10.171 7.586 L11.366 6.193 Z"/><path d="M24.661 9.669 L22.683 12.463 L18.914 16.201 L16.534 19.442 L12.297 23.700 L10.379 24.933 L8.424 22.770 L7.986 21.164 L11.354 17.872 L14.670 13.591 L18.454 10.136 L20.886 6.539 L22.766 7.290 Z"/></g><text x="251" y="116" text-anchor="middle" font-weight="600">Stoke</text>
+<rect x="191" y="131" width="120" height="114" rx="8" fill="#F7E6DF"/>
+<circle cx="244" cy="153" r="8" fill="none" stroke="#191A18" stroke-width="2.3"/>
+<path fill="none" d="m250 159 20 15m-9-7 5-7m0 11 5-7" stroke="#191A18" stroke-width="2.3" stroke-linecap="round"/>
+<text x="251" y="203" text-anchor="middle" font-size="19">Provider key</text><text x="251" y="230" text-anchor="middle" fill="#B63019">stays here</text>
+<path fill="none" d="M323 174H355m-9-7 9 7-9 7" stroke="#F15332" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="355" y="130" width="108" height="88" rx="9" fill="#F7E6DF" stroke="#191A18" stroke-width="2.5"/>
+<path fill="none" d="M373 150h54m-54 14h38" stroke="#191A18" stroke-width="2.3" stroke-linecap="round"/>
+<circle cx="447" cy="178" r="3" fill="#F15332"/><text x="409" y="205" text-anchor="middle" font-size="19">Model API</text>
+</g></svg>

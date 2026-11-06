@@ -36,12 +36,14 @@ def versioned_asset_url(path):
 
 PRESENTATION_CSS_URL = versioned_asset_url("/presentation.css")
 PRESENTATION_JS_URL = versioned_asset_url("/presentation.js")
+DOCUMENT_CSS_URL = versioned_asset_url("/document.css")
 
 
 def synchronize_shared_asset_urls(text):
     replacements = {
         "/presentation.css": PRESENTATION_CSS_URL,
         "/presentation.js": PRESENTATION_JS_URL,
+        "/document.css": DOCUMENT_CSS_URL,
     }
     for path, versioned in replacements.items():
         pattern = re.compile(rf'(?P<attribute>href|src)="{re.escape(path)}(?:\?[^\"]*)?"')
@@ -332,6 +334,7 @@ PAGE = """<!doctype html>
 """.replace("<!-- use-cases -->", USE_CASES_MENU)
 PAGE = PAGE.replace('href="/presentation.css"', f'href="{PRESENTATION_CSS_URL}"')
 PAGE = PAGE.replace('src="/presentation.js"', f'src="{PRESENTATION_JS_URL}"')
+PAGE = PAGE.replace('href="/document.css"', f'href="{DOCUMENT_CSS_URL}"')
 
 def article_parts(md):
     """Keep the source's first heading in the shared document hero."""
@@ -402,15 +405,28 @@ def build_use_cases():
             if not os.path.isfile(os.path.join(ROOT, "landing", meta[field].lstrip("/"))):
                 raise ValueError(f"missing use-case asset: {meta[field]}")
         url = f'{SITE}/use-cases/{meta["slug"]}/'
-        hero = (
-            '<section class="document-hero">'
-            '<div class="crumb"><a href="/">Stoke</a> / <a href="/use-cases/">Use cases</a></div>'
-            f'<p class="eyebrow">{esc(meta["persona"])}</p>'
-            f'<h1>{heading}</h1><p class="lede">{esc(meta["description"])}</p>'
+        figure = (
             '<figure class="use-case-figure">'
             f'<img data-use-case-image src="{attr(meta["image"])}" alt="{attr(meta["image_alt"])}" width="1152" height="720" decoding="async">'
-            '</figure></section>'
+            '</figure>'
         )
+        copy = (
+            f'<p class="eyebrow">{esc(meta["persona"])}</p>'
+            f'<h1>{heading}</h1><p class="lede">{esc(meta["description"])}</p>'
+        )
+        if meta.get("image_layout") == "editorial":
+            hero = (
+                '<section class="document-hero use-case-hero use-case-hero--editorial">'
+                '<div class="crumb"><a href="/">Stoke</a> / <a href="/use-cases/">Use cases</a></div>'
+                f'<div class="use-case-editorial-grid"><div class="use-case-copy">{copy}</div>{figure}</div>'
+                '</section>'
+            )
+        else:
+            hero = (
+                '<section class="document-hero">'
+                '<div class="crumb"><a href="/">Stoke</a> / <a href="/use-cases/">Use cases</a></div>'
+                f'{copy}{figure}</section>'
+            )
         page = template.format(
             title=attr(meta["title"]), description=attr(meta["description"]),
             canonical=attr(url), site=attr(SITE), og_type="article",
