@@ -458,7 +458,7 @@ def build_use_cases():
         '<section class="document-hero"><div class="crumb"><a href="/">Stoke</a> / Use cases</div>'
         '<h1>Your work.<br>Your use case.</h1>'
         '<p class="lede">A spare computer, a confidential document, an agent that will not stop retrying. Start with the problem you need to solve.</p></section>'
-        f'<div class="document-content use-case-list"><div class="gwrap">{cards}</div></div>',
+        f'<div class="document-content use-case-list"><div class="gwrap">{cards}</div></div>'
     )
     page = template.format(
         title=attr(meta["title"]), description=attr(meta["description"]),

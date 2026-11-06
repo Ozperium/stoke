@@ -58,6 +58,7 @@ class UseCasesTests(unittest.TestCase):
 
     def test_listing_reuses_each_article_illustration(self):
         raw = (LANDING / 'use-cases' / 'index.html').read_text()
+        self.assertRegex(raw, r'<main\b[^>]*>\s*<section\b')
         images = [attrs for tag, attrs in Page(raw).tags if tag == 'img' and 'data-use-case-card-image' in attrs]
         self.assertEqual(len(images), len(CASES))
         for slug in CASES:
