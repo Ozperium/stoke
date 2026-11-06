@@ -1,0 +1,66 @@
+{
+  "status": "Approved six-case editorial illustration set; production publication authorized",
+  "articles_unchanged": true,
+  "items": [
+    {
+      "slug": "local-models",
+      "method": "Deterministic explanatory SVG, Sora font rasterization; no model-generated interface",
+      "source": "design/use-cases/editorial/local-models-v2.svg",
+      "hero": "landing/media/use-cases/local-models-v3.webp",
+      "social": "landing/media/use-cases/local-models-og-v4.png",
+      "source_sha256": "10243f64216de984e17d97e785475c7a4dc79fb002303b09e98d0a1e632f3193",
+      "hero_sha256": "aa6192a4120ef55bba275be96f3406a703d1aed8887a217ee60265ef62afb842",
+      "social_sha256": "16a35f02a8b022483be831405613f09186a6fa70ce46907205e53bc9f89515ac"
+    },
+    {
+      "slug": "secret-redaction",
+      "method": "Deterministic explanatory SVG, Sora font rasterization; no model-generated interface",
+      "source": "design/use-cases/editorial/secret-redaction-v2.svg",
+      "hero": "landing/media/use-cases/secret-redaction-v3.webp",
+      "social": "landing/media/use-cases/secret-redaction-og-v4.png",
+      "source_sha256": "c0a72f90aabfa38f83b91bd8c4aeaccd85e9520ad249478df2e3de9ed098845a",
+      "hero_sha256": "eed9b553a652c10182c07fa24bcd7e1b6718ce9bb64e1e1fef4a2d4cd0d1b742",
+      "social_sha256": "7259a3b7746bf16a3303a382db5a7db65de683a4394f02cf74bfac1d6a634df7"
+    },
+    {
+      "slug": "private-data",
+      "method": "Deterministic explanatory SVG and Sora rasterization",
+      "source": "design/use-cases/editorial/private-data-v2.svg",
+      "hero": "landing/media/use-cases/private-data-v2.webp",
+      "social": "landing/media/use-cases/private-data-og-v3.png",
+      "source_sha256": "bdc1b8ac399f14c86e3ce03a153dafeb1daba4f71bd357ebae8fc40c3373cbdf",
+      "hero_sha256": "61d748c66490e96f9bc61e653bcce53745ef09230109eca91aa24f796f3f46e9",
+      "social_sha256": "c6ed87736e007277919eebf9a195643c4349fcb0da17b86d025a56b656ad375d"
+    },
+    {
+      "slug": "agent-spend",
+      "method": "Deterministic explanatory SVG and Sora rasterization",
+      "source": "design/use-cases/editorial/agent-spend-v2.svg",
+      "hero": "landing/media/use-cases/agent-spend-v2.webp",
+      "social": "landing/media/use-cases/agent-spend-og-v3.png",
+      "source_sha256": "73614714e187023de1eae542201765a11f33c7f9e3a23a870619ce46d19c5781",
+      "hero_sha256": "2111574f9e318841372024e544c6dfb26399821075c3a39c1305b18f5127c0bc",
+      "social_sha256": "d3d6881678f8f837dce5050b4cbfcbd36f7fb80ef260e8454414f66239ab3359"
+    },
+    {
+      "slug": "private-model-access",
+      "method": "Deterministic explanatory SVG and Sora rasterization",
+      "source": "design/use-cases/editorial/private-model-access-v2.svg",
+      "hero": "landing/media/use-cases/private-model-access-v2.webp",
+      "social": "landing/media/use-cases/private-model-access-og-v3.png",
+      "source_sha256": "2e76877f9055ed8d16808eec5d7e69b5532f235055b2f58787baff5e0359a0e7",
+      "hero_sha256": "2f17a763895ae9db5bfb9436fa1ae16c84db1d799ddbc172a19b94b92328a00e",
+      "social_sha256": "23d07b2bcfd7aa29ed7d295b9a9bfc23ed61a22a81207abfd6b5f5bf73fa967e"
+    },
+    {
+      "slug": "node-failover",
+      "method": "Deterministic explanatory SVG and Sora rasterization",
+      "source": "design/use-cases/editorial/node-failover-v2.svg",
+      "hero": "landing/media/use-cases/node-failover-v2.webp",
+      "social": "landing/media/use-cases/node-failover-og-v3.png",
+      "source_sha256": "289413bea7227ea25800a6096c5daab90045f534b3d87366257279cce681f5a9",
+      "hero_sha256": "a2a46b5ad21f2c21826057c5c15981cb43ec5f6809224fa5c7c07815fad30e7c",
+      "social_sha256": "4126e0e24f0c9350abd34dadd85badfce64dbd63ad8f349a4b8ba42182a01811"
+    }
+  ]
+}

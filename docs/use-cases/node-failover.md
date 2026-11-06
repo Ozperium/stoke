@@ -2,9 +2,10 @@
 title: A model host went offline. Now what?
 description: A teammate closes the laptop serving your model. Give eligible requests another approved destination without reconfiguring every app.
 slug: node-failover
-image: /media/use-cases/node-failover-v1.webp
-og_image: /media/use-cases/node-failover-og-v2.png
-image_alt: A connection moving from an unavailable model server to an available node.
+image: /media/use-cases/node-failover-v2.webp
+og_image: /media/use-cases/node-failover-og-v3.png
+image_alt: A failed connection to an offline host is retried on an approved backup before streaming.
+image_layout: editorial
 persona: Platform & DevEx teams
 icon: nodes
 order: 5

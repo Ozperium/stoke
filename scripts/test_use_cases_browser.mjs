@@ -17,6 +17,7 @@ const cases = [
   ['node-failover', 'A model host went offline. Now what?'],
   ['secret-redaction', 'The error log came with an API key'],
 ];
+const editorialCases = cases.map(([slug]) => slug);
 const types = {'.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2'};
 const server = createServer(async (request, response) => {
   const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
@@ -155,4 +156,55 @@ for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
       await browser.close();
     }
   });
+
+  for (const width of [390, 768, 1024, 1280]) {
+    test(`${name}: editorial layout at ${width}px`, {timeout: 90000}, async () => {
+      const browser = await engine.launch({headless: true});
+      try {
+        const page = await browser.newPage({viewport: {width, height: 950}, reducedMotion: 'reduce'});
+        for (const slug of editorialCases) {
+          await page.goto(base + `/use-cases/${slug}/`);
+          const result = await page.evaluate(async () => {
+            const image = document.querySelector('[data-use-case-image]');
+            await image.decode();
+            await document.fonts.ready;
+            const copy = document.querySelector('.use-case-copy');
+            const figure = document.querySelector('.use-case-figure');
+            const heading = document.querySelector('h1');
+            const grid = document.querySelector('.use-case-editorial-grid');
+            const imageStyle = getComputedStyle(image);
+            const figureStyle = getComputedStyle(figure);
+            return {
+              imageDecoded: image.complete && image.naturalWidth === 1152 && image.naturalHeight === 720,
+              overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+              border: figureStyle.borderTopWidth,
+              imageBorder: imageStyle.borderTopWidth,
+              copy: copy.getBoundingClientRect().toJSON(),
+              figure: figure.getBoundingClientRect().toJSON(),
+              grid: grid.getBoundingClientRect().toJSON(),
+              heading: heading.getBoundingClientRect().toJSON(),
+              main: document.querySelector('main').getBoundingClientRect().toJSON(),
+              body: document.querySelector('.document-content').getBoundingClientRect().toJSON(),
+            };
+          });
+          assert.equal(result.imageDecoded, true, slug);
+          assert.equal(result.overflow, false, `${slug}: ${JSON.stringify(result)}`);
+          assert.equal(result.border, '0px', `${slug}: figure frame remains`);
+          assert.equal(result.imageBorder, '0px', `${slug}: image frame remains`);
+          assert.ok(result.body.top < 950, `${slug}: article body is not visible in viewport: ${JSON.stringify(result)}`);
+          if (width <= 800) {
+            assert.ok(result.figure.top >= result.copy.bottom - 1, `${slug}: image is not stacked below copy: ${JSON.stringify(result)}`);
+            assert.equal(result.grid.width, result.copy.width, `${slug}: stacked grid width drift`);
+          } else {
+            assert.ok(result.copy.width >= 360, `${slug}: headline column is squeezed: ${JSON.stringify(result)}`);
+            assert.ok(Math.abs(result.grid.width - result.main.width) < 1, `${slug}: editorial header is trapped in the reading-width column`);
+            assert.ok(result.figure.left > result.copy.right, `${slug}: image is not beside copy: ${JSON.stringify(result)}`);
+            assert.ok(result.figure.top < result.copy.bottom && result.figure.bottom > result.copy.top, `${slug}: columns do not share the editorial row: ${JSON.stringify(result)}`);
+          }
+        }
+      } finally {
+        await browser.close();
+      }
+    });
+  }
 }
