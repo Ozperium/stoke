@@ -29,7 +29,7 @@ test('initializer recognizes a composition that is the root itself', () => {
   assert.equal(findComposition({matches:()=>false,querySelector:()=>child}), child);
 });
 
-test('browser mounts the actual ember module and pauses/resumes painted output', {skip: process.env.STOKE_BROWSER_TESTS !== '1'}, async () => {
+test('homepage mounts the accepted route ember and pauses/resumes actual SVG output', {skip: process.env.STOKE_BROWSER_TESTS !== '1'}, async () => {
   const {chromium} = await import('playwright');
   const {createServer} = await import('node:http');
   const {readFileSync} = await import('node:fs');
@@ -44,10 +44,12 @@ test('browser mounts the actual ember module and pauses/resumes painted output',
     browser=await chromium.launch();const page=await browser.newPage({viewport:{width:1280,height:1100}}),errors=[];
     page.on('pageerror',e=>errors.push(e.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/`);await page.evaluate(()=>document.fonts.ready);
-    await page.waitForFunction(()=>document.documentElement.hasAttribute('data-burning-ready'),{},{timeout:5000});
-    const button=page.locator('.burning-toggle'),canvas=page.locator('.burning-numbers');assert(await button.isVisible());assert(await canvas.evaluate(c=>c.width>300));
-    const pixels=()=>canvas.evaluate(c=>c.toDataURL());await page.waitForTimeout(200);const moving=await pixels();await page.waitForTimeout(240);assert.notEqual(await pixels(),moving);
-    await button.click();await page.waitForTimeout(80);const frozen=await pixels();await page.waitForTimeout(250);assert.equal(await pixels(),frozen);
-    await button.click();await page.waitForTimeout(240);assert.notEqual(await pixels(),frozen);assert.deepEqual(errors,[]);
+    await page.waitForFunction(()=>document.querySelector('[data-product-visual]').hasAttribute('data-ember-ready'),{},{timeout:5000});
+    const button=page.locator('.burning-toggle'),overlay=page.locator('[data-ember-overlay]');assert(await button.isVisible());assert.equal(await page.locator('.burning-numbers').count(),0);
+    await page.locator('[role=tab][data-scenario=privacy]').click();
+    await page.waitForFunction(()=>document.querySelector('[data-product-visual]').dataset.phase==='dispatch');
+    await button.click();await page.waitForFunction(()=>document.querySelector('[data-product-visual]').dataset.paused==='true');
+    const frozen=await overlay.innerHTML();await page.waitForTimeout(250);assert.equal(await overlay.innerHTML(),frozen);
+    await button.click();await page.waitForFunction(before=>document.querySelector('[data-ember-overlay]').innerHTML!==before,frozen);assert.deepEqual(errors,[]);
   } finally {if(browser)await browser.close();await new Promise(done=>server.close(done));}
 });

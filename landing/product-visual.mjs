@@ -74,7 +74,10 @@ function routeBetween(from, to, canvas) {
     const targetSide = useLeftGutter ? 'left' : 'right';
     const b = pointFor(to, targetSide, canvasRect);
     // Stay inside the inter-actor gap before descending beside the labels.
-    return `M${a.x},${a.y} C${a.x},${a.y + 3} ${gutter},${a.y + 3} ${gutter},${a.y + 6} L${gutter},${b.y} L${b.x},${b.y}`;
+    const emberFlow = !!canvas.closest('[data-ember-flow]');
+    const turn = emberFlow ? 10 : 3;
+    const clearance = emberFlow ? 12 : 6;
+    return `M${a.x},${a.y} C${a.x},${a.y + turn} ${gutter},${a.y + turn} ${gutter},${a.y + clearance} L${gutter},${b.y} L${b.x},${b.y}`;
   }
   const b = pointFor(to, 'top', canvasRect);
   const bend = Math.max(24, (b.y - a.y) * .48);
