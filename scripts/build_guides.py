@@ -446,8 +446,8 @@ def build_use_cases():
         urls.append(url)
 
     cards = ''.join(
-        f'<a class="gcard" href="/use-cases/{attr(meta["slug"])}/">'
-        f'<div class="gart" aria-hidden="true">{ICONS[meta["icon"]]}</div><div class="gbody">'
+        f'<a class="gcard gcard--illustrated" href="/use-cases/{attr(meta["slug"])}/">'
+        f'<div class="use-case-card-art" aria-hidden="true"><img data-use-case-card-image src="{attr(meta["image"])}" alt="" width="1152" height="720" loading="lazy" decoding="async"></div><div class="gbody">'
         f'<p class="eyebrow">{esc(meta["persona"])}</p><h2>{esc(meta["title"])}</h2>'
         f'<p>{esc(meta["description"])}</p><span class="go">Explore use case →</span></div></a>'
         for meta, _ in USE_CASES
@@ -458,7 +458,7 @@ def build_use_cases():
         '<section class="document-hero"><div class="crumb"><a href="/">Stoke</a> / Use cases</div>'
         '<h1>Your work.<br>Your use case.</h1>'
         '<p class="lede">A spare computer, a confidential document, an agent that will not stop retrying. Start with the problem you need to solve.</p></section>'
-        f'<div class="document-content"><div class="gwrap">{cards}</div></div>'
+        f'<div class="document-content use-case-list"><div class="gwrap">{cards}</div></div>',
     )
     page = template.format(
         title=attr(meta["title"]), description=attr(meta["description"]),

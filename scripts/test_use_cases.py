@@ -56,6 +56,23 @@ class UseCasesTests(unittest.TestCase):
         for slug in CASES:
             self.assertIn(f'href="/use-cases/{slug}/"', index)
 
+    def test_listing_reuses_each_article_illustration(self):
+        raw = (LANDING / 'use-cases' / 'index.html').read_text()
+        images = [attrs for tag, attrs in Page(raw).tags if tag == 'img' and 'data-use-case-card-image' in attrs]
+        self.assertEqual(len(images), len(CASES))
+        for slug in CASES:
+            detail = Page((LANDING / 'use-cases' / slug / 'index.html').read_text())
+            hero = next(attrs for tag, attrs in detail.tags if tag == 'img' and 'data-use-case-image' in attrs)
+            matches = [image for image in images if image['src'] == hero['src']]
+            self.assertEqual(len(matches), 1, slug)
+            self.assertEqual((matches[0]['width'], matches[0]['height']), ('1152', '720'))
+            self.assertEqual(matches[0].get('alt'), '')
+            self.assertEqual(matches[0].get('loading'), 'lazy')
+        self.assertNotIn('class="gart"', raw)
+        guides = (LANDING / 'guides' / 'index.html').read_text()
+        self.assertIn('class="gart"', guides)
+        self.assertNotIn('data-use-case-card-image', guides)
+
     def test_detail_pages_have_scenarios_boundaries_and_next_action(self):
         for slug, (persona, title) in CASES.items():
             with self.subTest(case=slug):
