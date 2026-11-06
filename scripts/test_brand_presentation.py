@@ -49,7 +49,9 @@ assert 'Release scope:' not in gateway_html and 'Read it in context' not in gate
 assert 'class="provider-strip"' in home_html
 assert 'OpenAI API' in home_html and 'Anthropic API' in home_html and 'Ollama' in home_html
 assert 'class="provider-strip"' not in cloud_html, 'provider row must stay homepage-only'
-assert 'data-burning-numbers' in home_html and '/burning-numbers.mjs' in home_html
+assert 'data-ember-flow' in home_html and '/ember-flow.mjs' in home_html
+assert '/burning-numbers.mjs' not in home_html and 'class="burning-numbers"' not in home_html
+assert '/hero-atmosphere.css' in home_html and '/ember-flow.css' in home_html
 assert 'data-burning-numbers' not in cloud_html and '/burning-numbers.mjs' not in cloud_html
 assert 'class="burning-toggle"' in home_html
 
@@ -57,11 +59,15 @@ css = (LANDING / 'product-visual.css').read_text()
 assert '.product-visual__core::before { content: none; }' in css
 assert '.log-panel-surface {' in css and 'pointer-events: none' in css
 
-controller = (LANDING / 'burning-numbers.mjs').read_text()
-for marker in ('STATIC_TIME', 'ResizeObserver', 'MutationObserver', 'IntersectionObserver', 'visibilitychange', 'cancelAnimationFrame', 'prefers-reduced-motion', 'data-phase'):
+controller = (LANDING / 'ember-flow.mjs').read_text()
+for marker in ('wakeDistances', 'ResizeObserver', 'MutationObserver', 'IntersectionObserver', 'visibilitychange', 'cancelAnimationFrame', 'prefers-reduced-motion', 'data-phase'):
     assert marker in controller, f'missing burning-number behavior: {marker}'
-assert '.product-visual__route' in controller, 'semantic routes require decorative exclusion'
-assert 'PHASE_OFFSET' not in controller, 'decoration must not track inference phases'
+assert "querySelectorAll('[data-route]')" in controller, 'effect must use actual request routes'
+assert 'state.visiblePaths.includes(packet.path)' in controller
+assert 'window.flowStudy' not in controller and "get('flow')" not in controller
+assert 'digits' not in controller, 'only the accepted ember option ships'
+assert '@keyframes' not in (LANDING / 'hero-atmosphere.css').read_text(), 'background stays static'
+assert 'PHASE_OFFSET' not in controller, 'do not add independent request streams'
 assert 'pageshow' in controller, 'restore animation after page-cache return'
 assert 'getBoundingClientRect()' in controller
 assert re.search(r'function tick\(now\).*?getBoundingClientRect', controller, re.S) is None, 'animation tick must not read layout'
@@ -78,4 +84,5 @@ for asset in json.loads((LANDING / 'brands' / 'sources.json').read_text()):
 import subprocess
 subprocess.run(['node', '--test', str(ROOT / 'scripts/test_burning_numbers.mjs')], check=True)
 
-print('brand presentation checks passed: homepage-only providers/burning state, shared log surface, CSP-safe brand markup, lifecycle controls, and icon provenance')
+subprocess.run(['node', '--test', str(ROOT / 'scripts/test_ember_flow.mjs')], check=True)
+print('brand presentation checks passed: homepage-only providers/ember route, static atmosphere, shared log surface, CSP, lifecycle, and provenance')

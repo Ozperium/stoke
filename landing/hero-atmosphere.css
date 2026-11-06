@@ -1,0 +1,28 @@
+/* Approved homepage atmosphere; static and independent of the request animation. */
+body.brand-presentation-page{position:relative;isolation:isolate;background:#FCFCFC}
+body.brand-presentation-page::before,
+body.brand-presentation-page::after{content:"";position:absolute;z-index:-1;pointer-events:none;inset:0 0 auto;height:1150px;mask-image:linear-gradient(#000 0%,#000 64%,transparent 100%)}
+body.brand-presentation-page::before{
+ background:
+  linear-gradient(163deg,transparent 26%,rgba(241,83,50,0) 33%,rgba(241,83,50,.115) 46%,rgba(241,83,50,.055) 53%,transparent 65%),
+  linear-gradient(122deg,#FCFCFC 10%,rgba(252,252,252,.96) 29%,rgba(245,246,247,.4) 54%,rgba(215,218,223,.75) 88%),
+  #FCFCFC;
+}
+body.brand-presentation-page::after{
+ background:
+  linear-gradient(148deg,transparent 0 35%,rgba(255,255,255,.55) 35.1%,rgba(255,255,255,.06) 56%,transparent 65%),
+  linear-gradient(148deg,transparent 0 58%,rgba(116,122,131,.045) 58.1%,transparent 75%);
+}
+.brand-presentation-page .site-nav{background:transparent}
+.brand-presentation-page .nav-inner{border-color:rgba(103,103,98,.17)}
+.brand-presentation-page .product-visual__frame{border-color:rgba(237,238,239,.8);box-shadow:0 0 0 1px rgba(83,88,96,.16),0 20px 60px -35px rgba(25,25,25,.17)}
+.brand-presentation-page .site-footer{position:relative;background:#FCFCFC}
+@media(max-width:960px){
+ body.brand-presentation-page::before,body.brand-presentation-page::after{height:1500px}
+ body.brand-presentation-page::before{background:linear-gradient(165deg,transparent 24%,rgba(241,83,50,.09) 43%,rgba(241,83,50,.035) 54%,transparent 66%),linear-gradient(118deg,#FCFCFC 5%,rgba(252,252,252,.9) 25%,rgba(217,220,225,.6) 95%),#FCFCFC}
+}
+@media(max-width:700px){
+ body.brand-presentation-page::before,body.brand-presentation-page::after{height:1400px}
+ body.brand-presentation-page::before{background:linear-gradient(163deg,transparent 22%,rgba(241,83,50,.105) 40%,rgba(241,83,50,.04) 53%,transparent 66%),linear-gradient(118deg,#FCFCFC 0%,rgba(252,252,252,.9) 27%,rgba(217,220,225,.65) 100%),#FCFCFC}
+ .brand-presentation-page .nav-links{background:#FCFCFC}
+}

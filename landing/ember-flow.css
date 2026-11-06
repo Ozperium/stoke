@@ -1,0 +1,5 @@
+/* Progressive enhancement: keep the original packet if this module cannot mount. */
+[data-ember-ready] .product-visual__routes [data-packet]{opacity:0!important}
+.brand-presentation-page .brand-mark::after{animation:none!important;opacity:.35}
+.ember-flow__overlay,.ember-flow__outline{pointer-events:none}
+@media(prefers-reduced-motion:reduce){.ember-flow__overlay,.ember-flow__outline{opacity:0!important}}
