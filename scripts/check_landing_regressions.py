@@ -88,7 +88,7 @@ assert "EVENTS.has(body.event)" in handler and "body.event" in handler
 assert "document.cookie" not in tracking and "sessionStorage" not in tracking
 assert "stoke_analytics_opt_out" in tracking and "localStorage" in tracking
 assert "window.location.protocol === 'https:'" in tracking and "STOKE_ANALYTICS_CONFIG" not in tracking
-assert "MAX_REQUEST_BYTES" in handler and "redirect: 'error'" in handler
+assert "MAX_REQUEST_BYTES" in handler and "redirect: 'manual'" in handler
 assert "requestOriginIsAllowed" in handler and "requestPrivacyBlocked" in handler
 wrangler = (ROOT / "wrangler.toml").read_text()
 assert "d1_databases" in wrangler and "c04effbf-1293-4b35-84d3-9fb47519ed73" in wrangler
