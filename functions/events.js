@@ -75,7 +75,7 @@ async function forwardToPostHog(env, event, analyticsId, path, source, target) {
           target,
         },
       }),
-      redirect: 'error',
+      redirect: 'manual',
       signal: controller.signal,
     });
   } catch {
