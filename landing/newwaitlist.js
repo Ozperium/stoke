@@ -71,6 +71,9 @@
 
     setError('');
     const body = new URLSearchParams(new FormData(form));
+    const analyticsId = window.stokeAnalytics?.getAnonymousId?.() || '';
+    if (analyticsId) body.set('analytics_id', analyticsId);
+    else body.delete('analytics_id');
     pending = true;
     fields.disabled = true;
     submit.disabled = true;

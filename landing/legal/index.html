@@ -44,6 +44,13 @@
       <h2>Scope</h2>
       <p>Stoke's self-hosted data plane does not receive or retain your prompts, provider credentials, or model traffic. The public site contains documentation and installation files; it does not provide a hosted gateway or account service.</p>
       <p>If you submit the Cloud waitlist, the separate endpoint receives your email address, selected solo/team persona, optional use-case description, and consent so a request can be reviewed. The linked <a href="/api/waitlist">server privacy notice</a> explains that purpose, retention for up to 90 days with daily cleanup, Cloudflare processing, and hashed anti-abuse handling. Deleted records may remain in Cloudflare recovery backups under its retention policies. Waitlist requests are reviewed manually; approval does not automatically grant, start, or email Cloud access. The form remains unavailable until the server confirms the matching privacy-notice version.</p>
+      <h2>Optional website analytics</h2>
+      <p>When enabled, Stoke sends a small set of anonymous website events to PostHog through Stoke's server: approved event names, a fixed public pathname, and limited fixed labels. It does not send your IP address, raw user agent, email address, form values, referrer, or arbitrary URL, query, hash, or other properties. The temporary ID is kept in memory only, is not stored in cookies or browser storage, and is used only for analytics. Browser Do Not Track and Global Privacy Control always keep this off.</p>
+      <div class="doc-actions">
+        <button class="button button-secondary" type="button" data-analytics-opt-out>Turn off optional analytics</button>
+        <button class="button button-secondary" type="button" data-analytics-enable hidden>Turn on optional analytics</button>
+        <p data-analytics-status role="status" aria-live="polite">Optional analytics is on unless a browser preference blocks it.</p>
+      </div>
       <p>Nothing on this site is a warranty that a configuration is secure or suitable for a particular workload. Review the source, test your configuration, and keep credentials out of configuration files where environment variables are available.</p>
     </section>
   </main>
