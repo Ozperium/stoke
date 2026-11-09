@@ -39,6 +39,9 @@ pub struct SpendReservation {
     /// provider call (ADR 0001). `None` when no durable hold was taken
     /// (zero amount or unlimited key).
     ledger: Option<std::sync::Arc<crate::ledger::Ledger>>,
+    reservation_id: Option<i64>,
+    dispatched: bool,
+    active: bool,
 }
 
 impl std::fmt::Debug for SpendReservation {
@@ -54,22 +57,70 @@ impl SpendReservation {
     pub fn amount(&self) -> f64 {
         self.amount
     }
+
+    /// Mark this request as having crossed the provider-dispatch boundary.
+    /// Dropping it afterward retains its durable hold unless conservative full
+    /// settlement succeeds.
+    pub fn mark_dispatched(&mut self) {
+        self.dispatched = true;
+    }
+
+    /// Settle this request's exact durable hold and consume the reservation.
+    /// A failed settlement leaves the hold active; `Drop` then retains it (or
+    /// conservatively settles the full hold as estimated).
+    pub fn settle(mut self, cost_usd: f64, estimated: bool) -> Result<(), String> {
+        if !(cost_usd >= 0.0) || !cost_usd.is_finite() {
+            return Err("invalid settlement amount".to_string());
+        }
+        if let (Some(ledger), Some(reservation_id)) = (&self.ledger, self.reservation_id) {
+            ledger.settle_reservation(reservation_id, cost_usd, estimated)?;
+        }
+        self.budget
+            .record_spend_memory(&self.key, cost_usd, estimated);
+        self.budget.release(&self.key, self.amount);
+        self.reservation_id = None;
+        self.active = false;
+        Ok(())
+    }
 }
 
 impl Drop for SpendReservation {
     fn drop(&mut self) {
-        self.budget.release(&self.key, self.amount);
-        // Mirror the release durably: without this a refusal/early-return
-        // after a durable reserve would leave the hold counting forever.
-        if let Some(ledger) = self.ledger.take() {
-            let key_id = self.budget.durable_key_id(&self.key);
-            if let Err(e) = ledger.release(&key_id, self.amount) {
-                tracing::error!(
-                    "ledger: durable release failed for key_id {}: {} — run `stoke ledger reconcile`",
-                    &key_id[..12.min(key_id.len())],
-                    e
-                );
+        if !self.active {
+            return;
+        }
+        let mut resolved = false;
+        if self.dispatched {
+            if let (Some(ledger), Some(reservation_id)) = (&self.ledger, self.reservation_id) {
+                match ledger.settle_reservation(reservation_id, self.amount, true) {
+                    Ok(()) => {
+                        self.budget
+                            .record_spend_memory(&self.key, self.amount, true);
+                        resolved = true;
+                    }
+                    Err(e) => tracing::error!(
+                        "ledger: dispatched reservation {} could not be conservatively settled: {e}; hold retained",
+                        reservation_id
+                    ),
+                }
+            } else {
+                self.budget
+                    .record_spend_memory(&self.key, self.amount, true);
+                resolved = true;
             }
+        } else if let (Some(ledger), Some(reservation_id)) = (&self.ledger, self.reservation_id) {
+            match ledger.cancel_reservation(reservation_id) {
+                Ok(()) => resolved = true,
+                Err(e) => tracing::error!(
+                    "ledger: reservation {} cancel failed: {e}; hold retained",
+                    reservation_id
+                ),
+            }
+        } else {
+            resolved = true;
+        }
+        if resolved {
+            self.budget.release(&self.key, self.amount);
         }
     }
 }
@@ -454,27 +505,31 @@ impl BudgetGuard {
             })
     }
 
-    /// Record a cost for an API key (call after the request completes).
-    /// When the key holds a durable reservation (ADR 0001), the charge is
-    /// atomically converted in the ledger first: spend without releasing the
-    /// hold would double-count the money.
+    /// Record a cost for an API key without consuming any reservation. A
+    /// request-owned reservation must use `SpendReservation::settle` instead.
     pub fn record_spend(&self, key: &str, cost_usd: f64) {
+        self.record_spend_memory(key, cost_usd, false);
+        if let Some(ledger) = &self.ledger {
+            let key_id = self.durable_key_id(key);
+            if let Err(e) = ledger.record_spend(&key_id, cost_usd, false) {
+                tracing::error!(
+                    "ledger: plain spend failed for key_id {}: {} — run `stoke ledger reconcile`",
+                    &key_id[..12.min(key_id.len())],
+                    e
+                );
+            }
+        }
+    }
+
+    fn record_spend_memory(&self, key: &str, cost_usd: f64, estimated: bool) {
         {
             let mut spend = self.spend.write().unwrap();
             let entry = spend.entry(key.to_string()).or_insert(0.0);
             *entry += cost_usd;
         }
-        if let Some(ledger) = &self.ledger {
-            let key_id = self.durable_key_id(key);
-            if let Err(e) = ledger.charge_and_release(&key_id, cost_usd) {
-                // The in-memory figure already counts this; the durable one
-                // must too. A failed conversion is a hard error: log loudly.
-                tracing::error!(
-                    "ledger: charge_and_release failed for key_id {}: {} — durable spend may lag; run `stoke ledger reconcile`",
-                    &key_id[..12.min(key_id.len())],
-                    e
-                );
-            }
+        if estimated {
+            let mut est = self.estimated.write().unwrap();
+            *est.entry(key.to_string()).or_insert(0.0) += cost_usd;
         }
     }
 
@@ -524,20 +579,24 @@ impl BudgetGuard {
         }
         if let Some(ledger) = ledger {
             let key_id = self.durable_key_id(key);
-            // The ledger serializes the spend/holds read, cap comparison, and
-            // reservation insert in one IMMEDIATE transaction.
-            if !ledger.reserve_if_within_limit(&key_id, amount, limit)? {
-                return Err(format!(
-                    "Budget exceeded (durable ledger): committed spend plus hold for this request exceeds ${:.4} for key_id {}",
-                    limit,
-                    &key_id[..12.min(key_id.len())]
-                ));
-            }
+            let reservation_id = ledger
+                .reserve_if_fits(&key_id, amount, limit)?
+                .ok_or_else(|| {
+                    format!(
+                        "Budget exceeded (durable ledger): request for ${:.4} exceeds ${:.4} for key_id {}",
+                        amount,
+                        limit,
+                        &key_id[..12.min(key_id.len())]
+                    )
+                })?;
             return Ok(Some(SpendReservation {
                 budget: Arc::clone(self),
                 key: key.to_string(),
                 amount,
                 ledger: Some(std::sync::Arc::clone(ledger)),
+                reservation_id: Some(reservation_id),
+                dispatched: false,
+                active: true,
             }));
         }
         // Hold the spend guard across the reserved write. Reading `spent` into a
@@ -564,6 +623,9 @@ impl BudgetGuard {
             key: key.to_string(),
             amount,
             ledger: None,
+            reservation_id: None,
+            dispatched: false,
+            active: true,
         }))
     }
 
@@ -592,9 +654,17 @@ impl BudgetGuard {
     /// response and never reported its token usage. It counts against the cap,
     /// and it is also tallied separately so `/v1/budget` can admit it is a guess.
     pub fn record_spend_estimated(&self, key: &str, cost_usd: f64) {
-        self.record_spend(key, cost_usd);
-        let mut est = self.estimated.write().unwrap();
-        *est.entry(key.to_string()).or_insert(0.0) += cost_usd;
+        self.record_spend_memory(key, cost_usd, true);
+        if let Some(ledger) = &self.ledger {
+            let key_id = self.durable_key_id(key);
+            if let Err(e) = ledger.record_spend(&key_id, cost_usd, true) {
+                tracing::error!(
+                    "ledger: estimated spend failed for key_id {}: {} — run `stoke ledger reconcile`",
+                    &key_id[..12.min(key_id.len())],
+                    e
+                );
+            }
+        }
     }
 
     /// Of a key's cumulative spend, how much was estimated rather than reported.
@@ -710,8 +780,9 @@ impl Auth {
         let keys = std::env::var("STOKE_API_KEYS")
             .unwrap_or_default()
             .split(',')
+            .map(str::trim)
             .filter(|s| !s.is_empty())
-            .map(|s| s.trim().to_string())
+            .map(str::to_string)
             .collect();
         Self {
             keys: RwLock::new(keys),
@@ -741,7 +812,7 @@ impl Auth {
             .map(|s| s.trim().to_string());
 
         match token {
-            Some(t) if keys.contains(&t) => Some(t),
+            Some(t) if !t.is_empty() && keys.contains(&t) => Some(t),
             _ => None,
         }
     }
@@ -799,6 +870,19 @@ impl Auth {
 mod tests {
     use super::*;
 
+    use axum::http::HeaderMap;
+
+    #[test]
+    fn malformed_explicit_gateway_headers_never_fall_back_to_authorization() {
+        let auth = Auth::with_keys(&["gateway-key"]);
+        for name in ["x-stoke-key", "x-api-key"] {
+            let mut headers = HeaderMap::new();
+            headers.insert("authorization", "Bearer gateway-key".parse().unwrap());
+            headers.insert(name, axum::http::HeaderValue::from_bytes(b"\xff").unwrap());
+            assert!(auth.validate_gateway_headers(&headers).is_none());
+        }
+    }
+
     /// `STOKE_DEV` / `STOKE_API_KEYS` are process-global, so the tests that
     /// mutate them must not run concurrently with each other.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -811,18 +895,19 @@ mod tests {
         guard.attach_ledger(std::sync::Arc::clone(&ledger));
         let guard = std::sync::Arc::new(guard);
         let key_id = guard.durable_key_id_for("k");
-        let reservation = guard
+        let mut reservation = guard
             .try_reserve("k", 0.25)
             .unwrap()
             .expect("fits under the cap");
         // The durable row exists the moment the guard is handed out.
         assert_eq!(ledger.held(&key_id).unwrap(), 0.25);
         assert_eq!(ledger.spend(&key_id).unwrap(), 0.0);
-        // Completion converts the hold to spend, durably.
-        guard.record_spend("k", 0.25);
+        // Completion converts the hold to spend, durably, through the
+        // request-owned settlement API.
+        reservation.mark_dispatched();
+        reservation.settle(0.25, false).unwrap();
         assert_eq!(ledger.spend(&key_id).unwrap(), 0.25);
         assert_eq!(ledger.held(&key_id).unwrap(), 0.0);
-        drop(reservation);
     }
 
     #[test]
@@ -919,16 +1004,6 @@ mod tests {
     }
 
     #[test]
-    fn malformed_explicit_gateway_headers_never_fall_back_to_authorization() {
-        let auth = Auth::with_keys(&["gateway-key"]);
-        for name in ["x-stoke-key", "x-api-key"] {
-            let mut headers = HeaderMap::new();
-            headers.insert("authorization", "Bearer gateway-key".parse().unwrap());
-            headers.insert(name, axum::http::HeaderValue::from_bytes(b"\xff").unwrap());
-            assert!(auth.validate_gateway_headers(&headers).is_none());
-        }
-    }
-    #[test]
     fn test_auth_dev_mode() {
         // STOKE_DEV=1 + no keys → anonymous access allowed
         let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -985,6 +1060,32 @@ mod tests {
             auth.validate_gateway(Some("wrong-gateway-key"), Some("Bearer gateway-key")),
             None,
             "an explicit but invalid x-stoke-key must not fall back to Authorization"
+        );
+
+        std::env::remove_var("STOKE_API_KEYS");
+    }
+
+    #[test]
+    fn auth_trims_and_rejects_empty_gateway_credentials() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("STOKE_DEV");
+        std::env::set_var("STOKE_API_KEYS", " ,valid-key");
+        let auth = Auth::new();
+
+        assert_eq!(auth.validate_gateway(Some(""), None), None);
+        assert_eq!(auth.validate_gateway(Some("   "), None), None);
+        assert_eq!(auth.validate(Some("Bearer ")), None);
+        assert_eq!(
+            auth.validate_gateway(Some(" valid-key "), None),
+            Some("valid-key".to_string())
+        );
+
+        std::env::set_var("STOKE_API_KEYS", " 	,  ");
+        let closed = Auth::new();
+        assert_eq!(
+            closed.validate(None),
+            None,
+            "whitespace-only env stays fail-closed"
         );
 
         std::env::remove_var("STOKE_API_KEYS");
@@ -1078,6 +1179,90 @@ mod reservation_tests {
         let g = Arc::new(BudgetGuard::new());
         g.set_budget(key, cap);
         g
+    }
+
+    #[test]
+    fn reservation_settle_owns_only_its_durable_hold() {
+        let mut guard = BudgetGuard::new();
+        guard.set_budget("k", 1.0);
+        let ledger = std::sync::Arc::new(crate::ledger::Ledger::open_in_memory().unwrap());
+        guard.attach_ledger(std::sync::Arc::clone(&ledger));
+        let guard = std::sync::Arc::new(guard);
+        let key_id = guard.durable_key_id_for("k");
+        let mut first = guard.try_reserve("k", 0.40).unwrap().unwrap();
+        let second = guard.try_reserve("k", 0.30).unwrap().unwrap();
+
+        first.mark_dispatched();
+        first.settle(0.20, false).unwrap();
+
+        assert_eq!(ledger.spend(&key_id).unwrap(), 0.20);
+        assert_eq!(ledger.held(&key_id).unwrap(), 0.30);
+        drop(second);
+        assert_eq!(ledger.held(&key_id).unwrap(), 0.0);
+    }
+
+    #[test]
+    fn dispatched_drop_conservatively_settles_only_its_own_hold() {
+        let mut guard = BudgetGuard::new();
+        guard.set_budget("k", 1.0);
+        let ledger = std::sync::Arc::new(crate::ledger::Ledger::open_in_memory().unwrap());
+        guard.attach_ledger(std::sync::Arc::clone(&ledger));
+        let guard = std::sync::Arc::new(guard);
+        let key_id = guard.durable_key_id_for("k");
+        let mut first = guard.try_reserve("k", 0.40).unwrap().unwrap();
+        let second = guard.try_reserve("k", 0.30).unwrap().unwrap();
+        first.mark_dispatched();
+        drop(first);
+
+        assert_eq!(ledger.spend(&key_id).unwrap(), 0.40);
+        assert_eq!(ledger.held(&key_id).unwrap(), 0.30);
+        assert_eq!(ledger.list_spend().unwrap()[0].estimated_usd, 0.40);
+        drop(second);
+        assert_eq!(ledger.held(&key_id).unwrap(), 0.0);
+    }
+
+    #[test]
+    fn budget_admission_is_atomic_across_actual_sqlite_connections() {
+        use std::sync::{Arc, Barrier};
+        let dir = std::env::temp_dir().join(format!(
+            "stoke-budget-atomic-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = dir.join("ledger.db");
+        let seed = crate::ledger::Ledger::open(&path).unwrap();
+        drop(seed);
+        let barrier = Arc::new(Barrier::new(2));
+        let after_reserve = Arc::new(Barrier::new(2));
+        let mut handles = Vec::new();
+        for _ in 0..2 {
+            let path = path.clone();
+            let barrier = Arc::clone(&barrier);
+            let after_reserve = Arc::clone(&after_reserve);
+            handles.push(std::thread::spawn(move || {
+                let mut budget = BudgetGuard::new();
+                budget.set_budget("k", 0.10);
+                let ledger = Arc::new(crate::ledger::Ledger::open(&path).unwrap());
+                budget.attach_ledger(Arc::clone(&ledger));
+                let budget = Arc::new(budget);
+                barrier.wait();
+                let reservation = budget.try_reserve("k", 0.06);
+                let admitted = reservation.is_ok();
+                after_reserve.wait();
+                drop(reservation);
+                admitted
+            }));
+        }
+        let admitted = handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .filter(|admitted| *admitted)
+            .count();
+        assert_eq!(admitted, 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

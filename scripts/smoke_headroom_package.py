@@ -44,7 +44,9 @@ def main():
                         base = f'http://127.0.0.1:{port}'
                         wait_health(base, proc)
                         for stream in (False, True):
-                            body = {'model': 'spy-model', 'reasoning': {'effort': 'high'}, 'tools': [], 'stream': stream,
+                            # Pin the bound so admission need not add an omitted limit;
+                            # the exact non-output-field equality below remains intact.
+                            body = {'model': 'spy-model', 'max_output_tokens': 64, 'reasoning': {'effort': 'high'}, 'tools': [], 'stream': stream,
                                     'input': [{'type': 'function_call_output', 'call_id': 'opaque-call', 'output': source},
                                               {'type': 'reasoning', 'encrypted_content': 'opaque-test'}]}
                             status, headers, raw = call(base, body)

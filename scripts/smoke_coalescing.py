@@ -159,7 +159,8 @@ mode = "exact"
 ttl_secs = 60
 ''')
         other_key = secrets.token_hex(16)
-        env = dict(os.environ, STOKE_API_KEYS=key + "," + other_key, STOKE_LEDGER_PATH=str(work / "ledger.db"))
+        admin_key = secrets.token_hex(16)
+        env = dict(os.environ, STOKE_API_KEYS=key + "," + other_key, STOKE_ADMIN_KEY=admin_key, STOKE_LEDGER_PATH=str(work / "ledger.db"))
         env.pop("STOKE_DEV", None)
         with (work / "gateway.log").open("w") as log:
             process = subprocess.Popen([binary], cwd=work, env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -181,7 +182,7 @@ ttl_secs = 60
                 feed_ready = threading.Event()
                 feed_thread = threading.Thread(
                     target=read_decision_feed,
-                    args=(base, key, feed_events, feed_ready),
+                    args=(base, admin_key, feed_events, feed_ready),
                     daemon=True,
                 )
                 feed_thread.start()

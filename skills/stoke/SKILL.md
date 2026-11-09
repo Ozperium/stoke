@@ -13,7 +13,7 @@ Work through the steps in order. Verify each one before moving on — an enforce
 curl -sSf https://stokegate.com/install | sh -s -- --version nightly
 ```
 
-This checkout prepares `v0.2.2`; verify stable publication and the exact source commit in its release manifest. `nightly` tracks newer main builds and is not stable. The package has two binaries: `stoke` is the server and owns `run claude|codex`; `stoke-cli` owns setup, init, serve, inspection, login, and ledger commands. Verify the downloaded artifact and checksum before deployment. Confirm:
+This checkout prepares `v0.2.3`; verify stable publication and the exact source commit in its release manifest. `nightly` tracks newer main builds and is not stable. The package has two binaries: `stoke` is the server and owns `run claude|codex`; `stoke-cli` owns setup, init, serve, inspection, login, and ledger commands. Verify the downloaded artifact and checksum before deployment. Confirm:
 
 ```sh
 stoke-cli version

@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
@@ -8,6 +8,7 @@ use std::time::Duration;
 pub const HEADROOM_MAX_BYTES: usize = 1024 * 1024;
 pub const HEADROOM_MAX_OUTPUTS: usize = 128;
 pub const HEADROOM_TOKEN_ENV: &str = "STOKE_HEADROOM_TOKEN";
+pub(crate) const WEBHOOK_MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
 /// Should this plugin webhook URL be refused?
 ///
@@ -65,21 +66,38 @@ fn is_forbidden_url(url_str: &str) -> bool {
     false
 }
 
-async fn webhook_client(url_str: &str) -> Result<reqwest::Client, String> {
+pub(crate) async fn webhook_client(url_str: &str) -> Result<reqwest::Client, String> {
     if is_forbidden_url(url_str) {
         return Err("forbidden webhook URL (metadata endpoint or non-HTTP scheme)".to_string());
     }
     let url = reqwest::Url::parse(url_str).map_err(|error| error.to_string())?;
+    let Some(host) = url.domain() else {
+        return reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .build()
+            .map_err(|error| error.to_string());
+    };
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| "webhook URL has no usable port".to_string())?;
+    let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|error| format!("could not resolve webhook host: {}", error))?
+        .collect();
+    build_pinned_webhook_client(&url, &addrs)
+}
+
+fn build_pinned_webhook_client(
+    url: &reqwest::Url,
+    addrs: &[SocketAddr],
+) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy();
     if let Some(host) = url.domain() {
-        let port = url.port_or_known_default().ok_or_else(|| "webhook URL has no usable port".to_string())?;
-        let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
-            .await
-            .map_err(|error| format!("could not resolve webhook host: {}", error))?
-            .collect();
         if addrs.is_empty() {
             return Err("webhook host resolved to no addresses".to_string());
         }
@@ -90,6 +108,21 @@ async fn webhook_client(url_str: &str) -> Result<reqwest::Client, String> {
         builder = builder.resolve_to_addrs(host, &addrs);
     }
     builder.build().map_err(|error| error.to_string())
+}
+
+pub(crate) async fn webhook_json<T: DeserializeOwned>(
+    response: reqwest::Response,
+) -> Result<T, String> {
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| error.to_string())?;
+        if body.len().saturating_add(chunk.len()) > WEBHOOK_MAX_RESPONSE_BYTES {
+            return Err("webhook response exceeded size limit".to_string());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&body).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -459,7 +492,7 @@ impl Plugins {
             };
             match client.post(url).json(&ctx).send().await {
                 Ok(resp) if resp.status().is_success() => {
-                    if let Ok(result) = resp.json::<PostResponseResult>().await {
+                    if let Ok(result) = webhook_json::<PostResponseResult>(resp).await {
                         if let Some(ref r) = result.response {
                             current_response = r.clone();
                         }
@@ -475,7 +508,7 @@ impl Plugins {
     }
 }
 
-fn key_id(api_key: &str) -> String {
+pub(crate) fn key_id(api_key: &str) -> String {
     let digest = Sha256::digest(api_key.as_bytes());
     format!("sha256:{}", hex::encode(digest))
 }
@@ -549,6 +582,49 @@ mod webhook_security_tests {
         redirect_thread.join().unwrap();
         target_thread.join().unwrap();
         assert!(!reached.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn pinned_webhook_client_uses_validated_addresses() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let thread = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 2048];
+            let _ = stream.read(&mut request);
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{{}}\r\n").unwrap();
+        });
+        let url = reqwest::Url::parse(&format!("http://hook.invalid:{}/hook", address.port())).unwrap();
+        let client = build_pinned_webhook_client(&url, &[address]).unwrap();
+        let response = client.post(url).send().await.unwrap();
+        assert!(response.status().is_success());
+        thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn webhook_json_rejects_oversized_responses() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let thread = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 2048];
+            let _ = stream.read(&mut request);
+            let body = vec![b'x'; WEBHOOK_MAX_RESPONSE_BYTES + 1];
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len()).unwrap();
+            stream.write_all(&body).unwrap();
+        });
+        let url = reqwest::Url::parse(&format!("http://hook.invalid:{}/hook", address.port())).unwrap();
+        let client = build_pinned_webhook_client(&url, &[address]).unwrap();
+        let response = client.post(url).send().await.unwrap();
+        assert!(webhook_json::<Value>(response).await.is_err());
+        thread.join().unwrap();
+    }
+
+    #[test]
+    fn pinned_webhook_client_rejects_metadata_resolutions() {
+        let url = reqwest::Url::parse("http://hook.invalid/hook").unwrap();
+        let metadata = SocketAddr::from(([169, 254, 169, 254], 80));
+        assert!(build_pinned_webhook_client(&url, &[metadata]).is_err());
     }
 }
 

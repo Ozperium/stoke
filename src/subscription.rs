@@ -100,6 +100,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_test_base_override_does_not_exist_by_default() {
+        // Fail-closed: production never sets STOKE_TEST_SUBSCRIPTION_BASES, so
+        // the pins stay absolute. Assert the override truly changes nothing
+        // when unset for a non-pinned URL.
+        std::env::remove_var("STOKE_TEST_SUBSCRIPTION_BASES");
+        assert!(subscription_responses_endpoint("http://127.0.0.1:1/v1").is_err());
+        assert!(claude_subscription_messages_endpoint("http://127.0.0.1:1").is_err());
+        assert!(validate_oauth_destination("http://127.0.0.1:1/x", "chatgpt.com").is_err());
+    }
+
+    #[test]
     fn an_unpinned_loopback_url_stays_rejected_without_process_env_mutation() {
         assert!(subscription_responses_endpoint("http://127.0.0.1:1/v1").is_err());
         assert!(claude_subscription_messages_endpoint("http://127.0.0.1:1").is_err());

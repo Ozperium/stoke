@@ -342,6 +342,16 @@ pub async fn messages(
         None => return (StatusCode::UNAUTHORIZED, "Invalid or missing API key").into_response(),
     };
 
+    if let Err(e) = crate::security::native_policy(&state.config) {
+        return (StatusCode::FORBIDDEN, e).into_response();
+    }
+    if req.get("max_completion_tokens").is_some() {
+        return (StatusCode::BAD_REQUEST, "Messages requires max_tokens, not max_completion_tokens").into_response();
+    }
+    let mut req = req;
+    let (max_tokens, copies) = match crate::security::normalize(&mut req, "max_tokens", state.config.limits.assumed_max_output_tokens, state.config.limits.max_n_samples, false) {
+        Ok(v) => v, Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
+    };
     let requested_model = req
         .get("model")
         .and_then(|m| m.as_str())
@@ -401,6 +411,12 @@ pub async fn messages(
     if alias.is_some() {
         model = canonical_alias_model(provider, &model);
         req["model"] = Value::String(model.clone());
+    }
+    if crate::security::capped(&state.config, &api_key) && !subscription_bypasses_spend_accounting(provider) && crate::cost::global().is_metered(&provider.tier, &model)
+        && crate::cost::global().is_priced(&model) {
+        if let Err(e) = crate::security::normalize(&mut req, "max_tokens", state.config.limits.assumed_max_output_tokens, state.config.limits.max_n_samples, true) {
+            return (StatusCode::BAD_REQUEST, e).into_response();
+        }
     }
     let subscription = subscription_bypasses_spend_accounting(provider);
     // The upstream credential for a subscription dispatch comes from the
@@ -488,16 +504,12 @@ pub async fn messages(
     // key are admitted against a figure that includes each other. Claude Code
     // always sends max_tokens, which makes the hold exact rather than assumed.
     // Subscription traffic bills no API dollars, so it holds nothing.
-    let max_tokens = req
-        .get("max_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(state.config.limits.assumed_max_output_tokens);
-    let reservation = if subscription {
+    let reservation = if subscription || !crate::cost::global().is_metered(&provider.tier, &model) {
         None
     } else {
         match state.budget.try_reserve(
             &api_key,
-            crate::cost::global().max_cost(&model, (prompt_text.len() / 4) as u64, max_tokens),
+            crate::cost::global().max_cost(&model, crate::security::input_bound(&req), max_tokens) * copies as f64,
         ) {
             Ok(r) => Some(r),
             Err(reason) => {
@@ -529,7 +541,6 @@ pub async fn messages(
         )
         .await
     } else {
-        let _hold = reservation.flatten(); // released when this handler returns
         forward_once(
             &state,
             &api_key,
@@ -538,6 +549,7 @@ pub async fn messages(
             &req,
             &headers,
             credential.as_ref(),
+            reservation.flatten(),
         )
         .await
     }
@@ -782,12 +794,11 @@ fn local_fallback_admission(
     // this tier is refused before any upstream call, whatever `unpriced`
     // policy the operator chose, the refusal is free.
     pricer.allows(&provider.tier, model)?;
-    let prompt_text = extract_prompt_text(req);
     let max_tokens = req
         .get("max_tokens")
         .and_then(Value::as_u64)
         .unwrap_or(assumed_max_output_tokens);
-    let max_cost = pricer.max_cost(model, (prompt_text.len() / 4) as u64, max_tokens);
+    let max_cost = pricer.max_cost(model, crate::security::input_bound(req), max_tokens);
     budget.try_reserve(api_key, max_cost)
 }
 
@@ -904,8 +915,7 @@ async fn subscription_fallback_response(
                 }
                 response
             } else {
-                let _hold = reservation; // released when this branch ends
-                forward_once_openai(state, api_key, candidate, &served, &fallback_req).await
+                forward_once_openai(state, api_key, candidate, &served, &fallback_req, reservation).await
             };
             if response.status().is_success() {
                 tracing::info!(
@@ -941,6 +951,7 @@ async fn forward_once(
     req: &Value,
     headers: &HeaderMap,
     credential: Option<&SubscriptionCredential>,
+    mut reservation: Option<crate::budget::SpendReservation>,
 ) -> Response {
     if subscription_bypasses_spend_accounting(provider) {
         return forward_once_subscription(state, api_key, provider, model, req, headers, credential)
@@ -950,10 +961,11 @@ async fn forward_once(
     // to {base_url}/chat/completions, translate the response back. Unsupported
     // features fail closed with a clear 400 before any upstream request.
     if provider_accepts_messages_translation(provider) {
-        return forward_once_openai(state, api_key, provider, model, req).await;
+        return forward_once_openai(state, api_key, provider, model, req, reservation).await;
     }
     let url = anthropic_url(provider);
     let started = Instant::now();
+    crate::security::dispatch(&mut reservation);
     let resp = match anthropic_request(provider, &url, req, headers).send().await {
         Ok(r) => r,
         Err(e) => {
@@ -997,22 +1009,34 @@ async fn forward_once(
     };
 
     // Anthropic usage → OpenAI-shaped usage for the shared Pricer.
-    let cost_usd = body
-        .get("usage")
-        .map(|u| {
-            let input = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-            let output = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-            let usage = serde_json::json!({
-                "prompt_tokens": input,
-                "completion_tokens": output,
-                "total_tokens": input + output
-            });
-            crate::cost::global()
-                .calculate(model, Some(&usage))
-                .cost_usd
-        })
-        .unwrap_or(0.0);
-    state.budget.record_spend(api_key, cost_usd);
+    let usage = crate::security::usage(body.get("usage"), "input_tokens", "output_tokens");
+    let cost = if !crate::cost::global().is_metered(&provider.tier, &model) {
+        0.0
+    } else {
+        crate::cost::global().calculate(model, usage.as_ref()).cost_usd
+    };
+    let settlement_cost = if !crate::cost::global().is_metered(&provider.tier, &model) {
+        0.0
+    } else if usage.is_some() {
+        cost
+    } else {
+        crate::cost::global().max_cost(
+            model,
+            crate::security::input_bound(req),
+            req.get("max_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(state.config.limits.assumed_max_output_tokens),
+        )
+    };
+    let cost_usd = match crate::security::settle(
+        &state.budget,
+        api_key,
+        reservation.take(),
+        settlement_cost,
+        status.is_success() && usage.is_some(),
+    ) {
+        Ok(v) => v, Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, e).into_response(),
+    };
     crate::record_decision(
         state,
         message_outcome(status),
@@ -1162,6 +1186,7 @@ async fn forward_once_openai(
     provider: &ProviderConfig,
     model: &str,
     req: &Value,
+    mut reservation: Option<crate::budget::SpendReservation>,
 ) -> Response {
     let started = Instant::now();
     let openai_req = match crate::anthropic_translate::translate_request(req) {
@@ -1184,6 +1209,7 @@ async fn forward_once_openai(
         "{}/chat/completions",
         provider.base_url.trim_end_matches('/')
     );
+    crate::security::dispatch(&mut reservation);
     let resp = match (&*SHARED_CLIENT)
         .post(&url)
         .bearer_auth(provider.resolve_api_key())
@@ -1233,10 +1259,36 @@ async fn forward_once_openai(
     };
     // OpenAI usage -> the shared Pricer, identical to the Anthropic path's
     // accounting so translation never bypasses the meter.
-    let cost_usd = crate::cost::global()
-        .calculate(model, body.get("usage"))
-        .cost_usd;
-    state.budget.record_spend(api_key, cost_usd);
+    let cost_usd = if !crate::cost::global().is_metered(&provider.tier, &model) {
+        0.0
+    } else {
+        crate::cost::global()
+            .calculate(model, body.get("usage"))
+            .cost_usd
+    };
+    let measured = crate::security::usage(body.get("usage"), "prompt_tokens", "completion_tokens").is_some();
+    let settlement_cost = if !crate::cost::global().is_metered(&provider.tier, &model) {
+        0.0
+    } else if measured {
+        cost_usd
+    } else {
+        crate::cost::global().max_cost(
+            model,
+            crate::security::input_bound(req),
+            req.get("max_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(state.config.limits.assumed_max_output_tokens),
+        )
+    };
+    let cost_usd = match crate::security::settle(
+        &state.budget,
+        api_key,
+        reservation.take(),
+        settlement_cost,
+        status.is_success() && measured,
+    ) {
+        Ok(v) => v, Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, e).into_response(),
+    };
     crate::record_decision(
         state,
         message_outcome(status),
@@ -1284,7 +1336,7 @@ async fn forward_stream_openai(
     provider: &ProviderConfig,
     model: &str,
     req: &Value,
-    reservation: Option<crate::budget::SpendReservation>,
+    mut reservation: Option<crate::budget::SpendReservation>,
 ) -> Response {
     let started = Instant::now();
     let openai_req = match crate::anthropic_translate::translate_request(req) {
@@ -1307,11 +1359,12 @@ async fn forward_stream_openai(
     // the meter exact, and the translation layer never alters a caller's own
     // stream_options if they had one.
     let openai_req =
-        crate::sse::request_stream_usage(&openai_req, &provider.tier, &provider.r#type);
+        crate::sse::request_stream_usage(&openai_req, if reservation.is_some() { "cloud" } else { &provider.tier }, &provider.r#type);
     let url = format!(
         "{}/chat/completions",
         provider.base_url.trim_end_matches('/')
     );
+    crate::security::dispatch(&mut reservation);
     let resp = match (&*SHARED_CLIENT)
         .post(&url)
         .bearer_auth(provider.resolve_api_key())
@@ -1364,29 +1417,23 @@ async fn forward_stream_openai(
         started.elapsed().as_millis() as u64,
     );
 
-    // The meter is None for every translation-eligible tier (local|remote are
-    // free tiers), but must exist for any future tier added to the gate — and
-    // it must then tap the TRANSLATED Anthropic events (raw upstream bytes are
-    // OpenAI-framed and carry no Anthropic "type" fields it can read).
-    let mut meter = (!crate::cost::is_free_tier(&provider.tier)).then(|| AnthropicStreamMeter {
+    // A priced local request may own a hold too. Meter the original OpenAI
+    // usage before translation, and retain that hold for the stream lifetime.
+    let mut meter = (reservation.is_some() || crate::cost::global().is_metered(&provider.tier, &model)).then(|| AnthropicStreamMeter {
         budget: state.budget.clone(),
         api_key: api_key.to_string(),
         model: model.to_string(),
-        usage: crate::sse::UsageScanner::new(crate::sse::Wire::Anthropic),
+        usage: crate::sse::UsageScanner::new(crate::sse::Wire::OpenAi),
         prompt_tokens_est: (extract_prompt_text(req).len() / 4) as u64,
         _reservation: reservation,
     });
     let mut translator = crate::anthropic_translate::StreamTranslator::new(model);
     let stream = resp.bytes_stream().flat_map(move |chunk| {
+        if let (Ok(bytes), Some(m)) = (&chunk, meter.as_mut()) { m.on_chunk(bytes); }
         let events = match &chunk {
             Ok(bytes) => translator.feed_bytes(bytes),
             Err(_) => Vec::new(),
         };
-        if let Some(m) = meter.as_mut() {
-            for event in &events {
-                m.on_chunk(event.as_bytes());
-            }
-        }
         futures_util::stream::iter(
             events
                 .into_iter()
@@ -1448,8 +1495,9 @@ impl Drop for AnthropicStreamMeter {
         let cost = crate::cost::global()
             .calculate(&self.model, Some(&usage.to_openai_json()))
             .cost_usd;
+        let cost = crate::security::settle(&self.budget, &self.api_key, self._reservation.take(), cost, measured)
+            .unwrap_or_else(|e| { tracing::error!("Messages stream settlement failed: {e}"); cost });
         if measured {
-            self.budget.record_spend(&self.api_key, cost);
             tracing::info!(
                 "/v1/messages stream billed: model={} tokens={}+{} cost=${:.6}",
                 self.model,
@@ -1458,7 +1506,6 @@ impl Drop for AnthropicStreamMeter {
                 cost
             );
         } else {
-            self.budget.record_spend_estimated(&self.api_key, cost);
             tracing::warn!(
                 "/v1/messages stream billed from an ESTIMATE: model={} reported no usage; \
                  charged ${:.6}. The cap is working from a guess for this key.",
@@ -1478,7 +1525,7 @@ async fn forward_stream(
     model: &str,
     req: &Value,
     headers: &HeaderMap,
-    reservation: Option<crate::budget::SpendReservation>,
+    mut reservation: Option<crate::budget::SpendReservation>,
     credential: Option<&SubscriptionCredential>,
 ) -> Response {
     if subscription_bypasses_spend_accounting(provider) {
@@ -1494,6 +1541,7 @@ async fn forward_stream(
     }
     let url = anthropic_url(provider);
     let started = Instant::now();
+    crate::security::dispatch(&mut reservation);
     match anthropic_request(provider, &url, req, headers).send().await {
         Ok(resp) if resp.status().is_success() => {
             crate::record_decision(
@@ -1510,7 +1558,7 @@ async fn forward_stream(
             // costs nothing per token; do not pretend to bill it.
             let mut reservation = reservation;
             let mut meter =
-                (!crate::cost::is_free_tier(&provider.tier)).then(|| AnthropicStreamMeter {
+                (reservation.is_some() || crate::cost::global().is_metered(&provider.tier, &model)).then(|| AnthropicStreamMeter {
                     budget: state.budget.clone(),
                     api_key: api_key.to_string(),
                     model: model.to_string(),

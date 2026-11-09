@@ -81,9 +81,9 @@ impl CostBreakdown {
     }
 
     pub fn merge(&mut self, other: &CostBreakdown) {
-        self.prompt_tokens += other.prompt_tokens;
-        self.completion_tokens += other.completion_tokens;
-        self.total_tokens += other.total_tokens;
+        self.prompt_tokens = self.prompt_tokens.saturating_add(other.prompt_tokens);
+        self.completion_tokens = self.completion_tokens.saturating_add(other.completion_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
         self.cost_usd += other.cost_usd;
     }
 }
@@ -119,6 +119,11 @@ pub fn is_unpriced_error(msg: &str) -> bool {
 impl Pricer {
     pub fn new(prices: HashMap<String, ModelPricing>, unpriced: Unpriced) -> Self {
         Self { prices, unpriced }
+    }
+
+    /// An explicit model price applies even on operator-owned hardware.
+    pub fn is_metered(&self, tier: &str, model: &str) -> bool {
+        self.is_priced(model) || !is_free_tier(tier)
     }
 
     pub fn is_priced(&self, model: &str) -> bool {
@@ -173,7 +178,7 @@ impl Pricer {
             model: model.to_string(),
             prompt_tokens,
             completion_tokens,
-            total_tokens: prompt_tokens + completion_tokens,
+            total_tokens: prompt_tokens.saturating_add(completion_tokens),
             cost_usd,
         }
     }
@@ -181,9 +186,8 @@ impl Pricer {
     /// The most this request could cost, for holding against the cap before it runs.
     ///
     /// Output length is the unknown. `max_tokens` is the caller's own promise not
-    /// to exceed it, so use it when given. Otherwise fall back to the operator's
-    /// assumption: guessing too low turns the hard cap back into a ceiling, and
-    /// guessing too high refuses requests that would have fit.
+    /// to exceed it, so use it when given. Handlers inject the operator's output
+    /// limit into the upstream request when it is omitted.
     ///
     /// Zero for a model with no configured price — there is nothing to reserve, and
     /// the dispatch gate refuses it before it can be served anyway.

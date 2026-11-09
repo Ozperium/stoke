@@ -6,8 +6,6 @@
 use regex::Regex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Instant;
 
 /// Configuration for built-in plugins.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -44,7 +42,7 @@ fn default_harness_mode() -> String {
 
 // ─── PII Redaction ──────────────────────────────────────────────
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct PiiConfig {
     /// Custom regex patterns to redact (in addition to built-ins)
     #[serde(default)]
@@ -56,15 +54,6 @@ pub struct PiiConfig {
 
 fn default_redact_text() -> String {
     "[REDACTED]".to_string()
-}
-
-impl Default for PiiConfig {
-    fn default() -> Self {
-        Self {
-            patterns: Vec::new(),
-            replacement: default_redact_text(),
-        }
-    }
 }
 
 // ─── Code Formatter ─────────────────────────────────────────────
@@ -117,17 +106,11 @@ impl Builtins {
             // AWS access keys
             (r"AKIA[0-9A-Z]{16}", "AWS_KEY"),
             // AWS secret keys (40 chars of base64)
-            (
-                r#"(?i)aws_secret_access_key["\s:=]+["']?[A-Za-z0-9/+]{40}["']?"#,
-                "AWS_SECRET",
-            ),
+            (r#"(?i)aws_secret_access_key["\s:=]+["']?[A-Za-z0-9/+]{40}["']?"#, "AWS_SECRET"),
             // Google API keys
             (r"AIza[A-zA-Z0-9_-]{35}", "GOOGLE_API_KEY"),
             // Generic API key patterns in env/config
-            (
-                r#"(?i)(api_key|apikey|token|secret|password)["\s:=]+["']?[A-Za-z0-9_+/=-]{20,}["']?"#,
-                "API_KEY",
-            ),
+            (r#"(?i)(api_key|apikey|token|secret|password)["\s:=]+["']?[A-Za-z0-9_+/=-]{20,}["']?"#, "API_KEY"),
             // Email addresses
             (r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "EMAIL"),
             // GitHub tokens
@@ -135,10 +118,7 @@ impl Builtins {
             // Slack tokens
             (r"xox[bp]-[A-Za-z0-9-]{10,}", "SLACK_TOKEN"),
             // Private keys (PEM)
-            (
-                r"(?s)-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z]+ )?PRIVATE KEY-----",
-                "PRIVATE_KEY",
-            ),
+            (r"(?s)-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z]+ )?PRIVATE KEY-----", "PRIVATE_KEY"),
         ];
 
         if config.pii_redact.is_some() {
@@ -253,7 +233,19 @@ impl Builtins {
         for msg in messages {
             let mut new_msg = msg.clone();
             if let Some(content) = new_msg.get_mut("content") {
-                modified |= self.redact_value(content);
+                modified |= self.redact_content_value(content);
+            }
+            if let Some(tool_calls) = new_msg.get_mut("tool_calls") {
+                if let Some(calls) = tool_calls.as_array_mut() {
+                    for call in calls {
+                        if let Some(function) = call.get_mut("function") {
+                            modified |= self.redact_function_call(function)?;
+                        }
+                    }
+                }
+            }
+            if let Some(function_call) = new_msg.get_mut("function_call") {
+                modified |= self.redact_function_call(function_call)?;
             }
             new_messages.push(new_msg);
         }
@@ -265,33 +257,145 @@ impl Builtins {
         }
     }
 
-    /// Redact every string below a message's content field without changing
-    /// arrays, objects, or non-string JSON values.
-    fn redact_value(&self, value: &mut Value) -> bool {
+    fn redact_string(&self, value: &str) -> String {
+        self.pii_patterns.iter().fold(value.to_string(), |current, (re, label_repl)| {
+            let replacement = label_repl
+                .split_once(':')
+                .map(|(_, replacement)| replacement)
+                .unwrap_or("[REDACTED]");
+            re.replace_all(&current, replacement).to_string()
+        })
+    }
+
+    /// Redact only data-bearing fields below a message's `content` value.
+    /// Structural metadata (roles, ids, schemas, and URLs) is not prompt text.
+    fn redact_content_value(&self, value: &mut Value) -> bool {
         match value {
             Value::String(text) => {
-                let mut redacted = text.clone();
-                for (re, label_repl) in &self.pii_patterns {
-                    let replacement = label_repl
-                        .split_once(':')
-                        .map(|(_, replacement)| replacement)
-                        .unwrap_or("[REDACTED]");
-                    redacted = re.replace_all(&redacted, replacement).into_owned();
-                }
+                let redacted = self.redact_string(text);
                 let changed = redacted != *text;
                 if changed {
                     *text = redacted;
                 }
                 changed
             }
-            Value::Array(values) => values
-                .iter_mut()
-                .map(|value| self.redact_value(value))
-                .any(|changed| changed),
-            Value::Object(object) => object
-                .values_mut()
-                .map(|value| self.redact_value(value))
-                .any(|changed| changed),
+            Value::Array(items) => {
+                let mut changed = false;
+                for item in items {
+                    changed |= self.redact_content_value(item);
+                }
+                changed
+            }
+            Value::Object(object) => {
+                let mut changed = false;
+                for key in ["text", "content", "output", "arguments"] {
+                    if let Some(child) = object.get_mut(key) {
+                        changed |= self.redact_content_value(child);
+                    }
+                }
+                if let Some(input) = object.get_mut("input") {
+                    changed |= self.redact_tool_data(input);
+                }
+                changed
+            }
+            _ => false,
+        }
+    }
+
+    fn redact_tool_data(&self, value: &mut Value) -> bool {
+        match value {
+            Value::String(text) => {
+                let redacted = self.redact_string(text);
+                let changed = redacted != *text;
+                if changed {
+                    *text = redacted;
+                }
+                changed
+            }
+            Value::Array(items) => {
+                let mut changed = false;
+                for item in items {
+                    changed |= self.redact_tool_data(item);
+                }
+                changed
+            }
+            Value::Object(object) => {
+                let mut changed = false;
+                for (key, child) in object.iter_mut() {
+                    if matches!(
+                        key.as_str(),
+                        "url"
+                            | "uri"
+                            | "id"
+                            | "name"
+                            | "type"
+                            | "role"
+                            | "tool_use_id"
+                            | "call_id"
+                            | "schema"
+                            | "input_schema"
+                            | "description"
+                            | "properties"
+                            | "required"
+                            | "enum"
+                    ) {
+                        continue;
+                    }
+                    changed |= self.redact_tool_data(child);
+                }
+                changed
+            }
+            _ => false,
+        }
+    }
+
+    fn redact_function_call(&self, value: &mut Value) -> Result<bool, String> {
+        match value {
+            Value::Object(object) => match object.get_mut("arguments") {
+                Some(Value::String(arguments)) => self.redact_json_arguments(arguments),
+                Some(_) => Err("pii_redact requires JSON-encoded function arguments".to_string()),
+                None => Ok(false),
+            },
+            _ => Ok(false),
+        }
+    }
+
+    fn redact_json_arguments(&self, arguments: &mut String) -> Result<bool, String> {
+        // Keep the parser's nesting bound; raw matching cannot inspect JSON escapes safely.
+        let mut parsed = serde_json::from_str::<Value>(arguments)
+            .map_err(|_| "pii_redact could not safely parse function arguments".to_string())?;
+        let changed = self.redact_argument_value(&mut parsed);
+        if changed {
+            *arguments = serde_json::to_string(&parsed)
+                .map_err(|_| "pii_redact could not encode sanitized function arguments".to_string())?;
+        }
+        Ok(changed)
+    }
+
+    fn redact_argument_value(&self, value: &mut Value) -> bool {
+        match value {
+            Value::String(text) => {
+                let redacted = self.redact_string(text);
+                let changed = redacted != *text;
+                if changed {
+                    *text = redacted;
+                }
+                changed
+            }
+            Value::Array(items) => {
+                let mut changed = false;
+                for item in items {
+                    changed |= self.redact_argument_value(item);
+                }
+                changed
+            }
+            Value::Object(object) => {
+                let mut changed = false;
+                for child in object.values_mut() {
+                    changed |= self.redact_argument_value(child);
+                }
+                changed
+            }
             _ => false,
         }
     }
@@ -470,81 +574,6 @@ impl Builtins {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-
-    fn pii_builtins() -> Builtins {
-        Builtins::new(BuiltinConfig {
-            pii_redact: Some(PiiConfig::default()),
-            ..BuiltinConfig::default()
-        })
-    }
-
-    #[tokio::test]
-    async fn redacts_multiline_pem_and_nested_content_leaves() {
-        let builtins = pii_builtins();
-        let messages = vec![json!({
-            "role": "user",
-            "content": [
-                {"type": "text", "text": format!("-----BEGIN {}-----\nsecret\n-----END {}-----", "PRIVATE KEY", "PRIVATE KEY")},
-                {"type": "image", "image": {"url": "https://example.test/image", "detail": 2}},
-                42,
-                true
-            ]
-        })];
-
-        let filtered = builtins
-            .prompt_filter(&messages, "model", "key")
-            .await
-            .unwrap();
-        let filtered = filtered.expect("PEM should be redacted");
-        assert_eq!(filtered[0]["content"][0]["type"], "text");
-        assert_eq!(filtered[0]["content"][0]["text"], "[REDACTED]");
-        assert_eq!(filtered[0]["content"][1]["image"]["detail"], 2);
-        assert_eq!(filtered[0]["content"][2], 42);
-        assert_eq!(filtered[0]["content"][3], true);
-    }
-
-    #[tokio::test]
-    async fn pii_redaction_is_opt_in() {
-        let builtins = Builtins::new(BuiltinConfig::default());
-        let messages = vec![json!({"role": "user", "content": "x@example.com"})];
-        assert!(builtins
-            .prompt_filter(&messages, "model", "key")
-            .await
-            .unwrap()
-            .is_none());
-    }
-
-    #[test]
-    fn audit_log_defaults_to_metadata_only() {
-        let config: AuditConfig = toml::from_str("path = 'audit.jsonl'").unwrap();
-        assert!(!config.log_body);
-        assert!(!default_log_body());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn newly_created_audit_log_is_owner_only() {
-        let path = std::env::temp_dir().join(format!("stoke-audit-{}.jsonl", std::process::id()));
-        let _ = std::fs::remove_file(&path);
-        let builtins = Builtins {
-            config: BuiltinConfig::default(),
-            pii_patterns: Vec::new(),
-            audit_path: Some(path.clone()),
-        };
-        builtins.audit_log("model", &json!({"secret": "body"}), 0.0, 1, "key");
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        let contents = std::fs::read_to_string(&path).unwrap();
-        let _ = std::fs::remove_file(&path);
-        assert_eq!(mode, 0o600);
-        assert!(!contents.contains("response"));
-    }
-}
-
 // ─── Multi-Endpoint Route Profiles ────────────────────────────────
 
 /// A named route profile with its own model, pattern, plugins, and budget.
@@ -616,4 +645,287 @@ pub struct RoutesConfig {
 /// Resolve a route profile by path.
 pub fn find_profile<'a>(profiles: &'a [RouteProfile], path: &str) -> Option<&'a RouteProfile> {
     profiles.iter().find(|p| p.path == path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn audit_log_defaults_to_metadata_only() {
+        let config: AuditConfig = toml::from_str("path = 'audit.jsonl'").unwrap();
+        assert!(!config.log_body);
+        assert!(!default_log_body());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn newly_created_audit_log_is_owner_only() {
+        let path = std::env::temp_dir().join(format!("stoke-audit-{}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let builtins = Builtins {
+            config: BuiltinConfig::default(),
+            pii_patterns: Vec::new(),
+            audit_path: Some(path.clone()),
+        };
+        builtins.audit_log("model", &json!({"secret": "body"}), 0.0, 1, "key");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(mode, 0o600);
+        assert!(!contents.contains("response"));
+    }
+
+    #[tokio::test]
+    async fn pii_redaction_is_opt_in() {
+        let builtins = Builtins::new(BuiltinConfig::default());
+        let messages = vec![json!({"role": "user", "content": "x@example.com"})];
+        assert!(builtins
+            .prompt_filter(&messages, "model", "key")
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn redacts_multiline_pem_and_nested_content_leaves() {
+        let builtins = pii_builtins();
+        let messages = vec![json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": format!("-----BEGIN {}-----\nsecret\n-----END {}-----", "PRIVATE KEY", "PRIVATE KEY")},
+                {"type": "image", "image": {"url": "https://example.test/image", "detail": 2}},
+                42,
+                true
+            ]
+        })];
+
+        let filtered = builtins
+            .prompt_filter(&messages, "model", "key")
+            .await
+            .unwrap();
+        let filtered = filtered.expect("PEM should be redacted");
+        assert_eq!(filtered[0]["content"][0]["type"], "text");
+        assert_eq!(filtered[0]["content"][0]["text"], "[REDACTED]");
+        assert_eq!(filtered[0]["content"][1]["image"]["detail"], 2);
+        assert_eq!(filtered[0]["content"][2], 42);
+        assert_eq!(filtered[0]["content"][3], true);
+    }
+
+    fn pii_builtins() -> Builtins {
+        Builtins::new(BuiltinConfig {
+            pii_redact: Some(PiiConfig {
+                replacement: "[REDACTED]".to_string(),
+                ..PiiConfig::default()
+            }),
+            ..BuiltinConfig::default()
+        })
+    }
+
+    #[tokio::test]
+    async fn redacts_email_in_string_message_content() {
+        let builtins = pii_builtins();
+        let messages = vec![json!({"role": "user", "content": "email@example.com"})];
+        let filtered = builtins
+            .prompt_filter(&messages, "model", "key")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(filtered[0]["content"], "[REDACTED]");
+    }
+
+    #[tokio::test]
+    async fn redacts_email_in_openai_text_content_parts() {
+        let builtins = pii_builtins();
+        let messages = vec![json!({
+            "role": "user",
+            "content": [{"type": "text", "text": "email@example.com"}]
+        })];
+        let filtered = builtins
+            .prompt_filter(&messages, "model", "key")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(filtered[0]["content"][0]["type"], "text");
+        assert_eq!(filtered[0]["content"][0]["text"], "[REDACTED]");
+    }
+
+    #[tokio::test]
+    async fn redacts_nested_tool_content_and_string_arguments() {
+        let builtins = pii_builtins();
+        let messages = vec![json!({
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": "toolu_1",
+                "content": [{"type": "text", "text": "email@example.com"}],
+                "arguments": "{\"email\":\"email@example.com\"}"
+            }]
+        })];
+        let filtered = builtins
+            .prompt_filter(&messages, "model", "key")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(filtered[0]["content"][0]["content"][0]["text"], "[REDACTED]");
+        assert_eq!(filtered[0]["content"][0]["arguments"], "{\"email\":\"[REDACTED]\"}");
+    }
+
+    #[tokio::test]
+    async fn does_not_redact_roles_schema_metadata_or_urls() {
+        let builtins = pii_builtins();
+        let messages = vec![json!({
+            "role": "user",
+            "content": [{
+                "type": "text",
+                "text": "send to email@example.com",
+                "name": "name@example.com",
+                "id": "id@example.com",
+                "url": "https://email@example.com/path",
+                "schema": {"description": "schema@example.com"}
+            }]
+        })];
+        let filtered = builtins
+            .prompt_filter(&messages, "model", "key")
+            .await
+            .unwrap()
+            .unwrap();
+        let part = &filtered[0]["content"][0];
+        assert_eq!(filtered[0]["role"], "user");
+        assert_eq!(part["text"], "send to [REDACTED]");
+        assert_eq!(part["name"], "name@example.com");
+        assert_eq!(part["id"], "id@example.com");
+        assert_eq!(part["url"], "https://email@example.com/path");
+        assert_eq!(part["schema"]["description"], "schema@example.com");
+    }
+
+    #[tokio::test]
+    async fn redacts_every_sensitive_value_in_nested_content_and_tool_arrays() {
+        let builtins = pii_builtins();
+        let messages = vec![json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "first@example.com"},
+                {"type": "tool_use", "input": [
+                    {"email": "second@example.com"},
+                    [{"email": "third@example.com"}]
+                ]},
+                {"type": "text", "text": "fourth@example.com"}
+            ]
+        })];
+
+        let filtered = builtins
+            .prompt_filter(&messages, "model", "key")
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(filtered[0]["content"][0]["text"], "[REDACTED]");
+        assert_eq!(filtered[0]["content"][1]["input"][0]["email"], "[REDACTED]");
+        assert_eq!(
+            filtered[0]["content"][1]["input"][1][0]["email"],
+            "[REDACTED]"
+        );
+        assert_eq!(filtered[0]["content"][2]["text"], "[REDACTED]");
+    }
+
+    fn assert_no_example_email(value: &Value) {
+        match value {
+            Value::String(text) => assert!(!text.contains("@example.com"), "leaked value: {text}"),
+            Value::Array(items) => items.iter().for_each(assert_no_example_email),
+            Value::Object(object) => object.values().for_each(assert_no_example_email),
+            _ => {}
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_uninspectable_function_arguments() {
+        let builtins = pii_builtins();
+        let deep = format!(
+            r#"{{"email":"contact\u0040example.com","pad":{}0{}}}"#,
+            "[".repeat(130),
+            "]".repeat(130)
+        );
+        for arguments in [
+            Value::String(deep),
+            Value::String(r#"{"email":"contact\u0040example.com""#.to_string()),
+            json!({"email": "contact@example.com"}),
+        ] {
+            for legacy in [false, true] {
+                let function = json!({"name": "lookup", "arguments": arguments});
+                let mut message = json!({"role": "assistant", "content": null});
+                if legacy {
+                    message["function_call"] = function;
+                } else {
+                    message["tool_calls"] = json!([{
+                        "id": "call_fixture", "type": "function", "function": function
+                    }]);
+                }
+                assert!(
+                    builtins.prompt_filter(&[message], "model", "key").await.is_err(),
+                    "mandatory redaction must reject arguments it cannot inspect safely"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn redacts_standard_and_legacy_function_arguments_as_valid_json() {
+        let builtins = Builtins::new(BuiltinConfig {
+            pii_redact: Some(PiiConfig {
+                replacement: "[REDACTED]\n\"quoted\"".to_string(),
+                ..PiiConfig::default()
+            }),
+            ..BuiltinConfig::default()
+        });
+        let tool_arguments =
+            r#"{"name":"contact\u0040example.com","items":["second@example.com",{"name":"third@example.com"}]}"#;
+        let legacy_arguments =
+            r#"{"name":"legacy@example.com","rows":[["fourth@example.com"],{"name":"fifth@example.com"}]}"#;
+        let messages = vec![
+            json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "lookup", "arguments": tool_arguments}
+                }]
+            }),
+            json!({
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": "tool-result@example.com"
+            }),
+            json!({
+                "role": "assistant",
+                "content": null,
+                "function_call": {"name": "legacy_lookup", "arguments": legacy_arguments}
+            }),
+        ];
+
+        let filtered = builtins
+            .prompt_filter(&messages, "model", "key")
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(filtered[0]["role"], "assistant");
+        assert_eq!(filtered[0]["tool_calls"][0]["id"], "call_1");
+        assert_eq!(filtered[0]["tool_calls"][0]["function"]["name"], "lookup");
+        assert_eq!(filtered[2]["function_call"]["name"], "legacy_lookup");
+        for arguments in [
+            filtered[0]["tool_calls"][0]["function"]["arguments"]
+                .as_str()
+                .unwrap(),
+            filtered[2]["function_call"]["arguments"].as_str().unwrap(),
+        ] {
+            let parsed: Value = serde_json::from_str(arguments).expect("arguments remain valid JSON");
+            assert_no_example_email(&parsed);
+        }
+        assert_no_example_email(&json!(filtered));
+    }
 }

@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Sha256, Digest};
 
+const MAX_CACHE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_CACHE_ENTRIES: usize = 1024;
+const MAX_CACHE_ENTRY_BYTES: usize = 1024 * 1024;
+
 /// A cached response entry.
 pub struct CacheEntry {
     pub response: Value,        // Full OpenAI-compatible response JSON
@@ -20,6 +24,7 @@ pub struct CacheEntry {
     pub scope: String,
     pub created_at: Instant,
     pub hit_count: u32,
+    size_bytes: usize,
 }
 
 /// In-process response cache.
@@ -75,6 +80,49 @@ impl ResponseCache {
     /// Route retention may shorten, but never extend, global retention.
     pub fn effective_ttl(&self, route_ttl_secs: u64) -> Duration {
         Duration::from_secs(route_ttl_secs.min(self.ttl.as_secs()))
+    }
+
+    fn entry_size(key: &str, entry: &CacheEntry) -> usize {
+        std::mem::size_of::<CacheEntry>()
+            .saturating_add(key.len())
+            .saturating_add(entry.size_bytes)
+    }
+
+    fn total_size(exact: &HashMap<String, CacheEntry>) -> usize {
+        exact.iter().fold(0, |total, (key, entry)| {
+            total.saturating_add(Self::entry_size(key, entry))
+        })
+    }
+
+    fn insert_bounded(&self, key: String, mut entry: CacheEntry) {
+        // Serialize once before taking the write lock, not once per retained
+        // response on every insertion. Include the newer semantic partition.
+        entry.size_bytes = entry.prompt_hash.len()
+            .saturating_add(entry.scope.len())
+            .saturating_add(entry.semantic_identity.as_ref().map_or(0, String::len))
+            .saturating_add(entry.embedding.len().saturating_mul(std::mem::size_of::<f32>()))
+            .saturating_add(serde_json::to_vec(&entry.response).map(|b| b.len()).unwrap_or(usize::MAX));
+        if Self::entry_size(&key, &entry) > MAX_CACHE_ENTRY_BYTES {
+            tracing::warn!("cache entry rejected: entry exceeds {} bytes", MAX_CACHE_ENTRY_BYTES);
+            return;
+        }
+        let mut exact = self.exact.write().unwrap();
+        exact.retain(|_, existing| existing.created_at.elapsed() < self.ttl);
+        let mut total_bytes = Self::total_size(&exact);
+        if let Some(previous) = exact.remove(&key) {
+            total_bytes = total_bytes.saturating_sub(Self::entry_size(&key, &previous));
+        }
+        total_bytes = total_bytes.saturating_add(Self::entry_size(&key, &entry));
+        exact.insert(key, entry);
+        while exact.len() > MAX_CACHE_ENTRIES || total_bytes > MAX_CACHE_BYTES {
+            let oldest = exact
+                .iter()
+                .min_by_key(|(_, existing)| existing.created_at)
+                .map(|(key, entry)| (key.clone(), Self::entry_size(key, entry)));
+            let Some((oldest, oldest_size)) = oldest else { break };
+            exact.remove(&oldest);
+            total_bytes = total_bytes.saturating_sub(oldest_size);
+        }
     }
 
     /// Compute cache key from request parameters.
@@ -183,8 +231,9 @@ impl ResponseCache {
             scope: scope.to_string(),
             created_at,
             hit_count: 0,
+            size_bytes: 0,
         };
-        self.exact.write().unwrap().insert(key.to_string(), entry);
+        self.insert_bounded(key.to_string(), entry);
     }
 
     /// Look up semantic match by embedding similarity.
@@ -259,14 +308,13 @@ impl ResponseCache {
             scope: scope.to_string(),
             created_at: Instant::now(),
             hit_count: 0,
+            size_bytes: 0,
         };
-        self.evict();
-        self.exact.write().unwrap().insert(key.to_string(), entry);
+        self.insert_bounded(key.to_string(), entry);
     }
 
     /// Store a response in the cache (legacy, no embedding).
     pub fn put(&self, key: &str, scope: &str, response: Value, embedding: Vec<f32>) {
-        self.evict();
         let entry = CacheEntry {
             response,
             embedding,
@@ -275,8 +323,9 @@ impl ResponseCache {
             scope: scope.to_string(),
             created_at: Instant::now(),
             hit_count: 0,
+            size_bytes: 0,
         };
-        self.exact.write().unwrap().insert(key.to_string(), entry);
+        self.insert_bounded(key.to_string(), entry);
     }
 
     /// Try exact match first, then semantic match.
@@ -378,6 +427,47 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(test)]
 mod scope_tests {
     use super::*;
+
+    #[test]
+    fn bounded_defaults_limit_entries_and_serialized_bytes() {
+        let cache = ResponseCache::new(3600, 0.5, false);
+        let scope = ResponseCache::scope_of("key", "/v1/chat/completions");
+        let payload = "x".repeat(20_000);
+        for index in 0..1025 {
+            cache.put(
+                &format!("key-{index}"),
+                &scope,
+                json!({"blob": payload}),
+                Vec::new(),
+            );
+        }
+        let exact = cache.exact.read().unwrap();
+        let total_bytes: usize = exact
+            .iter()
+            .map(|(key, entry)| ResponseCache::entry_size(key, entry))
+            .sum();
+        assert!(exact.len() <= 1024, "entry bound exceeded: {}", exact.len());
+        assert!(total_bytes <= 16 * 1024 * 1024, "byte bound exceeded: {total_bytes}");
+    }
+
+    #[test]
+    fn expired_entries_are_removed_by_the_next_write() {
+        let cache = ResponseCache::new(0, 0.5, false);
+        let scope = ResponseCache::scope_of("key", "/v1/chat/completions");
+        cache.put("old", &scope, json!({"answer": "old"}), Vec::new());
+        cache.put("new", &scope, json!({"answer": "new"}), Vec::new());
+        let exact = cache.exact.read().unwrap();
+        assert!(!exact.contains_key("old"));
+        assert!(exact.contains_key("new"));
+    }
+
+    #[test]
+    fn oversized_entry_is_not_inserted() {
+        let cache = ResponseCache::new(3600, 0.5, false);
+        let scope = ResponseCache::scope_of("key", "/v1/chat/completions");
+        cache.put("large", &scope, json!({"blob": "x".repeat(2 * 1024 * 1024)}), Vec::new());
+        assert!(!cache.exact.read().unwrap().contains_key("large"));
+    }
 
     fn msgs() -> Vec<Value> {
         vec![json!({"role": "user", "content": "the same question"})]
@@ -566,6 +656,7 @@ mod scope_tests {
                 scope: scope.clone(),
                 created_at: Instant::now(),
                 hit_count: 0,
+            size_bytes: 0,
             },
         );
 
@@ -683,6 +774,7 @@ mod scope_tests {
                 scope,
                 created_at,
                 hit_count: 0,
+            size_bytes: 0,
             },
         );
         assert!(cache.get_exact_at("key", Duration::from_secs(10), Instant::now()).is_none());
@@ -700,6 +792,7 @@ mod scope_tests {
                 scope: "scope".to_string(),
                 created_at: Instant::now() - Duration::from_secs(3601),
                 hit_count: 0,
+            size_bytes: 0,
             },
         );
         cache.put("fresh", "scope", json!({"answer": "fresh"}), Vec::new());
@@ -714,6 +807,7 @@ mod scope_tests {
                 scope: "scope".to_string(),
                 created_at: Instant::now() - Duration::from_secs(11),
                 hit_count: 0,
+            size_bytes: 0,
             },
         );
         assert!(cache.get_exact_at("key", Duration::from_secs(12), Instant::now()).is_some());

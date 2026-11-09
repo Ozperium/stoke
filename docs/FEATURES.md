@@ -1,6 +1,6 @@
 # Stoke feature-to-proof matrix — historical audit snapshot
 
-This inventory preserves the pre-solidification audit at `08d12fc`; its working-tree and release-status observations are historical, not current release gates. For the `v0.2.2` candidate and corrections made after this audit, use [release notes](releases/v0.2.2.md), [the current capability matrix](capability-matrix.md), and the exact published release manifest. In particular, privacy defaults, JS plugin composition, and installer rollback have since been corrected and regression-tested.
+This inventory preserves the pre-solidification audit at `08d12fc`; its working-tree and release-status observations are historical, not current release gates. For the `v0.2.3` candidate and corrections made after this audit, use [release notes](releases/v0.2.3.md), [the current capability matrix](capability-matrix.md), and the exact published release manifest. In particular, privacy defaults, JS plugin composition, and installer rollback have since been corrected and regression-tested.
 
 Canonical release/evidence inventory for the checkout audited at commit `08d12fce4502f3d046b11613662c7302e48245f0` (`08d12fc`). This file reconciles the eight read-only audit reports in `/tmp/stoke-solidify-audits` with direct source inspection. A feature is **shipped** here only when it is registered or reachable from the gateway/CLI and has implementation evidence; roadmap text, dead helpers, and unregistered experiments are not shipped rows.
 

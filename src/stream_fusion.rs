@@ -50,7 +50,10 @@ pub async fn stream_race(
     // answers to use one. Which tier a provider is on is declared in config —
     // never inferred from its name, which was how a provider called "my-gpu-box"
     // pointing at a paid API used to be raced as if it were free.
-    let is_free = |p: &ProviderConfig| crate::cost::is_free_tier(&p.tier);
+    // A local/remote tier is not enough to call a model free: an explicit
+    // model price makes owned hardware billable too. Only genuinely unmetered
+    // model/tier pairs may race in parallel.
+    let is_free = |p: &ProviderConfig| !pricer.is_metered(&p.tier, model);
 
     let free_providers: Vec<&ProviderConfig> = providers.iter().filter(|p| is_free(p)).copied().collect();
     let paid_providers: Vec<&ProviderConfig> = providers.iter().filter(|p| !is_free(p)).copied().collect();
@@ -298,7 +301,10 @@ pub async fn stream_race_models(
     // only the winning stream gets a meter, so the losers' tokens would be billed
     // by the provider and invisible to the cap. `stream_race` already refuses to
     // race paid providers for exactly this reason; do the same here.
-    if !crate::cost::is_free_tier(&provider.tier) {
+    let any_metered_model = models
+        .iter()
+        .any(|model| pricer.is_metered(&provider.tier, model));
+    if any_metered_model {
         tracing::info!(
             "stream_race_models: {} is metered — trying {} models in order rather than racing",
             provider.name,
