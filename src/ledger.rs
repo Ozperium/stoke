@@ -150,10 +150,132 @@ impl Ledger {
         tx.commit().map_err(|e| format!("ledger: commit: {e}"))
     }
 
-    /// Atomically convert `amount` into durable spend and drop that much of
-    /// the key's open reservations. One transaction: a charge without the
-    /// release would double-count; a release without the charge would erase
-    /// real spend.
+    /// Atomically admit a request against durable spend and open holds, then
+    /// create and return its owned reservation id. `None` means the request
+    /// would cross the supplied cap; database errors are returned so callers
+    /// fail closed.
+    pub fn reserve_if_fits(
+        &self,
+        key_id: &str,
+        amount: f64,
+        limit: f64,
+    ) -> Result<Option<i64>, String> {
+        if !(amount > 0.0) {
+            return Ok(None);
+        }
+        if !amount.is_finite() || !limit.is_finite() || limit <= 0.0 {
+            return Err("ledger: invalid reservation amount or limit".to_string());
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| format!("ledger: tx: {e}"))?;
+        let spent: f64 = tx
+            .query_row(
+                "SELECT COALESCE((SELECT spend_usd FROM spend WHERE key_id = ?1), 0.0)",
+                params![key_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("ledger: spend read: {e}"))?;
+        let held: f64 = tx
+            .query_row(
+                "SELECT COALESCE(SUM(amount_usd), 0.0) FROM reservations WHERE key_id = ?1",
+                params![key_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("ledger: held read: {e}"))?;
+        if spent + held + amount > limit {
+            return Ok(None);
+        }
+        tx.execute(
+            "INSERT INTO reservations (key_id, amount_usd, created_at) VALUES (?1, ?2, ?3)",
+            params![key_id, amount, unix_now()],
+        )
+        .map_err(|e| format!("ledger: reserve: {e}"))?;
+        let id = tx.last_insert_rowid();
+        tx.commit().map_err(|e| format!("ledger: commit: {e}"))?;
+        Ok(Some(id))
+    }
+
+    /// Atomically convert `amount` into durable spend and drop the exact
+    /// reservation owned by `reservation_id`. No other hold is touched.
+    pub fn settle_reservation(
+        &self,
+        reservation_id: i64,
+        amount: f64,
+        estimated: bool,
+    ) -> Result<(), String> {
+        if !(amount >= 0.0) || !amount.is_finite() {
+            return Err("ledger: invalid settlement amount".to_string());
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| format!("ledger: tx: {e}"))?;
+        let key_id: String = tx
+            .query_row(
+                "SELECT key_id FROM reservations WHERE id = ?1",
+                params![reservation_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("ledger: settle reservation: {e}"))?;
+        let estimated_amount = if estimated { amount } else { 0.0 };
+        tx.execute(
+            "INSERT INTO spend (key_id, spend_usd, estimated_usd) VALUES (?1, ?2, ?3)
+             ON CONFLICT(key_id) DO UPDATE SET
+                 spend_usd = spend_usd + ?2,
+                 estimated_usd = estimated_usd + ?3",
+            params![key_id, amount, estimated_amount],
+        )
+        .map_err(|e| format!("ledger: settle charge: {e}"))?;
+        tx.execute(
+            "DELETE FROM reservations WHERE id = ?1",
+            params![reservation_id],
+        )
+        .map_err(|e| format!("ledger: settle reservation: {e}"))?;
+        tx.commit().map_err(|e| format!("ledger: commit: {e}"))
+    }
+
+    /// Record plain spend without consuming any reservation. Legacy callers
+    /// use this for unreserved charges; production reservation settlement must
+    /// use `settle_reservation` with its request-owned id.
+    pub fn record_spend(&self, key_id: &str, amount: f64, estimated: bool) -> Result<(), String> {
+        if !(amount >= 0.0) || !amount.is_finite() {
+            return Err("ledger: invalid spend amount".to_string());
+        }
+        let estimated_amount = if estimated { amount } else { 0.0 };
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO spend (key_id, spend_usd, estimated_usd) VALUES (?1, ?2, ?3)
+             ON CONFLICT(key_id) DO UPDATE SET
+                 spend_usd = spend_usd + ?2,
+                 estimated_usd = estimated_usd + ?3",
+            params![key_id, amount, estimated_amount],
+        )
+        .map_err(|e| format!("ledger: spend: {e}"))?;
+        Ok(())
+    }
+
+    /// Cancel the exact request-owned reservation. No other hold is touched.
+    pub fn cancel_reservation(&self, reservation_id: i64) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let deleted = conn
+            .execute(
+                "DELETE FROM reservations WHERE id = ?1",
+                params![reservation_id],
+            )
+            .map_err(|e| format!("ledger: cancel reservation: {e}"))?;
+        if deleted == 1 {
+            Ok(())
+        } else {
+            Err(format!("ledger: reservation {reservation_id} is missing"))
+        }
+    }
+
+    /// Legacy compatibility API: atomically charge `amount` and consume the
+    /// oldest holds for this key. Production request paths must not use this
+    /// aggregate release because it cannot identify the request that owns a
+    /// hold; use `settle_reservation` instead.
     pub fn charge_and_release(&self, key_id: &str, amount: f64) -> Result<(), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn
@@ -170,7 +292,9 @@ impl Ledger {
         Ok(())
     }
 
-    /// Give back a hold without spending (early return, refusal, client gone).
+    /// Legacy compatibility API: return `amount` from the oldest holds for
+    /// this key. Production request paths must cancel their exact reservation
+    /// id instead.
     pub fn release(&self, key_id: &str, amount: f64) -> Result<(), String> {
         if !(amount > 0.0) {
             return Ok(());
@@ -743,6 +867,78 @@ mod tests {
         }
         let held = ledger.held("k").unwrap();
         assert!((held - 0.08).abs() < 1e-9, "expected 8 holds of 0.01, got {held}");
+    }
+
+    #[test]
+    fn durable_reserve_if_fits_is_atomic_across_connections() {
+        use std::sync::{Arc, Barrier};
+        let dir = std::env::temp_dir().join(format!(
+            "stoke-ledger-atomic-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = dir.join("ledger.db");
+        let first = Arc::new(Ledger::open(&path).unwrap());
+        let second = Arc::new(Ledger::open(&path).unwrap());
+        let barrier = Arc::new(Barrier::new(2));
+        let mut handles = Vec::new();
+        for ledger in [first, second] {
+            let barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                ledger.reserve_if_fits("k", 0.06, 0.10).unwrap()
+            }));
+        }
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(results.iter().filter(|r| r.is_some()).count(), 1);
+        let ledger = Ledger::open(&path).unwrap();
+        assert!(ledger.held("k").unwrap() <= 0.10);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn exact_settlement_is_out_of_order_and_preserves_other_holds() {
+        let ledger = l();
+        let first = ledger.reserve_if_fits("k", 0.40, 1.0).unwrap().unwrap();
+        let second = ledger.reserve_if_fits("k", 0.30, 1.0).unwrap().unwrap();
+
+        ledger.record_spend("k", 0.10, false).unwrap();
+        assert_eq!(ledger.held("k").unwrap(), 0.70);
+
+        ledger.settle_reservation(second, 0.50, true).unwrap();
+        assert_eq!(ledger.spend("k").unwrap(), 0.60);
+        assert_eq!(ledger.held("k").unwrap(), 0.40);
+        assert_eq!(ledger.list_spend().unwrap()[0].estimated_usd, 0.50);
+
+        ledger.settle_reservation(first, 0.20, false).unwrap();
+        assert_eq!(ledger.spend("k").unwrap(), 0.80);
+        assert_eq!(ledger.held("k").unwrap(), 0.0);
+    }
+
+    #[test]
+    fn failed_settlement_keeps_existing_holds() {
+        let ledger = l();
+        let first = ledger.reserve_if_fits("k", 0.40, 1.0).unwrap().unwrap();
+        let second = ledger.reserve_if_fits("k", 0.30, 1.0).unwrap().unwrap();
+
+        assert!(ledger.settle_reservation(i64::MAX, 0.20, false).is_err());
+        assert_eq!(ledger.held("k").unwrap(), 0.70);
+        ledger.cancel_reservation(first).unwrap();
+        ledger.cancel_reservation(second).unwrap();
+        assert_eq!(ledger.held("k").unwrap(), 0.0);
+    }
+
+    #[test]
+    fn plain_spend_does_not_consume_unrelated_holds() {
+        let ledger = l();
+        let _first = ledger.reserve_if_fits("k", 0.40, 1.0).unwrap().unwrap();
+        let _second = ledger.reserve_if_fits("k", 0.30, 1.0).unwrap().unwrap();
+        ledger.record_spend("k", 0.10, false).unwrap();
+        assert_eq!(ledger.spend("k").unwrap(), 0.10);
+        assert_eq!(ledger.held("k").unwrap(), 0.70);
     }
 
     #[test]
