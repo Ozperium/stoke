@@ -97,6 +97,10 @@ check('route_rate_startup',lambda:startup('[[routes]]\nname="guard"\npath="/v1/g
 def scripts_startup():
     with daemon('[plugins]\nscripts=["missing-required-fixture.js"]\n') as (_,proc,_): assert proc.poll() is not None,'configured missing script silently ignored'
 check('required_scripts_startup',scripts_startup)
+def empty_native_script_startup():
+    with daemon('[plugins]\nscripts=["hook.js"]\n',feature_scripts='') as (_,proc,_):
+        assert proc.poll() is not None,'empty/no-hook JS script started'
+check('empty_native_script_startup',empty_native_script_startup)
 def admin():
     with daemon() as (p,_,_):
         for path in ['/ui','/ui/summary','/ui/events','/ui/dashboard.css','/ui/htmx.min.js','/ui/sse.js']:
@@ -188,10 +192,10 @@ for hook in ['pre_request','prompt_filter','post_response','scripts']:
     for alias in ['fixture-model','claude-stoke-local--fixture--fixture-model','stoke-local--fixture--fixture-model','claude-stoke-codex--fixture-model','stoke-codex--fixture-model']:
         def native_hooks(hook=hook,alias=alias):
             extra='[plugins]\n'+(hook+'=["hook.js"]\n' if hook=='scripts' else hook+'=["http://127.0.0.1:'+str(mock.server_port)+'/deny"]\n')
-            with daemon(extra,feature_scripts='module.exports = {};') as (p,proc,_):
+            with daemon(extra,feature_scripts='module.exports = { pre_request(input) { return input; } };') as (p,proc,_):
                 # Feature-less builds refuse scripts at startup; JS builds must refuse the native request.
                 if proc.poll() is not None:
-                    assert hook=='scripts'; return
+                    assert hook=='scripts' and os.environ.get('STOKE_TEST_JS')!='1'; return
                 before=len(seen)
                 for stream in [False,True]:
                     code,_=req(p,'/v1/messages',body('/v1/messages',model=alias,stream=stream)); assert code==403,(hook,alias,code)
@@ -262,6 +266,113 @@ def metadata_and_schema_are_text_data():
             assert code==200,('ordinary schema/metadata rejected',path,code)
             assert len(seen)==before+1 and seen[-1][1]['metadata']==b['metadata']
 check('metadata_and_function_schema_positive_controls',metadata_and_schema_are_text_data)
+def assert_no_example_email(value):
+    if isinstance(value,str):
+        assert '@example.com' not in value, f'leaked sensitive value: {value}'
+    elif isinstance(value,dict):
+        for child in value.values(): assert_no_example_email(child)
+    elif isinstance(value,list):
+        for child in value: assert_no_example_email(child)
+def pii_redact_protected_chat_shapes():
+    extra='[builtins.pii_redact]\nreplacement="[REDACTED]"\n[[routes]]\nname="pii-protected"\npath="/v1/protected/completions"\nrouting="single"\nbuiltins=["pii_redact"]\n'
+    with daemon(extra) as (p,_,_):
+        standard = [
+            {'role':'user','content':[{'type':'text','text':'first@example.com'},{'type':'text','text':'second@example.com'}]},
+            {'role':'assistant','content':None,'tool_calls':[
+                {'id':'call_1','type':'function','function':{'name':'lookup','arguments':r'{"name":"contact\u0040example.com","items":["third@example.com",{"name":"fourth@example.com"}]}' }},
+                {'id':'call_2','type':'function','function':{'name':'lookup_more','arguments':json.dumps({'rows':[['fifth@example.com'],{'name':'sixth@example.com'}]})}},
+            ]},
+            {'role':'tool','tool_call_id':'call_1','content':'tool-result@example.com'},
+        ]
+        before=len(seen); code,_=req(p,'/v1/protected/completions',body('/v1/chat/completions',messages=standard))
+        assert code==200,code; assert len(seen)==before+1
+        captured=seen[-1][1]['messages']
+        assert captured[0]['content'][0]['text']=='[REDACTED]'
+        assert captured[0]['content'][1]['text']=='[REDACTED]'
+        assert captured[1]['tool_calls'][0]['id']=='call_1'
+        assert captured[1]['tool_calls'][0]['function']['name']=='lookup'
+        assert captured[1]['tool_calls'][1]['function']['name']=='lookup_more'
+        for call in captured[1]['tool_calls']:
+            json.loads(call['function']['arguments'])
+        assert_no_example_email(captured)
+
+        legacy = [
+            {'role':'user','content':'legacy request'},
+            {'role':'assistant','content':None,'function_call':{
+                'name':'legacy_lookup',
+                'arguments':r'{"name":"legacy@example.com","nested":[["seventh@example.com"],{"name":"eighth@example.com"}]}'
+            }},
+        ]
+        before=len(seen); code,_=req(p,'/v1/protected/completions',body('/v1/chat/completions',messages=legacy))
+        assert code==200,code; assert len(seen)==before+1
+        captured=seen[-1][1]['messages']
+        assert captured[1]['function_call']['name']=='legacy_lookup'
+        json.loads(captured[1]['function_call']['arguments'])
+        assert_no_example_email(captured)
+check('pii_redact_protected_chat_shapes',pii_redact_protected_chat_shapes)
+def pii_redact_protected_tool_arguments():
+    extra='[builtins.pii_redact]\nreplacement="[REDACTED]"\n[[routes]]\nname="pii-protected-tools"\npath="/v1/protected/tools"\nrouting="single"\nbuiltins=["pii_redact"]\n'
+    with daemon(extra) as (p,_,_):
+        messages = [
+            {'role':'assistant','content':None,'tool_calls':[
+                {'id':'call_args','type':'function','function':{'name':'lookup','arguments':r'{"name":"contact\u0040example.com","items":["nested@example.com",{"name":"business@example.com"}]}'}}
+            ]},
+            {'role':'tool','tool_call_id':'call_args','content':'ordinary tool result'},
+        ]
+        before=len(seen); code,_=req(p,'/v1/protected/tools',body('/v1/chat/completions',messages=messages))
+        assert code==200,code; assert len(seen)==before+1
+        captured=seen[-1][1]['messages']; call=captured[0]['tool_calls'][0]
+        assert call['id']=='call_args' and call['function']['name']=='lookup'
+        json.loads(call['function']['arguments'])
+        assert_no_example_email(captured)
+
+        legacy = [{'role':'assistant','content':None,'function_call':{
+            'name':'legacy_lookup',
+            'arguments':r'{"name":"legacy@example.com","nested":[["legacy-nested@example.com"],{"name":"legacy-business@example.com"}]}'
+        }}]
+        before=len(seen); code,_=req(p,'/v1/protected/tools',body('/v1/chat/completions',messages=legacy))
+        assert code==200,code; assert len(seen)==before+1
+        captured=seen[-1][1]['messages']; function_call=captured[0]['function_call']
+        assert function_call['name']=='legacy_lookup'
+        json.loads(function_call['arguments'])
+        assert_no_example_email(captured)
+check('pii_redact_protected_tool_arguments',pii_redact_protected_tool_arguments)
+def pii_argument_validation(kind, case, stream):
+    extra='[builtins.pii_redact]\nreplacement="[REDACTED]"\n[[routes]]\nname="pii-protected"\npath="/v1/protected/completions"\nrouting="single"\nbuiltins=["pii_redact"]\n'
+    depth = 130 if case in ('deep', 'unprotected') else 32
+    arguments = r'{"email":"contact\u0040example.com","pad":' + '[' * depth + '0' + ']' * depth + '}'
+    assert json.loads(arguments)['email'] == 'contact@example.com'
+    if case == 'malformed': arguments = arguments[:-1]
+    if case == 'nonstring': arguments = {'email': 'contact@example.com'}
+    function = {'name': 'lookup', 'arguments': arguments}
+    message = {'role': 'assistant', 'content': None}
+    if kind == 'standard':
+        message['tool_calls'] = [{'id': 'call_fixture', 'type': 'function', 'function': function}]
+    else:
+        message['function_call'] = function
+    path = '/v1/chat/completions' if case == 'unprotected' else '/v1/protected/completions'
+    with daemon(extra) as (p,_,_):
+        before = len(seen)
+        code,raw = req(p,path,body('/v1/chat/completions',messages=[message],stream=stream))
+        if case in ('deep', 'malformed', 'nonstring'):
+            assert code == 403, ('mandatory redaction did not refuse', kind, case, stream, code)
+            assert len(seen) == before, 'provider contacted before mandatory redaction succeeded'
+            assert b'contact' not in raw and b'example.com' not in raw, 'refusal exposed argument data'
+            balance = stats(p)['keys'][0]
+            assert balance['spend_usd'] == 0 and balance['reserved_usd'] == 0
+        else:
+            assert code == 200 and len(seen) == before + 1, (kind, case, code)
+            captured = seen[-1][1]['messages'][0]
+            call = captured['tool_calls'][0]['function'] if kind == 'standard' else captured['function_call']
+            assert call['name'] == 'lookup'
+            if case == 'unprotected':
+                assert call['arguments'] == arguments, 'unprotected route was changed'
+            else:
+                assert json.loads(call['arguments'])['email'] == '[REDACTED]'
+for kind in ('standard', 'legacy'):
+    for case in ('deep', 'malformed', 'nonstring', 'shallow', 'unprotected'):
+        for stream in (False, True):
+            check(f'pii_arguments_{kind}_{case}_{"stream" if stream else "json"}', lambda kind=kind,case=case,stream=stream: pii_argument_validation(kind,case,stream))
 if os.environ.get('STOKE_TEST_JS')=='1':
     for hook in ['pre_request','prompt_filter','post_response']:
         def js_throw(hook=hook):

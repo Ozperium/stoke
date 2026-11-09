@@ -31,6 +31,27 @@ fn sse_delimiter(bytes: &[u8]) -> Option<(usize, usize)> {
     }
 }
 
+fn sse_delimiter_across_boundary(partial: &[u8], incoming: &[u8]) -> Option<(usize, usize)> {
+    let delimiters: [&[u8]; 2] = [b"\r\n\r\n", b"\n\n"];
+    let mut match_found = None;
+    for delimiter in delimiters {
+        for split in 1..delimiter.len() {
+            if partial.ends_with(&delimiter[..split])
+                && incoming.starts_with(&delimiter[split..])
+            {
+                let candidate = (partial.len() - split, delimiter.len() - split);
+                if match_found
+                    .map(|current: (usize, usize)| candidate.0 < current.0)
+                    .unwrap_or(true)
+                {
+                    match_found = Some(candidate);
+                }
+            }
+        }
+    }
+    match_found
+}
+
 fn sse_error(message: &str) -> String {
     format!(
         "event: error\ndata: {}\n\n",
@@ -460,7 +481,7 @@ impl ResponsesStreamTranslator {
         Self {
             model: model.into(),
             id: "msg_stoke_codex".to_string(),
-            partial: Vec::new(),
+            partial: Vec::with_capacity(MAX_SSE_FRAME_BYTES),
             started: false,
             next_index: 0,
             open: None,
@@ -486,40 +507,71 @@ impl ResponsesStreamTranslator {
         if self.failed.is_some() {
             return Vec::new();
         }
-        self.partial.extend_from_slice(bytes);
         let mut events = Vec::new();
-        while let Some((end, delimiter_len)) = sse_delimiter(&self.partial) {
-            if end > MAX_SSE_FRAME_BYTES {
-                events.extend(self.fail(format!("SSE frame exceeds {} bytes", MAX_SSE_FRAME_BYTES)));
-                return events;
-            }
-            let frame: Vec<u8> = self.partial.drain(..end + delimiter_len).collect();
-            let frame = match std::str::from_utf8(&frame) {
-                Ok(frame) => frame,
-                Err(_) => {
-                    events.extend(self.fail("SSE frame is not valid UTF-8"));
+        let mut incoming = bytes;
+        while !incoming.is_empty() {
+            if let Some((end, delimiter_len)) = sse_delimiter_across_boundary(&self.partial, incoming) {
+                // Count the wire separator too, consistently across chunk boundaries.
+                if self.partial.len().saturating_add(delimiter_len) > MAX_SSE_FRAME_BYTES {
+                    events.extend(self.fail(format!("SSE frame exceeds {} bytes", MAX_SSE_FRAME_BYTES)));
                     return events;
                 }
-            };
-            for line in frame.lines() {
-                if let Some(data) = line.strip_prefix("data:") {
-                    let data = data.trim();
-                    if data == "[DONE]" {
-                        continue;
-                    }
-                    if let Ok(value) = serde_json::from_str::<Value>(data) {
-                        self.translate_event(&value, &mut events);
-                    }
-                    if self.failed.is_some() {
-                        return events;
-                    }
+                self.partial.truncate(end);
+                let frame: Vec<u8> = self.partial.drain(..).collect();
+                if !self.translate_frame(&frame, &mut events) {
+                    return events;
+                }
+                incoming = &incoming[delimiter_len..];
+                continue;
+            }
+
+            if let Some((end, delimiter_len)) = sse_delimiter(incoming) {
+                if self.partial.len().saturating_add(end).saturating_add(delimiter_len) > MAX_SSE_FRAME_BYTES {
+                    events.extend(self.fail(format!("SSE frame exceeds {} bytes", MAX_SSE_FRAME_BYTES)));
+                    return events;
+                }
+                self.partial.extend_from_slice(&incoming[..end]);
+                let frame: Vec<u8> = self.partial.drain(..).collect();
+                if !self.translate_frame(&frame, &mut events) {
+                    return events;
+                }
+                incoming = &incoming[end + delimiter_len..];
+                continue;
+            }
+
+            if self.partial.len().saturating_add(incoming.len()) > MAX_SSE_FRAME_BYTES {
+                events.extend(self.fail(format!("SSE buffer exceeds {} bytes", MAX_SSE_FRAME_BYTES)));
+                return events;
+            }
+            self.partial.extend_from_slice(incoming);
+            break;
+        }
+        events
+    }
+
+    fn translate_frame(&mut self, frame: &[u8], events: &mut Vec<String>) -> bool {
+        let frame = match std::str::from_utf8(frame) {
+            Ok(frame) => frame,
+            Err(_) => {
+                events.extend(self.fail("SSE frame is not valid UTF-8"));
+                return false;
+            }
+        };
+        for line in frame.lines() {
+            if let Some(data) = line.strip_prefix("data:") {
+                let data = data.trim();
+                if data == "[DONE]" {
+                    continue;
+                }
+                if let Ok(value) = serde_json::from_str::<Value>(data) {
+                    self.translate_event(&value, events);
+                }
+                if self.failed.is_some() {
+                    return false;
                 }
             }
         }
-        if self.partial.len() > MAX_SSE_FRAME_BYTES {
-            events.extend(self.fail(format!("SSE buffer exceeds {} bytes", MAX_SSE_FRAME_BYTES)));
-        }
-        events
+        true
     }
 
     pub fn finish_response(&self) -> Value {
@@ -879,7 +931,7 @@ impl StreamTranslator {
             input_tokens: 0,
             output_tokens: 0,
             stop_reason: None,
-            partial: Vec::new(),
+            partial: Vec::with_capacity(MAX_SSE_FRAME_BYTES),
             failed: None,
         }
     }
@@ -903,10 +955,17 @@ impl StreamTranslator {
         if self.failed.is_some() {
             return Vec::new();
         }
-        self.partial.extend_from_slice(bytes);
         let mut events = Vec::new();
-        while let Some(pos) = self.partial.iter().position(|&b| b == b'\n') {
-            let line: Vec<u8> = self.partial.drain(..=pos).collect();
+        let mut incoming = bytes;
+        while let Some(pos) = incoming.iter().position(|&b| b == b'\n') {
+            let line_len = pos + 1;
+            if self.partial.len().saturating_add(line_len) > MAX_SSE_FRAME_BYTES {
+                events.extend(self.fail(format!("SSE line exceeds {} bytes", MAX_SSE_FRAME_BYTES)));
+                return events;
+            }
+            self.partial.extend_from_slice(&incoming[..line_len]);
+            incoming = &incoming[line_len..];
+            let line: Vec<u8> = self.partial.drain(..).collect();
             let line = match std::str::from_utf8(&line) {
                 Ok(line) => line,
                 Err(_) => {
@@ -914,10 +973,6 @@ impl StreamTranslator {
                     return events;
                 }
             };
-            if line.len() > MAX_SSE_FRAME_BYTES {
-                events.extend(self.fail(format!("SSE line exceeds {} bytes", MAX_SSE_FRAME_BYTES)));
-                return events;
-            }
             if let Some(payload) = line.trim_end().strip_prefix("data:") {
                 let payload = payload.trim();
                 if payload == "[DONE]" {
@@ -930,13 +985,18 @@ impl StreamTranslator {
                 }
             }
         }
-        if self.partial.len() > MAX_SSE_FRAME_BYTES {
+        if self.partial.len().saturating_add(incoming.len()) > MAX_SSE_FRAME_BYTES {
             events.extend(self.fail(format!("SSE buffer exceeds {} bytes", MAX_SSE_FRAME_BYTES)));
+            return events;
         }
+        self.partial.extend_from_slice(incoming);
         events
     }
 
     fn on_chunk(&mut self, v: &Value) -> Vec<String> {
+        if self.failed.is_some() {
+            return Vec::new();
+        }
         let mut events = self.ensure_started();
         if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
             if let Some(p) = u.get("prompt_tokens").and_then(Value::as_u64) {
@@ -954,6 +1014,9 @@ impl StreamTranslator {
             if let Some(text) = choice.pointer("/delta/content").and_then(Value::as_str) {
                 if !text.is_empty() {
                     events.extend(self.text_delta(text));
+                    if self.failed.is_some() {
+                        return events;
+                    }
                 }
             }
             if let Some(calls) = choice
@@ -962,6 +1025,9 @@ impl StreamTranslator {
             {
                 for call in calls {
                     events.extend(self.tool_call_delta(call));
+                    if self.failed.is_some() {
+                        return events;
+                    }
                 }
             }
             if let Some(fr) = choice
@@ -980,6 +1046,9 @@ impl StreamTranslator {
     /// opens a fresh text block — a `tool_use` block must never receive
     /// `text_delta` events.
     fn text_delta(&mut self, text: &str) -> Vec<String> {
+        if self.failed.is_some() {
+            return Vec::new();
+        }
         if self.text_bytes.saturating_add(text.len()) > MAX_TEXT_BLOCK_BYTES {
             return self.fail(format!("text block exceeds {} bytes", MAX_TEXT_BLOCK_BYTES));
         }
@@ -1038,6 +1107,9 @@ impl StreamTranslator {
     /// `index` (or one we have not seen) opens a new `tool_use` block with
     /// `input_json_delta` partial-JSON fragments.
     fn tool_call_delta(&mut self, call: &Value) -> Vec<String> {
+        if self.failed.is_some() {
+            return Vec::new();
+        }
         let oa_index = call.get("index").and_then(Value::as_u64).unwrap_or(0);
         if oa_index > MAX_TOOL_INDEX || oa_index as usize >= MAX_TOOL_BLOCKS {
             return self.fail(format!("tool-call index {} exceeds the stream limit", oa_index));
@@ -1788,6 +1860,38 @@ mod tests {
     }
 
     #[test]
+    fn malformed_tool_delta_is_terminal_within_the_same_frame() {
+        let mut translator = StreamTranslator::new("m");
+        let frame = format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":{},\"id\":\"bad\",\"function\":{{\"name\":\"bad\",\"arguments\":\"\"}}}},{{\"index\":0,\"id\":\"good\",\"function\":{{\"name\":\"good\",\"arguments\":\"{{}}\"}}}}]}}}}]}}\n\n",
+            MAX_TOOL_INDEX + 1
+        );
+        let events = translator.feed_bytes(frame.as_bytes());
+
+        assert!(translator.failed.is_some());
+        assert!(!events.is_empty());
+        let error = events.last().unwrap();
+        assert!(error.starts_with("event: error"));
+        assert_eq!(event_data(error)["error"]["type"], "stream_error");
+        assert_eq!(events.iter().filter(|event| event.contains("content_block_start")).count(), 0);
+    }
+
+    #[test]
+    fn text_limit_error_is_terminal_before_later_tool_delta_in_the_same_frame() {
+        let mut translator = StreamTranslator::new("m");
+        translator.text_bytes = MAX_TEXT_BLOCK_BYTES;
+        let frame = b"data: {\"choices\":[{\"delta\":{\"content\":\"x\",\"tool_calls\":[{\"index\":0,\"id\":\"good\",\"function\":{\"name\":\"good\",\"arguments\":\"{}\"}}]}}]}\n\n";
+        let events = translator.feed_bytes(frame);
+
+        assert!(translator.failed.is_some());
+        assert!(!events.is_empty());
+        let error = events.last().unwrap();
+        assert!(error.starts_with("event: error"));
+        assert_eq!(event_data(error)["error"]["type"], "stream_error");
+        assert_eq!(events.iter().filter(|event| event.contains("content_block_start")).count(), 0);
+    }
+
+    #[test]
     fn parallel_tool_call_fragments_never_reuse_closed_indexes() {
         let mut t = StreamTranslator::new("m");
         let mut events = Vec::new();
@@ -1982,6 +2086,90 @@ mod tests {
         let events = translator.feed_bytes(&frame);
         assert!(events.iter().any(|event| event.starts_with("event: error")));
         assert!(translator.feed_bytes(b"data: [DONE]\n\n").is_empty());
+    }
+
+    #[test]
+    fn chat_stream_bounds_partial_before_copying_an_oversized_chunk() {
+        let mut translator = StreamTranslator::new("m");
+        let mut frame = b"data: ".to_vec();
+        frame.extend(std::iter::repeat_n(b'x', 2 * MAX_SSE_FRAME_BYTES));
+        let events = translator.feed_bytes(&frame);
+        assert!(events.iter().any(|event| event.starts_with("event: error")));
+        let error = event_data(events.iter().find(|event| event.starts_with("event: error")).unwrap());
+        assert_eq!(error["type"], "error");
+        assert_eq!(error["error"]["type"], "stream_error");
+        assert!(translator.partial.capacity() <= MAX_SSE_FRAME_BYTES);
+    }
+
+    #[test]
+    fn responses_stream_bounds_partial_before_copying_an_oversized_chunk() {
+        let mut translator = ResponsesStreamTranslator::new("m");
+        let mut frame = b"data: ".to_vec();
+        frame.extend(std::iter::repeat_n(b'x', 2 * MAX_SSE_FRAME_BYTES));
+        let events = translator.feed_bytes(&frame);
+        assert!(events.iter().any(|event| event.starts_with("event: error")));
+        let error = event_data(events.iter().find(|event| event.starts_with("event: error")).unwrap());
+        assert_eq!(error["type"], "error");
+        assert_eq!(error["error"]["type"], "stream_error");
+        assert!(translator.partial.capacity() <= MAX_SSE_FRAME_BYTES);
+    }
+
+    #[test]
+    fn chat_stream_accepts_a_coalesced_chunk_over_the_buffer_limit() {
+        let mut translator = StreamTranslator::new("m");
+        let frame = r#"data: {"choices":[{"delta":{"content":"x"}}]}
+
+"#;
+        let mut input = frame.repeat(1_500);
+        assert!(input.len() > MAX_SSE_FRAME_BYTES);
+        input.push_str("data: [DONE]\n\n");
+        let events = translator.feed_bytes(input.as_bytes());
+        assert!(!events.iter().any(|event| event.starts_with("event: error")));
+        assert!(events.iter().any(|event| event.contains("message_stop")));
+        assert!(translator.partial.capacity() <= MAX_SSE_FRAME_BYTES);
+    }
+
+    #[test]
+    fn responses_stream_accepts_a_coalesced_chunk_over_the_buffer_limit() {
+        let mut translator = ResponsesStreamTranslator::new("m");
+        let mut input = String::from(
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n",
+        );
+        for _ in 0..1_500 {
+            input.push_str(
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"x\"}\n\n",
+            );
+        }
+        input.push_str(
+            "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+        );
+        assert!(input.len() > MAX_SSE_FRAME_BYTES);
+        let events = translator.feed_bytes(input.as_bytes());
+        assert!(!events.iter().any(|event| event.starts_with("event: error")));
+        assert!(events.iter().any(|event| event.contains("message_stop")));
+        assert_eq!(translator.finish_response()["content"][0]["text"].as_str().unwrap().len(), 1_500);
+        assert!(translator.partial.capacity() <= MAX_SSE_FRAME_BYTES);
+    }
+
+    #[test]
+    fn responses_frame_limit_is_independent_of_delimiter_chunking() {
+        let prefix = b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"";
+        let suffix = b"\"}\r\n\r\n";
+        for wire_len in [MAX_SSE_FRAME_BYTES, MAX_SSE_FRAME_BYTES + 4] {
+            let mut frame = prefix.to_vec();
+            frame.extend(std::iter::repeat_n(b'x', wire_len - prefix.len() - suffix.len()));
+            frame.extend_from_slice(suffix);
+            for split in [0, frame.len() - 3, frame.len() - 2, frame.len() - 1, frame.len()] {
+                let mut translator = ResponsesStreamTranslator::new("m");
+                let mut events = translator.feed_bytes(&frame[..split]);
+                events.extend(translator.feed_bytes(&frame[split..]));
+                assert_eq!(translator.failed.is_some(), wire_len > MAX_SSE_FRAME_BYTES,
+                    "frame acceptance changed with delimiter split at {split}");
+                assert!(translator.partial.capacity() <= MAX_SSE_FRAME_BYTES);
+                assert_eq!(events.iter().any(|event| event.starts_with("event: error")),
+                    wire_len > MAX_SSE_FRAME_BYTES);
+            }
+        }
     }
 
     #[test]

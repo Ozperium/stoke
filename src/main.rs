@@ -1340,13 +1340,19 @@ async fn chat_completions(
     // Built-in: prompt_filter (PII redaction) — strip secrets from messages
     if let Some(ref profile) = route_profile {
         if profile.builtins.contains(&"pii_redact".to_string()) {
-            if let Ok(Some(filtered)) = state
+            match state
                 .builtins
                 .prompt_filter(&req.messages, &model, &api_key)
                 .await
             {
-                req.messages = filtered;
-                tracing::info!("pii_redact: redacted sensitive data from prompt");
+                Ok(Some(filtered)) => {
+                    req.messages = filtered;
+                    tracing::info!("pii_redact: redacted sensitive data from prompt");
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    return (StatusCode::FORBIDDEN, format!("Required built-in PII redaction failed: {error}")).into_response();
+                }
             }
         }
     }

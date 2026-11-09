@@ -194,6 +194,29 @@ impl JsPlugins {
             .execute_script("plugin.js", wrapper)
             .map_err(|e| format!("Failed to load JS plugin {}: {}", name, e))?;
 
+        let hook_check = runtime
+            .execute_script(
+                "plugin-validation.js",
+                "JSON.stringify(globalThis.__stoke_hooks.pre_request.length > 0 || globalThis.__stoke_hooks.prompt_filter.length > 0 || globalThis.__stoke_hooks.post_response.length > 0);".to_string(),
+            )
+            .map_err(|e| format!("Failed to validate JS plugin {}: {}", name, e))?;
+        let hook_check = {
+            let context = runtime.main_context();
+            let mut scope = runtime.handle_scope();
+            let context_local = v8::Local::new(&mut scope, context);
+            let mut cs = v8::ContextScope::new(&mut scope, context_local);
+            v8::Local::new(&mut cs, hook_check)
+                .to_string(&mut cs)
+                .ok_or_else(|| format!("Failed to validate JS plugin {} hooks", name))?
+                .to_rust_string_lossy(&mut cs)
+        };
+        if hook_check != "true" {
+            return Err(format!(
+                "JS plugin {} must register at least one supported hook",
+                name
+            ));
+        }
+
         Ok(JsPlugin { name: name.to_string(), runtime })
     }
 
@@ -432,6 +455,28 @@ mod tests {
         let path = std::env::temp_dir().join(format!("stoke-js-plugin-{stamp}.js"));
         std::fs::write(&path, source).unwrap();
         path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn configured_plugin_without_supported_hook_is_an_error() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let sources = [
+            "",
+            "   \n\t",
+            "module.exports = {};",
+            "const helper = 1;",
+            "module.exports = { unknown(input) { return input; } };",
+        ];
+
+        for source in sources {
+            let path = write_plugin(source);
+            let result = JsPlugins::load(&[path.clone()]);
+            let _ = std::fs::remove_file(&path);
+            assert!(
+                result.is_err(),
+                "configured plugin without a supported hook must fail: {source:?}"
+            );
+        }
     }
 
     #[test]
