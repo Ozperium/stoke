@@ -454,7 +454,7 @@ Environment variables (server):
 | `POST <route profile paths>` | required | Same handler with the profile's pinned defaults |
 | `GET /v1/models` | required | Models known from config |
 | `GET /v1/nodes` | required | Live node registry snapshot |
-| `GET /v1/budget` | required | Per-key spend, limits, recent request counts, and the receipts ledger (zero-marginal share + cloud list-price counterfactual, estimates) |
+| `GET /v1/budget` | required | Caller-scoped spend, limits and recent request counts; global receipts withheld for inference keys |
 | `GET /v1/pricing` | required | The configured prices behind `stoke_cost` |
 | `GET /v1/cache` | required | Cache entry/hit counts |
 | `GET /v1/routes` | required | Configured route profiles |
@@ -507,3 +507,25 @@ These do not exist in the code today and nothing above claims them:
 - Per-tenant usage entitlement enforcement.
 - Published enforcement benchmarks (overhead, time-to-trip, false-positive rate).
 - OpenTelemetry traces and Prometheus metrics.
+
+Security integration (2026-11-09): finite-budget requests support single routing
+with one upstream attempt. Other routing patterns require an unlimited key;
+this avoids guessing a bound for loser races, retries, generated deliberation
+prompts or provider fan-out. Text reservations include the full serialized
+request and framing overhead, and omitted output bounds are enforced upstream.
+Media and hosted/remote content on metered finite keys are refused. JSON and
+stream paths own and settle exactly one reservation; uncertain usage settles at
+least its hold, while valid final counts (including zero) settle measured cost.
+Dispatched errors retain the conservative hold; pre-dispatch refusals cancel it.
+
+RouteProfile budget/rate fields remain deserializable for explicit migration
+errors: nonzero values fail validation and direct operators to [[keys]]. Global
+hooks cannot be enforced on native APIs or their bridge aliases, so these paths
+refuse them before token resolution or dispatch. Chat requires successful JS
+startup/handlers and strict webhook output responses; protected streaming is
+refused. Route built-ins remain scoped to their route.
+
+All /ui routes/assets/SSE require STOKE_ADMIN_KEY (or explicit unauthenticated
+local dev mode), distinct from inference authentication. Demo calls require a
+separate x-stoke-key and never reuse the operator password. Tenant budget API
+rows are caller-scoped and global aggregate receipts are withheld.

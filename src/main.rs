@@ -17,6 +17,7 @@ mod plugins;
 mod responses;
 mod router;
 mod sse;
+mod security;
 mod stream_fusion;
 mod subscription;
 mod ttft;
@@ -177,7 +178,7 @@ async fn main() {
                 }
                 Err(e) => {
                     tracing::error!("Failed to load JS plugins: {}", e);
-                    Arc::new(js_plugins::JsPlugins::load(&[]).unwrap())
+                    std::process::exit(1);
                 }
             }
         } else {
@@ -221,7 +222,7 @@ async fn main() {
             budget.set_budget(&policy.key, policy.budget_usd);
             tracing::info!(
                 "policy: key {}… budget ${:.2}",
-                &policy.key[..8.min(policy.key.len())],
+                "configured",
                 policy.budget_usd
             );
         }
@@ -229,7 +230,7 @@ async fn main() {
             budget.set_rate_limit(&policy.key, policy.rate_limit_rpm);
             tracing::info!(
                 "policy: key {}… rate {} rpm",
-                &policy.key[..8.min(policy.key.len())],
+                "configured",
                 policy.rate_limit_rpm
             );
         }
@@ -415,13 +416,13 @@ async fn ui_demo(State(state): State<AppState>, headers: axum::http::HeaderMap) 
     };
 
     let mut demo_headers = axum::http::HeaderMap::new();
-    if let Some(key) = headers
-        .get("authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(dashboard::api_key_from_basic)
-    {
-        demo_headers.insert("authorization", format!("Bearer {key}").parse().unwrap());
+    let Some(key) = headers.get("x-stoke-key").and_then(|v| v.to_str().ok()) else {
+        return (StatusCode::BAD_REQUEST, "Demo requires an explicit x-stoke-key inference credential").into_response();
+    };
+    if state.auth.validate_gateway(Some(key), None).is_none() {
+        return (StatusCode::UNAUTHORIZED, "Invalid demo inference credential").into_response();
     }
+    demo_headers.insert("x-stoke-key", headers["x-stoke-key"].clone());
 
     tokio::spawn(async move {
         let _demo_permit = demo_permit;
@@ -511,15 +512,16 @@ async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -
             .get("authorization")
             .and_then(|h| h.to_str().ok())
             .and_then(dashboard::api_key_from_basic)
-            .and_then(|key| state.auth.validate(Some(&format!("Bearer {key}"))))
-            .is_some();
+            .map(|key| std::env::var("STOKE_ADMIN_KEY").ok()
+                .filter(|admin| !admin.trim().is_empty()).map_or(false, |admin| key == admin))
+            .unwrap_or(false);
         if dev_authorized || basic_authorized {
             return next.run(req).await;
         }
         return Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header("www-authenticate", "Basic realm=\"Stoke control room\"")
-            .body(axum::body::Body::from("Stoke API key required"))
+            .body(axum::body::Body::from("Stoke operator key required"))
             .unwrap();
     }
 
@@ -611,12 +613,12 @@ async fn budget_stats(State(state): State<AppState>, headers: axum::http::Header
         // configured [auto_route].quality model for auto-routed requests that
         // were served at zero marginal cost. An estimate — never a
         // quality-equivalence claim. Zero when no quality model is configured.
-        "receipts": {
+        "receipts": if state.auth.validate(None).is_some() { Some(json!({
             "requests": requests,
             "zero_marginal_requests": zero_marginal,
             "zero_marginal_pct": if requests > 0 { (zero_marginal as f64 / requests as f64 * 100.0).round() } else { 0.0 },
             "cloud_listprice_avoided_usd_est": (avoided * 10_000.0).round() / 10_000.0,
-        }
+        })) } else { None }
     }))
 }
 
@@ -719,9 +721,8 @@ struct StreamBilling {
     api_key: String,
     /// Fallback when the provider never reports usage. An estimate, and labelled one.
     prompt_tokens_est: u64,
-    /// The hold taken on this key before the stream started. Dropped after the
-    /// real cost is recorded, so the money is never counted twice — once as
-    /// reserved and once as spent — and never leaks if the client vanishes.
+    /// The stream owns this request's hold and consumes it exactly once when
+    /// settling measured usage or a conservative estimate, including disconnects.
     _reservation: Option<budget::SpendReservation>,
 }
 
@@ -805,8 +806,9 @@ impl Drop for StreamMeter {
             .calculate(&self.model, Some(&usage.to_openai_json()))
             .cost_usd;
 
+        let cost = security::settle(&billing.budget, &billing.api_key, billing._reservation, cost, measured)
+            .unwrap_or_else(|e| { tracing::error!("stream settlement failed: {e}"); cost });
         if measured {
-            billing.budget.record_spend(&billing.api_key, cost);
             tracing::info!(
                 "stream billed: model={} node={} tokens={}+{} cost=${:.6}",
                 self.model,
@@ -816,9 +818,6 @@ impl Drop for StreamMeter {
                 cost
             );
         } else {
-            billing
-                .budget
-                .record_spend_estimated(&billing.api_key, cost);
             tracing::warn!(
                 "stream billed from an ESTIMATE: model={} node={} reported no usage; \
                  charged ${:.6} for ~{}+{} tokens{}. The cap is working from a guess for this key.",
@@ -1126,23 +1125,10 @@ async fn chat_completions(
 ) -> Response {
     // Auth check: gateway identity via x-stoke-key / x-api-key alias, or the
     // legacy Bearer form — matching the global middleware gate above.
-    let stoke_key = headers
-        .get("x-stoke-key")
-        .or_else(|| headers.get("x-api-key"))
-        .and_then(|h| h.to_str().ok());
-    let bearer_from_stoke_header = stoke_key.map(|k| format!("Bearer {}", k.trim()));
-    let auth_header = headers
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .map(|s| s.to_string())
-        .or(bearer_from_stoke_header);
-    let api_key = match state.auth.validate(auth_header.as_deref()) {
+    let api_key = match messages::validate_gateway_headers(&state.auth, &headers) {
         Some(k) => k,
-        None => {
-            return (StatusCode::UNAUTHORIZED, "Invalid or missing API key").into_response();
-        }
+        None => return (StatusCode::UNAUTHORIZED, "Invalid or missing API key").into_response(),
     };
-
     // Compute prompt hash for loop detection (model + messages + temp)
     let prompt_text: String = req
         .messages
@@ -1315,7 +1301,7 @@ async fn chat_completions(
                 }
             }
             Err(e) => {
-                tracing::error!("JS pre_request plugin error: {}", e);
+                return (StatusCode::FORBIDDEN, format!("Required JS pre_request failed: {e}")).into_response();
             }
         }
     };
@@ -1390,11 +1376,16 @@ async fn chat_completions(
             }
             Ok((None, None)) => {}
             Err(e) => {
-                tracing::error!("JS prompt_filter plugin error: {}", e);
+                return (StatusCode::FORBIDDEN, format!("Required JS prompt_filter failed: {e}")).into_response();
             }
         }
     }
 
+    if let Some(n) = req.extra.get("n_samples") {
+        if n.as_u64().filter(|n| *n > 0 && *n <= state.config.limits.max_n_samples as u64).is_none() {
+            return (StatusCode::BAD_REQUEST, "n_samples must be a positive integer within [limits].max_n_samples").into_response();
+        }
+    }
     // For self_consistency: number of samples and temperature. The caller names a
     // number; the operator sets the ceiling. Unclamped, `n_samples` is a direct
     // multiplier on the bill (router.rs loops over it, one provider call each).
@@ -1552,8 +1543,29 @@ async fn chat_completions(
     // Two-layer: exact match (hash) + semantic match (embedding similarity).
     // Scoped to (api_key, path): a cached response is a response the caller was
     // already authorised to receive, and nobody else.
+    let finite = security::capped(&state.config, &api_key);
+    let bounded_text = finite && cost::global().is_priced(&model)
+        && eligible_providers(&state.config, exclude_stoke, allowed_tiers).iter().any(|p| !cost::is_free_tier(&p.tier));
+    if finite && routing != "single" {
+        return (StatusCode::FORBIDDEN, "Finite budgets support single routing only; multi-call billing cannot be bounded safely").into_response();
+    }
+    if req.stream.unwrap_or(false) && (!state.config.plugins.post_response.is_empty() || !state.config.plugins.scripts.is_empty()
+        || route_profile.as_ref().map_or(false, |p| p.builtins.contains(&"code_formatter".to_string()))) {
+        return (StatusCode::FORBIDDEN, "Streaming cannot enforce mandatory output policy").into_response();
+    }
+    let mut normalized = serde_json::to_value(&req).unwrap();
+    // Optional Rust fields serialize as null; absence is the protocol default.
+    normalized.as_object_mut().unwrap().retain(|_, v| !v.is_null());
+    let (max_output, copies) = match security::normalize(&mut normalized, "max_tokens", state.config.limits.assumed_max_output_tokens, state.config.limits.max_n_samples, bounded_text) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    req = serde_json::from_value(normalized).unwrap();
+    // Hold the serialized request actually sent, including optional fields.
+    let normalized = serde_json::to_value(&req).unwrap();
     let cache_scope = ResponseCache::scope_of(&api_key, path);
-    let cache_key = if routing == "single" && !req.stream.unwrap_or(false) {
+    let cache_key = if routing == "single" && !req.stream.unwrap_or(false) && req.extra.is_empty()
+        && state.config.plugins.post_response.is_empty() && state.config.plugins.scripts.is_empty() {
         ResponseCache::cache_key(
             &cache_scope,
             &model,
@@ -1605,11 +1617,9 @@ async fn chat_completions(
         &model,
         &vote_models,
         n_samples,
-        (prompt_chars / 4) as u64,
-        req.max_tokens
-            .map(u64::from)
-            .unwrap_or(state.config.limits.assumed_max_output_tokens),
-    );
+        security::input_bound(&normalized),
+        max_output,
+    ) * copies as f64;
     let mut reservation = match state.budget.try_reserve(&api_key, hold) {
         Ok(r) => r,
         Err(reason) => {
@@ -1631,7 +1641,10 @@ async fn chat_completions(
     // Fusion patterns aggregate multiple responses and can't stream.
     // stream_race: race multiple providers/models, first to connect wins.
     if req.stream.unwrap_or(false) && (routing == "single" || routing == "stream_race") {
-        let body = serde_json::to_value(&req).unwrap_or_default();
+        let mut body = serde_json::to_value(&req).unwrap_or_default();
+        if reservation.is_some() {
+            body = sse::request_stream_usage(&body, "cloud", "openai_compatible");
+        }
 
         // Each branch resolves to (guard, winning node, connect ms, response, the
         // model that actually served). The served model is not always the one the
@@ -1683,7 +1696,7 @@ async fn chat_completions(
         } else {
             // Single routing with failover — candidates ordered by node placement
             // (warm > cold > unknown; ties by tier, in-flight, latency EWMA)
-            let (ranked, explain) = state.nodes.rank_with_tiers(
+            let (mut ranked, explain) = state.nodes.rank_with_tiers(
                 &model,
                 &state.config.providers,
                 exclude_stoke,
@@ -1707,10 +1720,11 @@ async fn chat_completions(
                 };
                 return (code, message).into_response();
             }
+            if finite { ranked.truncate(1); }
             // Hedged dispatch (opt-in): small prompt + top-2 candidates both
             // zero-marginal and verifiably holding the model → race them,
             // first past prefill wins. Duplicate local compute buys tail latency.
-            let hedge_pair = if state.config.auto_route.hedge
+            let hedge_pair = if state.config.auto_route.hedge && !finite
                 && prompt_chars / 4 < 1500
                 && ranked.len() >= 2
                 && ranked[..2].iter().all(|p| p.tier != "cloud")
@@ -1725,6 +1739,7 @@ async fn chat_completions(
             } else {
                 None
             };
+            security::dispatch(&mut reservation);
             let win = if let Some((a, b)) = hedge_pair {
                 tracing::info!("hedging {} across {} + {}", model, a.name, b.name);
                 failover::stream_hedged(a, b, &body, &state.nodes, hop).await
@@ -1788,7 +1803,7 @@ async fn chat_completions(
                     .find(|p| p.name == node_name)
                     .map(|p| p.tier.clone())
                     .unwrap_or_default();
-                let billing = (!cost::is_free_tier(&serving_tier)).then(|| StreamBilling {
+                let billing = (reservation.is_some() || !cost::is_free_tier(&serving_tier)).then(|| StreamBilling {
                     budget: state.budget.clone(),
                     api_key: api_key.clone(),
                     // Only ever used if the provider reports nothing. ~4 chars/token.
@@ -1890,7 +1905,7 @@ async fn chat_completions(
             _ => {
                 // Node-aware placement: rank candidates (warm > cold > unknown;
                 // ties by tier, in-flight count, latency EWMA), try best-first.
-                let (ranked, explain) = state.nodes.rank_with_tiers(
+                let (mut ranked, explain) = state.nodes.rank_with_tiers(
                     &model,
                     &state.config.providers,
                     exclude_stoke,
@@ -1918,7 +1933,13 @@ async fn chat_completions(
                     "no candidate attempted".to_string(),
                 );
                 let mut outcome = None;
+                if finite { ranked.truncate(1); }
                 for provider in ranked.iter().take(3) {
+                    if let Err(e) = cost::global().allows(&provider.tier, &req.model) {
+                        last_err = (StatusCode::FORBIDDEN, e);
+                        continue;
+                    }
+                    security::dispatch(&mut reservation);
                     let _inflight = state.nodes.begin(&provider.name);
                     match call_provider_hop(provider, &req, hop).await {
                         Ok(r) => {
@@ -1953,7 +1974,7 @@ async fn chat_completions(
     }
     .await;
 
-    let result = match result {
+    let mut result = match result {
         Ok(r) => r,
         Err((code, msg)) => {
             // The pricing gate refuses inside the router, where every failure
@@ -1982,6 +2003,14 @@ async fn chat_completions(
         }
     };
 
+    // Settle before output policy; a failed hook cannot forgive upstream work.
+    let measured = !result.cost_estimated;
+    result.cost.cost_usd = match security::settle(&state.budget, &api_key, reservation.take(),
+        if measured { result.cost.cost_usd } else { result.cost.cost_usd.max(hold) }, measured) {
+        Ok(charge) => charge,
+        Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, e).into_response(),
+    };
+
     tracing::info!(
         "Response: model={}, provider={} ({}ms) cost=${:.6}",
         model,
@@ -2000,18 +2029,6 @@ async fn chat_completions(
         result.elapsed_ms,
     );
 
-    // Record spend the moment the money is known to be gone — before the response
-    // hooks, before any transform, before any of the returns below. A plugin that
-    // blocks, panics, or rewrites the body does not un-bill the provider, and a
-    // cap that only debits on the happy path is a cap a retry loop walks straight
-    // through. `result.cost` is the whole request's bill, including every call a
-    // fan-out pattern made.
-    state.budget.record_spend(&api_key, result.cost.cost_usd);
-    // The hold has served its purpose: the money it stood for is now recorded as
-    // spent. Releasing here rather than at the end of the handler stops it being
-    // counted twice — once held, once spent — while the response hooks run.
-    drop(reservation.take());
-
     // Inject cost into the response (non-standard field, ignored by OpenAI clients)
     let mut response_json = serde_json::to_value(&result.response).unwrap();
     if let Some(obj) = response_json.as_object_mut() {
@@ -2019,6 +2036,7 @@ async fn chat_completions(
             "stoke_cost".into(),
             serde_json::to_value(&result.cost).unwrap(),
         );
+        obj.insert("stoke_cost_estimated".into(), json!(!measured));
         obj.insert("stoke_elapsed_ms".into(), json!(result.elapsed_ms));
         obj.insert("stoke_cache".into(), json!("miss"));
         if let Some(mut note) = route_note.take() {
@@ -2033,16 +2051,13 @@ async fn chat_completions(
 
     // Plugin: post_response — audit or transform output
     if state.plugins.has_post_response() {
-        response_json = state
-            .plugins
-            .post_response(
-                &model,
-                &response_json,
-                result.cost.cost_usd,
-                result.elapsed_ms,
-                &api_key,
-            )
-            .await;
+        response_json = match security::post_response(
+            &state.config.plugins.post_response, &model, response_json,
+            result.cost.cost_usd, result.elapsed_ms, &api_key,
+        ).await {
+            Ok(v) => v,
+            Err(e) => return (StatusCode::FORBIDDEN, e).into_response(),
+        };
     }
 
     // Built-in: post_response (code formatter + audit log)
@@ -2084,8 +2099,10 @@ async fn chat_completions(
             Err("JS plugin interrupted".to_string())
         });
 
-        if let Ok(Some(transformed)) = js_result {
-            response_json = transformed;
+        match js_result {
+            Ok(Some(transformed)) => response_json = transformed,
+            Ok(None) => {},
+            Err(e) => return (StatusCode::FORBIDDEN, format!("Required JS post_response failed: {e}")).into_response(),
         }
     }
 

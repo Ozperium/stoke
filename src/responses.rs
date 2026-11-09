@@ -102,11 +102,17 @@ fn record_metered_decision(
 pub async fn responses(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    Json(mut body): Json<Value>,
 ) -> Response {
     let api_key = match validate_gateway_headers(&state.auth, &headers) {
         Some(key) => key,
         None => return (StatusCode::UNAUTHORIZED, "Invalid or missing API key").into_response(),
+    };
+    if let Err(e) = crate::security::native_policy(&state.config) {
+        return (StatusCode::FORBIDDEN, e).into_response();
+    }
+    let (max_output_tokens, copies) = match crate::security::normalize(&mut body, "max_output_tokens", state.config.limits.assumed_max_output_tokens, state.config.limits.max_n_samples, false) {
+        Ok(v) => v, Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
     };
     let model = body
         .get("model")
@@ -148,6 +154,12 @@ pub async fn responses(
                 .into_response()
         }
     };
+    if crate::security::capped(&state.config, &api_key) && !subscription_bypasses_spend_accounting(provider) && !crate::cost::is_free_tier(&provider.tier)
+        && crate::cost::global().is_priced(&model) {
+        if let Err(e) = crate::security::normalize(&mut body, "max_output_tokens", state.config.limits.assumed_max_output_tokens, state.config.limits.max_n_samples, true) {
+            return (StatusCode::BAD_REQUEST, e).into_response();
+        }
+    }
     // Price admission only gates metered dollar spend. A subscription provider
     // bills through the flat ChatGPT plan, so it is admitted without a price.
     if !subscription_bypasses_spend_accounting(provider) {
@@ -156,20 +168,16 @@ pub async fn responses(
         }
     }
 
-    let max_output_tokens = body
-        .get("max_output_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(state.config.limits.assumed_max_output_tokens);
-    let reservation = if subscription_bypasses_spend_accounting(provider) {
+    let mut reservation = if subscription_bypasses_spend_accounting(provider) {
         None
     } else {
         match state.budget.try_reserve(
             &api_key,
             crate::cost::global().max_cost(
                 &model,
-                (prompt_text.len() / 4) as u64,
+                crate::security::input_bound(&body),
                 max_output_tokens,
-            ),
+            ) * copies as f64,
         ) {
             Ok(reservation) => reservation,
             Err(reason) => return (StatusCode::TOO_MANY_REQUESTS, reason).into_response(),
@@ -188,7 +196,7 @@ pub async fn responses(
         )
         .await;
     }
-    let _hold = reservation;
+
 
     let started = Instant::now();
     let url = match dispatch_url(provider) {
@@ -203,6 +211,7 @@ pub async fn responses(
     } else {
         openai_request(provider, &url, &body, &headers)
     };
+    crate::security::dispatch(&mut reservation);
     let response = match request.send().await {
         Ok(response) => response,
         Err(error) => {
@@ -233,21 +242,7 @@ pub async fn responses(
                 .into_response();
         }
     };
-    let usage = response_body.get("usage").map(|usage| {
-        let input = usage
-            .get("input_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let output = usage
-            .get("output_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        serde_json::json!({
-            "prompt_tokens": input,
-            "completion_tokens": output,
-            "total_tokens": input + output,
-        })
-    });
+    let usage = crate::security::usage(response_body.get("usage"), "input_tokens", "output_tokens");
     // Dollar accounting only applies to metered providers. Subscription
     // traffic bills through the flat plan — no spend recorded, no dollar
     // header; it announces its billing mode instead.
@@ -257,8 +252,10 @@ pub async fn responses(
         let cost = crate::cost::global()
             .calculate(&model, usage.as_ref())
             .cost_usd;
-        state.budget.record_spend(&api_key, cost);
-        cost
+        match crate::security::settle(&state.budget, &api_key, reservation.take(), if usage.is_some() { cost } else { crate::cost::global().max_cost(&model, crate::security::input_bound(&body), max_output_tokens) }, status.is_success() && usage.is_some()) {
+            Ok(cost) => cost,
+            Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, e).into_response(),
+        }
     };
     state
         .budget
@@ -322,10 +319,8 @@ impl Drop for ResponsesStreamMeter {
         let cost = crate::cost::global()
             .calculate(&self.model, Some(&usage.to_openai_json()))
             .cost_usd;
-        if measured {
-            self.budget.record_spend(&self.api_key, cost);
-        } else {
-            self.budget.record_spend_estimated(&self.api_key, cost);
+        if let Err(e) = crate::security::settle(&self.budget, &self.api_key, self._reservation.take(), cost, measured) {
+            tracing::error!("Responses stream settlement failed: {e}");
         }
     }
 }
@@ -337,7 +332,7 @@ async fn forward_stream(
     model: &str,
     body: &Value,
     headers: &HeaderMap,
-    reservation: Option<crate::budget::SpendReservation>,
+    mut reservation: Option<crate::budget::SpendReservation>,
 ) -> Response {
     let started = Instant::now();
     let url = match dispatch_url(provider) {
@@ -363,6 +358,7 @@ async fn forward_stream(
     } else {
         openai_request(provider, &url, body, headers)
     };
+    crate::security::dispatch(&mut reservation);
     match request.send().await {
         Ok(response) if response.status().is_success() => {
             record_metered_decision(

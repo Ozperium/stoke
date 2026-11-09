@@ -179,7 +179,7 @@ PRIVATE_STATUS=$(curl -s -o "$WORK_DIR/private.out" -w "%{http_code}" \
 
 echo "==> assert: enforcement demo triggers real traffic and a visible refusal"
 DEMO_STATUS=$(curl -s -o "$WORK_DIR/demo.out" -w "%{http_code}" \
-  -X POST "http://127.0.0.1:$STOKE_PORT/ui/demo")
+  -X POST "http://127.0.0.1:$STOKE_PORT/ui/demo" -H 'x-stoke-key: dev-demo-fixture')
 [[ "$DEMO_STATUS" == "202" ]] || fail "demo did not start"
 for _ in 1 2 3 4 5; do
   curl -fsS "http://127.0.0.1:$STOKE_PORT/ui" | grep -q "Loop detected" && break

@@ -98,10 +98,8 @@ pub struct LimitsConfig {
     /// `[[routes]]` profile or the top-level `routing` setting.
     #[serde(default)]
     pub allow_caller_routing: bool,
-    /// How many output tokens to assume when a request sets no `max_tokens`, for
-    /// the purpose of holding money against the cap while the request runs. Too
-    /// low and a burst of concurrent streams can still overshoot; too high and
-    /// requests that would have fit are refused.
+    /// Output limit sent upstream when the caller omits one. The reservation
+    /// uses the same enforced limit; it is not merely a billing assumption.
     #[serde(default = "default_assumed_max_output_tokens")]
     pub assumed_max_output_tokens: u64,
 }
@@ -313,6 +311,28 @@ impl Config {
     /// let it serve unmetered traffic under a `budget_usd` cap that never trips.
     /// Fail at boot rather than at spend time.
     pub fn validate(&self) -> Result<(), String> {
+        #[cfg(not(feature = "js-plugins"))]
+        if !self.plugins.scripts.is_empty() {
+            return Err("Configured scripts require a build with js-plugins; policy cannot be ignored".into());
+        }
+        if self.limits.assumed_max_output_tokens == 0 || self.limits.assumed_max_output_tokens > u32::MAX as u64 {
+            return Err("[limits] assumed_max_output_tokens must be a positive u32".into());
+        }
+        for p in self.pricing.models.values() {
+            if !p.input_per_1m.is_finite() || p.input_per_1m < 0.0 || !p.output_per_1m.is_finite() || p.output_per_1m < 0.0
+                || !((u64::MAX as f64) * (p.input_per_1m + p.output_per_1m)).is_finite() {
+                return Err("prices must be finite, nonnegative and cannot overflow".into());
+            }
+        }
+        for key in &self.keys {
+            if !key.budget_usd.is_finite() || key.budget_usd < 0.0 { return Err("[[keys]] budget_usd must be finite and nonnegative".into()); }
+        }
+        for route in &self.routes {
+            if route.budget_usd != 0.0 || route.rate_limit != 0 {
+                return Err(format!("route '{}' budget_usd/rate_limit are unsupported; migrate enforcement to [[keys]] budget_usd and rate_limit_rpm", route.name));
+            }
+        }
+
         for p in &self.providers {
             if !p.is_subscription() {
                 continue;

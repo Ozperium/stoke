@@ -54,6 +54,8 @@ pub struct ProviderResult {
     pub elapsed_ms: u64,
     pub provider_name: String,
     pub cost: CostBreakdown,
+    /// At least one billed leg lacked a complete final usage report.
+    pub cost_estimated: bool,
 }
 
 /// Call a single provider with a chat completion request.
@@ -110,14 +112,38 @@ pub async fn call_provider_hop(
         .await
         .map_err(|e| format!("Failed to parse provider {} response: {}", provider.name, e))?;
 
-    let cost = pricer.calculate(&request.model, response.usage.as_ref());
+    let cost_estimated = response.usage.as_ref().and_then(|u| {
+        let p = u.get("prompt_tokens")?.as_u64()?;
+        let c = u.get("completion_tokens")?.as_u64()?;
+        p.checked_add(c)
+    }).is_none();
+    let mut cost = pricer.calculate(&request.model, response.usage.as_ref());
+    if cost_estimated {
+        let estimate = estimated_cost(request);
+        if estimate.cost_usd > cost.cost_usd { cost = estimate; }
+    }
 
     Ok(ProviderResult {
         response,
         elapsed_ms,
         provider_name: provider.name.clone(),
         cost,
+        cost_estimated,
     })
+}
+
+/// Conservative text estimate for an unlimited caller whose provider omitted usage.
+/// HTTP handlers have already injected and validated the upstream output bound.
+fn estimated_cost(request: &ChatCompletionRequest) -> CostBreakdown {
+    let input = serde_json::to_vec(request).map_or(0, |v| v.len() as u64)
+        .saturating_add(256).saturating_add((request.messages.len() as u64).saturating_mul(64));
+    let output = request.max_tokens.map(u64::from)
+        .or_else(|| request.extra.get("max_completion_tokens").and_then(Value::as_u64)).unwrap_or(0);
+    let copies = request.extra.get("n").and_then(Value::as_u64).unwrap_or(1);
+    crate::cost::global().calculate(&request.model, Some(&json!({
+        "prompt_tokens":input.saturating_mul(copies),
+        "completion_tokens":output.saturating_mul(copies),
+    })))
 }
 
 /// A fusion pattern issues many provider calls and returns exactly one of them.
@@ -127,11 +153,13 @@ pub async fn call_provider_hop(
 ///
 /// `attempted` should include every call whose tokens were actually generated,
 /// including the losers.
-fn bill_all(winner: &mut ProviderResult, attempted: &[ProviderResult]) {
+fn bill_all(winner: &mut ProviderResult, attempted: &[ProviderResult], expected: usize, request: &ChatCompletionRequest) {
     let mut total = CostBreakdown::zero(&winner.cost.model);
     for r in attempted {
         total.merge(&r.cost);
     }
+    for _ in attempted.len()..expected { total.merge(&estimated_cost(request)); }
+    winner.cost_estimated = attempted.len() < expected || attempted.iter().any(|r| r.cost_estimated);
     winner.cost = total;
 }
 
@@ -145,6 +173,7 @@ pub async fn parallel_vote(
         return Err("No providers for parallel_vote".to_string());
     }
 
+    let expected = providers.len();
     let mut set = tokio::task::JoinSet::new();
     for p in providers {
         let req = request.clone();
@@ -190,7 +219,7 @@ pub async fn parallel_vote(
                 if let Some(content) = choice.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                     if content == winner {
                         let mut out = r.clone();
-                        bill_all(&mut out, &successes);
+                        bill_all(&mut out, &successes, expected, request);
                         return Ok(out);
                     }
                 }
@@ -200,7 +229,7 @@ pub async fn parallel_vote(
 
     // Fallback: return the first success
     let mut out = successes[0].clone();
-    bill_all(&mut out, &successes);
+    bill_all(&mut out, &successes, expected, request);
     Ok(out)
 }
 
@@ -261,7 +290,7 @@ pub async fn self_consistency(
                     if content == winner {
                         tracing::info!("self_consistency: model {} majority vote ({} samples)", model, n_samples);
                         let mut out = r.clone();
-                        bill_all(&mut out, &results);
+                        bill_all(&mut out, &results, n_samples, request);
                         return Ok(out);
                     }
                 }
@@ -270,7 +299,7 @@ pub async fn self_consistency(
     }
 
     let mut out = results[0].clone();
-    bill_all(&mut out, &results);
+    bill_all(&mut out, &results, n_samples, request);
     Ok(out)
 }
 
@@ -315,11 +344,15 @@ pub async fn deliberation(
     // Panel and judge tokens are billed even though only the synthesizer's
     // response is returned. Carry their cost forward.
     let mut side_cost = CostBreakdown::zero(synth_model);
+    let mut side_estimated = false;
+    let mut panel_successes = 0;
 
     let mut responses: Vec<(String, String)> = Vec::new();
     while let Some(res) = set.join_next().await {
         if let Ok(Ok(r)) = res {
             side_cost.merge(&r.cost);
+            side_estimated |= r.cost_estimated;
+            panel_successes += 1;
             let content = r
                 .response
                 .choices
@@ -339,6 +372,7 @@ pub async fn deliberation(
         return Err("All panel models failed in deliberation".to_string());
     }
 
+    side_estimated |= panel_successes < panel_models.len();
     // Phase 2: Judge — analyze panel responses, output structured analysis
     let mut judge_prompt = format!(
         "You are a judge analyzing responses from multiple AI models to the same question.\n\
@@ -366,6 +400,7 @@ Original question:\n{}\n\n",
 
     let judge_result = call_provider(provider, &judge_req).await?;
     side_cost.merge(&judge_result.cost);
+    side_estimated |= judge_result.cost_estimated;
 
     let judge_analysis = judge_result
         .response
@@ -403,6 +438,7 @@ address coverage gaps and blind spots, and include unique insights where relevan
 
     let mut out = call_provider(provider, &synth_req).await?;
     out.cost.merge(&side_cost);
+    out.cost_estimated |= side_estimated;
     Ok(out)
 }
 
@@ -412,10 +448,16 @@ pub async fn cascade(
     request: &ChatCompletionRequest,
 ) -> Result<ProviderResult, String> {
     let mut last_err = String::new();
+    let mut uncertain = CostBreakdown::zero(&request.model);
     for p in providers {
         match call_provider(p, request).await {
-            Ok(result) => return Ok(result),
+            Ok(mut result) => {
+                result.cost_estimated |= uncertain.cost_usd > 0.0;
+                result.cost.merge(&uncertain);
+                return Ok(result);
+            },
             Err(e) => {
+                if !crate::cost::is_unpriced_error(&e) { uncertain.merge(&estimated_cost(request)); }
                 last_err = e;
                 tracing::warn!("Cascade: provider {} failed, trying next", p.name);
             }

@@ -130,12 +130,21 @@ EOF
 }
 
 start_stoke() {
+  if [ -n "${STOKE_PID:-}" ] && kill -0 "$STOKE_PID" 2>/dev/null; then stop_stoke; fi
   ( cd "$FIXTURE_HOME" && exec env HOME="$FIXTURE_HOME" STOKE_API_KEYS="$KEY_A" \
       STOKE_TEST_SUBSCRIPTION_BASES="http://127.0.0.1:$CLAUDE_PORT,http://127.0.0.1:$CODEX_PORT/v1" \
       "$REPO_DIR/target/debug/stoke" > "$WORK_DIR/stoke.log" 2>&1 ) &
+  STOKE_PID=$!
   sleep 3
 }
-stop_stoke() { pkill -f "$REPO_DIR/target/debug/stoke" 2>/dev/null || true; sleep 1; }
+stop_stoke() {
+  if [ -n "${STOKE_PID:-}" ]; then
+    kill "$STOKE_PID" 2>/dev/null || true
+    wait "$STOKE_PID" 2>/dev/null || true
+    unset STOKE_PID
+  fi
+  sleep 1
+}
 
 # ── 1. Qualified 429 triggers the codex fallback ──────────────────────
 echo "==> assert: a qualified 429 falls back to the codex provider, retargeting the model"

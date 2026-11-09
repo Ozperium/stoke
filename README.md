@@ -136,7 +136,7 @@ Because prompts route to your own machines by default, they never leave your inf
 ### Also in the box
 
 - **Response cache** — exact-match plus semantic (semantic is opt-in via `STOKE_SEMANTIC_CACHE`).
-- **Cost tracking** — non-streaming responses carry a `stoke_cost` field, and both streamed and non-streamed responses record their spend per key, including every call a fan-out pattern makes. Streamed spend is read from the provider's own usage report as the stream passes; if a metered provider reports none, Stoke bills an estimate and says so (`estimated_usd` in `/v1/budget`) rather than booking $0. Prices come from `[pricing.models]` in your config — Stoke ships none, and refuses to serve a model it cannot price on a metered provider rather than meter it at $0. Before dispatching, Stoke holds the most a request could cost against the key's cap and refuses it if the hold would not fit, so concurrent streams cannot overshoot while none of them has been charged yet. `/v1/budget` shows per-key spend, held money, and the configured prices are at `/v1/pricing`.
+- **Cost tracking** — non-streaming responses carry a `stoke_cost` field, and both streamed and non-streamed responses record spend per key. Finite-budget keys support single routing with one dispatch attempt; multi-call routing requires an explicitly unlimited key. Streamed spend is read from the provider's own usage report as the stream passes; if a metered provider reports none, Stoke bills an estimate and says so (`estimated_usd` in `/v1/budget`) rather than booking $0. Prices come from `[pricing.models]` in your config — Stoke ships none, and refuses to serve a model it cannot price on a metered provider rather than meter it at $0. Before dispatching, Stoke holds the most a request could cost against the key's cap and refuses it if the hold would not fit, so concurrent streams cannot overshoot while none of them has been charged yet. `/v1/budget` shows per-key spend, held money, and the configured prices are at `/v1/pricing`.
 - **Route profiles** — multiple endpoints, each with its own model, routing pattern, plugin chain, and optional `allowed_tiers` egress allowlist. A route set to `["local", "remote"]` refuses cloud fallback before any provider is called.
 - **Plugins** — webhook hooks (`pre_request`, `prompt_filter`, `post_response`) in any language; JS/TS plugins behind a compile-time feature flag (`--features js-plugins`); built-in PII redaction and JSONL audit log.
 - **OpenAI-compatible** — `/v1/chat/completions` passthrough including SSE streaming and `tool_calls`. Works with any OpenAI-compatible client or agent.
@@ -331,7 +331,7 @@ The registry polls both nodes and places each request on whichever machine has t
 | `POST /v1/responses` | OpenAI Responses API — native JSON/SSE passthrough to a configured OpenAI-compatible provider. Used by `stoke run codex`; same auth/budget/rate/loop enforcement, with measured stream usage charged when the stream closes. |
 | `GET /v1/models` | Models declared in provider config, per provider (live per-node inventory is on `/v1/nodes`). |
 | `GET /v1/nodes` | Live node registry: health, pulled/warm models, in-flight counts, latency EWMA. |
-| `GET /v1/budget` | Per-key spend, limits, recent activity, and the receipts ledger (zero-marginal share, cloud list-price counterfactual). |
+| `GET /v1/budget` | Caller-scoped spend, limits and recent activity. Global receipts are withheld from inference keys. |
 | `GET /v1/cache` | Cache statistics (exact + semantic layers). |
 | `GET /v1/pricing` | The pricing table used for cost calculation. |
 | `GET /v1/routes` | Configured route profiles. |
@@ -396,3 +396,34 @@ MIT. The data plane is MIT forever.
 ---
 
 **[stokegate.com](https://stokegate.com)** · [github.com/Ozperium/stoke](https://github.com/Ozperium/stoke)
+
+Security enforcement contracts: `[[keys]]` sets `budget_usd` and
+`rate_limit_rpm`. Nonzero route-profile `budget_usd`/`rate_limit` fail startup;
+migrate those settings to `[[keys]]`. `allowed_tiers` remains route-scoped.
+A missing output limit is sent upstream as `[limits].assumed_max_output_tokens`;
+`max_completion_tokens` and bounded `n` are included in Chat reservations.
+Text holds count serialized UTF-8 bytes, tools and schemas with framing overhead.
+Finite-budget metered requests reject media, remote content, hosted tools,
+unknown billing fields, and multi-call routing. Explicit unpriced/free and
+subscription billing remain operator opt-ins outside token-dollar enforcement.
+Missing or partial usage and interrupted requests retain at least their original
+hold as estimated spend. Valid final zero usage is measured zero.
+
+Global webhook and JavaScript policy hooks are supported through Chat
+Completions. Native `/v1/messages`, `/v1/responses`, and Messages bridge aliases
+refuse these configurations before provider or subscription-token contact.
+Mandatory output hooks/scripts require nonstream Chat; protected streams refuse
+before dispatch. Required hook failures return errors, and configured scripts
+require a `js-plugins` build and successful startup loading.
+
+The global `/ui` surface requires a separate nonempty `STOKE_ADMIN_KEY` as its
+Basic-auth password. Inference keys cannot access UI assets or global events.
+`STOKE_DEV=1` retains the local exception only when no inference keys are
+configured. `/ui/demo` additionally requires `x-stoke-key` for the tenant to
+charge; the browser's demo button cannot supply that header. An admin secret is
+never converted into an inference credential. `/v1/budget` exposes only the
+caller's rows and withholds global receipts.
+
+Run the synthetic security wire regression with
+`TMPDIR=/path/to/private/scratch STOKE_BIN=/path/to/stoke python3 tests/security_integration.py`.
+For a native `js-plugins` build, set `STOKE_TEST_JS=1` to exercise handler errors.
