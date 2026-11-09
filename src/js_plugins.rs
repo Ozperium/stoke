@@ -79,7 +79,7 @@ globalThis.__stoke_run = function(hookType, dataJson) {
         return JSON.stringify({ __blocked: true, reason: result.block });
       }
       if (result) {
-        data = result;
+        data = { ...data, ...result };
       }
     } catch (e) {
       // Configured policy hooks are required: an exception is not an allow.
@@ -527,6 +527,43 @@ mod tests {
         assert!(plugins.prompt_filter(&[], "original", "key").is_err());
         assert!(plugins.post_response("original", &json!({}), 0.0, 0, "key").is_err());
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn partial_hook_overrides_preserve_context_for_later_policies() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let first = write_plugin(
+            r#"module.exports = {
+                pre_request(_input) { return { model: "guarded" }; },
+                prompt_filter(_input) { return { messages: [{role: "user", content: "clean"}] }; },
+                post_response(_input) { return { response: {safe: true} }; }
+            };"#,
+        );
+        let second = write_plugin(
+            r#"module.exports = {
+                pre_request(input) {
+                    if (input.messages && input.messages[0].content === "secret") return {block: "context deny"};
+                    return input;
+                },
+                prompt_filter(input) {
+                    if (input.model === "guarded") return {block: "model deny"};
+                    return input;
+                },
+                post_response(input) {
+                    if (input.model === "guarded") return {block: "response deny"};
+                    return input;
+                }
+            };"#,
+        );
+        let plugins = JsPlugins::load(&[first.clone(), second.clone()]).unwrap();
+        let messages = vec![json!({"role": "user", "content": "secret"})];
+        let pre = plugins.pre_request("original", "single", &messages, "key").unwrap();
+        assert_eq!(pre.3.as_deref(), Some("context deny"));
+        let filter = plugins.prompt_filter(&messages, "guarded", "key").unwrap();
+        assert_eq!(filter.1.as_deref(), Some("model deny"));
+        assert!(plugins.post_response("guarded", &json!({}), 0.0, 0, "key").is_err());
+        let _ = std::fs::remove_file(first);
+        let _ = std::fs::remove_file(second);
     }
 
     #[test]
