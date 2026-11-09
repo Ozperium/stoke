@@ -98,7 +98,7 @@ impl JsPlugins {
         let mut plugin_codes: Vec<(String, String)> = Vec::new();
         for path in paths {
             if path.is_empty() {
-                continue;
+                return Err("Configured JS plugin path must not be empty".to_string());
             }
             let code = std::fs::read_to_string(path)
                 .map_err(|e| format!("Failed to read JS plugin {}: {}", path, e))?;
@@ -564,6 +564,11 @@ mod tests {
         assert!(plugins.post_response("guarded", &json!({}), 0.0, 0, "key").is_err());
         let _ = std::fs::remove_file(first);
         let _ = std::fs::remove_file(second);
+    }
+
+    #[test]
+    fn empty_configured_plugin_path_is_an_error_not_an_empty_policy_set() {
+        assert!(JsPlugins::load(&[String::new()]).is_err());
     }
 
     #[test]
