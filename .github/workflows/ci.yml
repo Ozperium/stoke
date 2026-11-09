@@ -50,3 +50,14 @@ jobs:
 
       - name: Smoke — durable budget ledger (spend survives crash/restart, raw key never in DB)
         run: ./scripts/smoke_durable_ledger.sh
+
+      - name: Security — negative wire regressions
+        run: STOKE_BIN="$PWD/target/debug/stoke" python3 tests/security_integration.py
+
+      - name: Security — native JavaScript policy tests
+        run: cargo test --locked --features js-plugins
+
+      - name: Security — native JavaScript wire enforcement
+        run: |
+          cargo build --locked --features js-plugins
+          STOKE_TEST_JS=1 STOKE_BIN="$PWD/target/debug/stoke" python3 tests/security_integration.py

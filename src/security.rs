@@ -142,7 +142,7 @@ pub fn normalize(
                         }
                     }
                     o.iter().all(|(k, v)| {
-                        matches!(k.as_str(), "parameters" | "input_schema" | "schema")
+                        matches!(k.as_str(), "parameters" | "input_schema" | "schema" | "metadata")
                             || text_only(v)
                     })
                 }

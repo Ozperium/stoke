@@ -252,6 +252,16 @@ def priced_local_stream_guard():
             time.sleep(.05); s=stats(p)['keys'][0]
             assert s['spend_usd']==0 and s['reserved_usd']==0,(path,s)
 check('priced_local_stream_owns_and_settles_hold',priced_local_stream_guard)
+def metadata_and_schema_are_text_data():
+    for path in ['/v1/chat/completions', '/v1/responses']:
+        with daemon() as (p,_,_):
+            schema={'type':'object','properties':{'type':{'type':'string'},'source':{'type':'string'}}}
+            tool={'type':'function','function':{'name':'lookup','parameters':schema}} if path.endswith('completions') else {'type':'function','name':'lookup','parameters':schema}
+            b=body(path,metadata={'type':'order','source':'fixture-origin'},tools=[tool])
+            before=len(seen); code,_=req(p,path,b)
+            assert code==200,('ordinary schema/metadata rejected',path,code)
+            assert len(seen)==before+1 and seen[-1][1]['metadata']==b['metadata']
+check('metadata_and_function_schema_positive_controls',metadata_and_schema_are_text_data)
 if os.environ.get('STOKE_TEST_JS')=='1':
     for hook in ['pre_request','prompt_filter','post_response']:
         def js_throw(hook=hook):
