@@ -72,6 +72,9 @@ globalThis.__stoke_run = function(hookType, dataJson) {
   for (const hook of hooks) {
     try {
       const result = hook(data);
+      if (result && typeof result.then === 'function') {
+        throw new Error('Asynchronous JS policy hooks are not supported');
+      }
       if (result && result.block) {
         return JSON.stringify({ __blocked: true, reason: result.block });
       }
@@ -79,7 +82,8 @@ globalThis.__stoke_run = function(hookType, dataJson) {
         data = result;
       }
     } catch (e) {
-      console.error('Plugin ' + hookType + ' error: ' + (e.message || e));
+      // Configured policy hooks are required: an exception is not an allow.
+      throw e;
     }
   }
   return JSON.stringify(data);
@@ -322,9 +326,9 @@ impl JsPlugins {
     pub fn is_empty(&self) -> bool {
         let (tx, rx) = channel();
         if self.tx.as_ref().and_then(|sender| sender.send(JsCommand::IsEmpty { reply: tx }).ok()).is_none() {
-            return true;
+            return false; // unavailable required policies are not an empty configuration
         }
-        rx.recv().unwrap_or(true)
+        rx.recv().unwrap_or(false)
     }
 
     pub fn pre_request(&self, model: &str, routing: &str, messages: &[Value], api_key: &str) -> Result<(Option<String>, Option<String>, Option<Vec<String>>, Option<String>), String> {
@@ -477,25 +481,52 @@ mod tests {
     }
 
     #[test]
-    fn hook_exception_is_logged_and_later_hook_still_runs() {
+    fn hook_exceptions_fail_closed_for_every_policy_stage() {
         let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let throwing = write_plugin(
             r#"module.exports = {
-                pre_request(_input) { throw new Error("hook failure"); }
+                pre_request(_input) { throw new Error("pre failure"); },
+                prompt_filter(_input) { throw new Error("filter failure"); },
+                post_response(_input) { throw new Error("post failure"); }
             };"#,
         );
         let later = write_plugin(
             r#"module.exports = {
-                pre_request(input) { return { ...input, model: "after-error" }; }
+                pre_request(input) { return { ...input, model: "after-error" }; },
+                prompt_filter(input) { return input; },
+                post_response(input) { return input; }
             };"#,
         );
         let plugins = JsPlugins::load(&[throwing.clone(), later.clone()]).unwrap();
-        let result = plugins
-            .pre_request("original", "single", &[], "key")
-            .unwrap();
-        assert_eq!(result.0.as_deref(), Some("after-error"));
+        assert!(plugins.pre_request("original", "single", &[], "key").is_err());
+        assert!(plugins.prompt_filter(&[], "original", "key").is_err());
+        assert!(plugins.post_response("original", &json!({}), 0.0, 0, "key").is_err());
         let _ = std::fs::remove_file(throwing);
         let _ = std::fs::remove_file(later);
+    }
+
+    #[test]
+    fn closed_policy_worker_is_not_reported_as_empty() {
+        let plugins = JsPlugins { tx: None, handle: None };
+        assert!(!plugins.is_empty(), "worker failure must not bypass required hooks");
+        assert!(plugins.pre_request("original", "single", &[], "key").is_err());
+    }
+
+    #[test]
+    fn asynchronous_policy_hooks_are_refused_instead_of_silently_ignored() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let path = write_plugin(
+            r#"module.exports = {
+                async pre_request(_input) { return { block: "deny" }; },
+                async prompt_filter(_input) { return { block: "deny" }; },
+                async post_response(_input) { return { block: "deny" }; }
+            };"#,
+        );
+        let plugins = JsPlugins::load(&[path.clone()]).unwrap();
+        assert!(plugins.pre_request("original", "single", &[], "key").is_err());
+        assert!(plugins.prompt_filter(&[], "original", "key").is_err());
+        assert!(plugins.post_response("original", &json!({}), 0.0, 0, "key").is_err());
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
