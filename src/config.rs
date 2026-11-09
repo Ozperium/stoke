@@ -98,10 +98,8 @@ pub struct LimitsConfig {
     /// `[[routes]]` profile or the top-level `routing` setting.
     #[serde(default)]
     pub allow_caller_routing: bool,
-    /// How many output tokens to assume when a request sets no `max_tokens`, for
-    /// the purpose of holding money against the cap while the request runs. Too
-    /// low and a burst of concurrent streams can still overshoot; too high and
-    /// requests that would have fit are refused.
+    /// Output limit sent upstream when the caller omits one. The reservation
+    /// uses the same enforced limit; it is not merely a billing assumption.
     #[serde(default = "default_assumed_max_output_tokens")]
     pub assumed_max_output_tokens: u64,
 }
@@ -314,6 +312,28 @@ impl Config {
     /// Fail at boot rather than at spend time.
     pub fn validate(&self) -> Result<(), String> {
         self.plugins.headroom.validate()?;
+        #[cfg(not(feature = "js-plugins"))]
+        if !self.plugins.scripts.is_empty() {
+            return Err("Configured scripts require a build with js-plugins; policy cannot be ignored".into());
+        }
+        if self.limits.assumed_max_output_tokens == 0 || self.limits.assumed_max_output_tokens > u32::MAX as u64 {
+            return Err("[limits] assumed_max_output_tokens must be a positive u32".into());
+        }
+        for p in self.pricing.models.values() {
+            if !p.input_per_1m.is_finite() || p.input_per_1m < 0.0 || !p.output_per_1m.is_finite() || p.output_per_1m < 0.0
+                || !((u64::MAX as f64) * (p.input_per_1m + p.output_per_1m)).is_finite() {
+                return Err("prices must be finite, nonnegative and cannot overflow".into());
+            }
+        }
+        for key in &self.keys {
+            if !key.budget_usd.is_finite() || key.budget_usd < 0.0 { return Err("[[keys]] budget_usd must be finite and nonnegative".into()); }
+        }
+        for route in &self.routes {
+            if route.budget_usd != 0.0 || route.rate_limit != 0 {
+                return Err(format!("route '{}' budget_usd/rate_limit are unsupported; migrate enforcement to [[keys]] budget_usd and rate_limit_rpm", route.name));
+            }
+        }
+
         for p in &self.providers {
             if !p.is_subscription() {
                 continue;
@@ -385,6 +405,8 @@ impl Config {
                     ));
                 }
             }
+        }
+        for route in &self.routes {
             if let Some(policy) = &route.response_cache {
                 match policy.mode.as_str() {
                     "off" => {
@@ -583,42 +605,6 @@ mod dirs {
 mod validate_tests {
     use super::*;
 
-    fn cfg(toml_src: &str) -> Config {
-        toml::from_str(toml_src).expect("test config must parse")
-    }
-
-    const BASE: &str = r#"
-[server]
-host = "127.0.0.1"
-port = 8787
-"#;
-
-    #[test]
-    fn stoke_config_overrides_search_and_invalid_override_does_not_fallback() {
-        let path = std::env::temp_dir().join(format!(
-            "stoke-config-override-{}-{}.toml",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
-        std::fs::write(&path, BASE).expect("write config override fixture");
-        let previous = std::env::var_os("STOKE_CONFIG");
-
-        std::env::set_var("STOKE_CONFIG", &path);
-        assert_eq!(Config::find_config_path().unwrap(), path);
-
-        let missing = path.with_extension("missing.toml");
-        std::env::set_var("STOKE_CONFIG", &missing);
-        let error = Config::find_config_path().unwrap_err();
-        assert!(error.contains("STOKE_CONFIG"), "error must identify override: {error}");
-        assert!(error.contains(&missing.display().to_string()));
-
-        match previous {
-            Some(value) => std::env::set_var("STOKE_CONFIG", value),
-            None => std::env::remove_var("STOKE_CONFIG"),
-        }
-        let _ = std::fs::remove_file(path);
-    }
-
     #[test]
     fn response_cache_policy_validates_modes_and_exact_ttl() {
         let exact = cfg(&format!(
@@ -650,6 +636,73 @@ port = 8787
             "wrong ttl type must fail at config load"
         );
     }
+
+    #[test]
+    fn route_coalescing_is_off_by_default_and_exact_opt_in_is_valid() {
+        let c = cfg(&format!(
+            "{BASE}\n[[routes]]\nname = \"joined\"\npath = \"/v1/joined/completions\"\nrouting = \"single\"\n\
+             response_cache = {{ mode = \"exact\", ttl_secs = 60 }}\n"
+        ));
+        assert!(!c.routes[0].coalesce);
+
+        let enabled = cfg(&format!(
+            "{BASE}\n[[routes]]\nname = \"joined\"\npath = \"/v1/joined/completions\"\nrouting = \"single\"\ncoalesce = true\n\
+             [routes.response_cache]\nmode = \"exact\"\nttl_secs = 60\n"
+        ));
+        assert!(enabled.validate().is_ok());
+        assert!(enabled.routes[0].coalesce);
+    }
+
+    #[test]
+    fn route_coalescing_requires_explicit_exact_cache_policy() {
+        for policy in [
+            "",
+            "[routes.response_cache]\nmode = \"off\"\n",
+        ] {
+            let c = cfg(&format!(
+                "{BASE}\n[[routes]]\nname = \"joined\"\npath = \"/v1/joined/completions\"\nrouting = \"single\"\ncoalesce = true\n{policy}"
+            ));
+            let err = c.validate().unwrap_err();
+            assert!(err.contains("coalesce"), "unexpected error: {err}");
+            assert!(err.contains("exact"), "unexpected error: {err}");
+        }
+    }
+
+    #[test]
+    fn stoke_config_overrides_search_and_invalid_override_does_not_fallback() {
+        let path = std::env::temp_dir().join(format!(
+            "stoke-config-override-{}-{}.toml",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::write(&path, BASE).expect("write config override fixture");
+        let previous = std::env::var_os("STOKE_CONFIG");
+
+        std::env::set_var("STOKE_CONFIG", &path);
+        assert_eq!(Config::find_config_path().unwrap(), path);
+
+        let missing = path.with_extension("missing.toml");
+        std::env::set_var("STOKE_CONFIG", &missing);
+        let error = Config::find_config_path().unwrap_err();
+        assert!(error.contains("STOKE_CONFIG"), "error must identify override: {error}");
+        assert!(error.contains(&missing.display().to_string()));
+
+        match previous {
+            Some(value) => std::env::set_var("STOKE_CONFIG", value),
+            None => std::env::remove_var("STOKE_CONFIG"),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    fn cfg(toml_src: &str) -> Config {
+        toml::from_str(toml_src).expect("test config must parse")
+    }
+
+    const BASE: &str = r#"
+[server]
+host = "127.0.0.1"
+port = 8787
+"#;
 
     #[test]
     fn a_provider_without_a_tier_is_rejected_at_boot() {
@@ -917,36 +970,5 @@ tier = "subscription"
              base_url = \"https://api.anthropic.com\"\ntier = \"cloud\"\napi_key_env = \"ANTHROPIC_API_KEY\"\n"
         ));
         assert!(c.validate().is_ok());
-    }
-
-    #[test]
-    fn route_coalescing_is_off_by_default_and_exact_opt_in_is_valid() {
-        let c = cfg(&format!(
-            "{BASE}\n[[routes]]\nname = \"joined\"\npath = \"/v1/joined/completions\"\nrouting = \"single\"\n\
-             response_cache = {{ mode = \"exact\", ttl_secs = 60 }}\n"
-        ));
-        assert!(!c.routes[0].coalesce);
-
-        let enabled = cfg(&format!(
-            "{BASE}\n[[routes]]\nname = \"joined\"\npath = \"/v1/joined/completions\"\nrouting = \"single\"\ncoalesce = true\n\
-             [routes.response_cache]\nmode = \"exact\"\nttl_secs = 60\n"
-        ));
-        assert!(enabled.validate().is_ok());
-        assert!(enabled.routes[0].coalesce);
-    }
-
-    #[test]
-    fn route_coalescing_requires_explicit_exact_cache_policy() {
-        for policy in [
-            "",
-            "[routes.response_cache]\nmode = \"off\"\n",
-        ] {
-            let c = cfg(&format!(
-                "{BASE}\n[[routes]]\nname = \"joined\"\npath = \"/v1/joined/completions\"\nrouting = \"single\"\ncoalesce = true\n{policy}"
-            ));
-            let err = c.validate().unwrap_err();
-            assert!(err.contains("coalesce"), "unexpected error: {err}");
-            assert!(err.contains("exact"), "unexpected error: {err}");
-        }
     }
 }

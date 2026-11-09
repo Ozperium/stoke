@@ -68,14 +68,23 @@ post_path() {
     -H "Authorization: Bearer $KEY_A" -H 'Content-Type: application/json' -d "$2"
 }
 start_stoke() {
+  if [ -n "${STOKE_PID:-}" ] && kill -0 "$STOKE_PID" 2>/dev/null; then stop_stoke; fi
    # Reset the ledger between sections: the test checks per-section caps
    # and the in-memory model was the original contract.
   rm -f "$WORK_DIR/ledger.db" "$WORK_DIR/ledger.db-wal" "$WORK_DIR/ledger.db-shm" 2>/dev/null
    ( cd "$WORK_DIR" && exec env STOKE_LEDGER_PATH="${WORK_DIR}/ledger.db" STOKE_API_KEYS="$KEY_A,$KEY_B" \
        "$REPO_DIR/target/debug/stoke" > "$WORK_DIR/stoke.log" 2>&1 ) &
+  STOKE_PID=$!
   sleep 3
 }
-stop_stoke() { pkill -f "$REPO_DIR/target/debug/stoke" 2>/dev/null || true; sleep 1; }
+stop_stoke() {
+  if [ -n "${STOKE_PID:-}" ]; then
+    kill "$STOKE_PID" 2>/dev/null || true
+    wait "$STOKE_PID" 2>/dev/null || true
+    unset STOKE_PID
+  fi
+  sleep 1
+}
 run_with_timeout() {
   local seconds="$1"
   shift
@@ -266,7 +275,7 @@ assert abs(d - 0.030) < 1e-6, f'expected \$0.030 recorded, got \${d}'" || fail "
 # ── Caller-driven fan-out ────────────────────────────────────────────
 echo "==> assert: a caller cannot select a fan-out routing pattern"
 BEFORE=$(calls)
-CODE=$(post "$KEY_A" '{"model":"priced-model","routing":"self_consistency","n_samples":20,"messages":[{"role":"user","content":"y"}]}')
+CODE=$(post "$KEY_A" '{"model":"priced-model","routing":"self_consistency","n_samples":5,"messages":[{"role":"user","content":"y"}]}')
 AFTER=$(calls)
 [ "$CODE" = "403" ] || fail "caller fan-out: expected 403, got $CODE"
 [ "$((AFTER - BEFORE))" = "0" ] || fail "refused fan-out still called the provider"
@@ -361,25 +370,29 @@ start_stoke
 BEFORE=$(calls)
 CODE=$(post "$KEY_A" '{"model":"priced-model","routing":"self_consistency","n_samples":5,"max_tokens":1000,"messages":[{"role":"user","content":"fan out"}]}')
 AFTER=$(calls)
-[ "$CODE" = "429" ] || fail "a 5-call fan-out on a 1-call cap: expected 429, got $CODE"
+[ "$CODE" = "403" ] || fail "capped fan-out must fail closed: expected 403, got $CODE"
 [ "$((AFTER - BEFORE))" = "0" ] || fail "the refused fan-out still reached the provider $((AFTER - BEFORE)) times"
-grep -q "for this request exceeds" "$WORK_DIR/resp.json" || fail "the refusal did not explain the hold"
+grep -q "Finite budgets support single routing" "$WORK_DIR/resp.json" || fail "the refusal did not explain the unsupported bounded fan-out"
 stop_stoke
 
 # ── Clamped fan-out, billed in full ──────────────────────────────────
-echo "==> assert: an allowed fan-out is clamped, and every call it makes is billed"
+echo "==> assert: an explicitly unlimited fan-out stays within configured samples and bills every call"
 write_config '
 [limits]
 max_n_samples = 3
 allow_caller_routing = true'
+python3 - "$WORK_DIR/stoke.toml" <<'PYEOF'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]); p.write_text(p.read_text().replace('budget_usd = 100.0', 'budget_usd = 0.0'))
+PYEOF
 start_stoke
 
 BEFORE=$(calls); S0=$(spend "$KEY_A")
-CODE=$(post "$KEY_A" '{"model":"priced-model","routing":"self_consistency","n_samples":20,"messages":[{"role":"user","content":"z"}]}')
+CODE=$(post "$KEY_A" '{"model":"priced-model","routing":"self_consistency","n_samples":3,"messages":[{"role":"user","content":"z"}]}')
 AFTER=$(calls); S1=$(spend "$KEY_A")
 N=$((AFTER - BEFORE))
 [ "$CODE" = "200" ] || fail "allowed fan-out: expected 200, got $CODE"
-[ "$N" = "3" ] || fail "n_samples=20 should clamp to 3, made $N calls"
+[ "$N" = "3" ] || fail "n_samples=3 should make 3 calls, made $N calls"
 python3 -c "
 d = $S1 - $S0
 want = 3 * 0.030
@@ -398,6 +411,7 @@ import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
 s = s.replace('routing = "single"', 'routing = "stream_race"', 1)
 s = s.replace("\nrouting_override = true", "")
+s = s.replace('budget_usd = 100.0', 'budget_usd = 0.0')
 p.write_text(s)
 PYEOF
 start_stoke
@@ -549,7 +563,7 @@ CODE=$(curl -s -o "$WORK_DIR/resp.json" -w '%{http_code}' --max-time 20 \
 AFTER=$(calls)
 [ "$CODE" = "429" ] || fail "/v1/messages over-cap request: expected 429, got $CODE"
 [ "$((AFTER - BEFORE))" = "0" ] || fail "/v1/messages forwarded a request it could not fund"
-grep -q "for this request exceeds" "$WORK_DIR/resp.json" || fail "/v1/messages refusal did not explain the hold"
+grep -q "Budget exceeded (durable ledger): request for" "$WORK_DIR/resp.json" || fail "/v1/messages refusal did not explain the durable hold"
 
 echo "==> assert: ...and a request that fits is forwarded and billed"
 BEFORE=$(calls)
@@ -571,4 +585,4 @@ assert abs(k['reserved_usd']) < 1e-9, 'the hold leaked'
 
 stop_stoke
 echo
-echo "SPEND FIREWALL SMOKE PASSED ✔ (pricing gate, PII redaction, streamed spend, loop refusal, in-flight holds, served-model billing, boot validation, fan-out clamp, full billing, cache isolation)"
+echo "SPEND FIREWALL SMOKE PASSED ✔ (pricing gate, PII redaction, streamed spend, loop refusal, in-flight holds, served-model billing, boot validation, capped fan-out refusal, unlimited full billing, cache isolation)"

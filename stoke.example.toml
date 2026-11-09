@@ -178,9 +178,10 @@ tier = "local"
 #
 # A streamed request is charged when it ends, so before dispatching one Stoke
 # holds the most it could cost against the key's budget_usd. When the caller
-# names no max_tokens, assume this many output tokens for that hold. Lower it
-# and a burst of concurrent streams can overshoot; raise it and requests that
-# would have fit get refused.
+# names no output limit, inject this actual upstream token limit. Holds use
+# serialized UTF-8 input bytes plus framing, including tools and schemas.
+# Finite budgets reject media/hosted tools and multi-call routing. Use a key
+# with budget_usd = 0 only when you explicitly accept unlimited exposure.
 # assumed_max_output_tokens = 2048
 
 # ─── Per-key enforcement ─────────────────────────────────────────
@@ -188,3 +189,12 @@ tier = "local"
 # key = "agent-key"           # must also appear in STOKE_API_KEYS
 # budget_usd = 20.0           # hard cap; 429 once cumulative spend reaches it
 # rate_limit_rpm = 60         # sliding 60s window
+
+# RouteProfile budget_usd/rate_limit are unsupported and must remain zero.
+# Migrate route spend/rate enforcement to [[keys]] above; allowed_tiers remains supported.
+# Global webhook/JS policy hooks require Chat Completions. Native Messages,
+# Responses, and Messages bridge aliases refuse configured global hooks.
+# Streams refuse mandatory output hooks/scripts; use nonstream Chat instead.
+# Operator UI: set a separate, nonempty STOKE_ADMIN_KEY (Basic-auth password).
+# Inference keys cannot access /ui. Demo additionally requires an explicit
+# x-stoke-key inference credential; the browser UI does not supply one.

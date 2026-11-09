@@ -72,6 +72,9 @@ globalThis.__stoke_run = function(hookType, dataJson) {
   for (const hook of hooks) {
     try {
       const result = hook(data);
+      if (result && typeof result.then === 'function') {
+        throw new Error('Asynchronous JS policy hooks are not supported');
+      }
       if (result && result.block) {
         return JSON.stringify({ __blocked: true, reason: result.block });
       }
@@ -79,7 +82,7 @@ globalThis.__stoke_run = function(hookType, dataJson) {
         data = { ...data, ...result };
       }
     } catch (e) {
-      console.error('Plugin ' + hookType + ' error: ' + (e.message || e));
+      return JSON.stringify({ __error: (e && e.message) || String(e) });
     }
   }
   return JSON.stringify(data);
@@ -94,7 +97,7 @@ impl JsPlugins {
         let mut plugin_codes: Vec<(String, String)> = Vec::new();
         for path in paths {
             if path.is_empty() {
-                continue;
+                return Err("Configured JS plugin path is empty".to_string());
             }
             let code = std::fs::read_to_string(path)
                 .map_err(|e| format!("Failed to read JS plugin {}: {}", path, e))?;
@@ -109,6 +112,7 @@ impl JsPlugins {
         // Barrier ensures the thread has finished loading before is_empty() returns.
         let barrier = std::sync::Arc::new(Barrier::new(2));
         let barrier_clone = barrier.clone();
+        let (startup_tx, startup_rx) = channel::<Result<(), String>>();
 
         let handle = thread::spawn(move || {
             let mut plugins: Vec<JsPlugin> = Vec::new();
@@ -120,11 +124,14 @@ impl JsPlugins {
                         plugins.push(p);
                     }
                     Err(e) => {
-                        tracing::error!("Failed to load JS plugin {}: {}", name, e);
+                        let _ = startup_tx.send(Err(e));
+                        barrier_clone.wait();
+                        return;
                     }
                 }
             }
 
+            let _ = startup_tx.send(Ok(()));
             // Signal that loading is complete.
             barrier_clone.wait();
 
@@ -191,6 +198,18 @@ impl JsPlugins {
         // Wait for the JS thread to finish loading plugins before returning.
         barrier.wait();
 
+        match startup_rx.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                let _ = handle.join();
+                return Err(error);
+            }
+            Err(error) => {
+                let _ = handle.join();
+                return Err(format!("JS plugin startup channel error: {error}"));
+            }
+        }
+
         Ok(Self {
             tx,
             handle: Some(handle),
@@ -222,6 +241,29 @@ impl JsPlugins {
         runtime
             .execute_script("plugin.js", wrapper)
             .map_err(|e| format!("Failed to load JS plugin {}: {}", name, e))?;
+
+        let hook_check = runtime
+            .execute_script(
+                "plugin-validation.js",
+                "JSON.stringify(globalThis.__stoke_hooks.pre_request.length > 0 || globalThis.__stoke_hooks.prompt_filter.length > 0 || globalThis.__stoke_hooks.post_response.length > 0);".to_string(),
+            )
+            .map_err(|e| format!("Failed to validate JS plugin {}: {}", name, e))?;
+        let hook_check = {
+            let context = runtime.main_context();
+            let mut scope = runtime.handle_scope();
+            let context_local = v8::Local::new(&mut scope, context);
+            let mut cs = v8::ContextScope::new(&mut scope, context_local);
+            v8::Local::new(&mut cs, hook_check)
+                .to_string(&mut cs)
+                .ok_or_else(|| format!("Failed to validate JS plugin {} hooks", name))?
+                .to_rust_string_lossy(&mut cs)
+        };
+        if hook_check != "true" {
+            return Err(format!(
+                "JS plugin {} must register at least one supported hook",
+                name
+            ));
+        }
 
         Ok(JsPlugin {
             name: name.to_string(),
@@ -282,6 +324,9 @@ impl JsPlugins {
             let result_str = Self::run_hook(plugin, "pre_request", &input)?;
             let result: Value = serde_json::from_str(&result_str)
                 .map_err(|e| format!("JS plugin returned invalid JSON: {}", e))?;
+            if let Some(error) = result.get("__error").and_then(Value::as_str) {
+                return Err(format!("JS plugin hook failed: {error}"));
+            }
             if result.get("__blocked").and_then(Value::as_bool) == Some(true) {
                 let reason = result
                     .get("reason")
@@ -326,6 +371,9 @@ impl JsPlugins {
             let result_str = Self::run_hook(plugin, "prompt_filter", &input)?;
             let result: Value = serde_json::from_str(&result_str)
                 .map_err(|e| format!("JS plugin returned invalid JSON: {}", e))?;
+            if let Some(error) = result.get("__error").and_then(Value::as_str) {
+                return Err(format!("JS plugin hook failed: {error}"));
+            }
             if result.get("__blocked").and_then(Value::as_bool) == Some(true) {
                 let reason = result
                     .get("reason")
@@ -366,8 +414,15 @@ impl JsPlugins {
         let mut input = json!({ "model": model, "response": response, "cost_usd": cost_usd, "elapsed_ms": elapsed_ms });
         for plugin in plugins {
             let result_str = Self::run_hook(plugin, "post_response", &input)?;
-            input = serde_json::from_str(&result_str)
+            let result: Value = serde_json::from_str(&result_str)
                 .map_err(|e| format!("JS plugin returned invalid JSON: {}", e))?;
+            if let Some(error) = result.get("__error").and_then(Value::as_str) {
+                return Err(format!("JS plugin hook failed: {error}"));
+            }
+            if result.get("__blocked").and_then(Value::as_bool) == Some(true) {
+                return Err("post_response blocked by required JS policy".to_string());
+            }
+            input = result;
         }
         Ok(input.get("response").filter(|v| *v != response).cloned())
     }
@@ -410,7 +465,8 @@ impl JsPlugins {
 
     fn encode_post_response(r: Result<Option<Value>, String>) -> Value {
         match r {
-            Ok(response) => json!({ "ok": true, "response": response }),
+            Ok(Some(response)) => json!({ "ok": true, "response": response }),
+            Ok(None) => json!({ "ok": true }),
             Err(e) => json!({ "ok": false, "error": e }),
         }
     }
@@ -420,9 +476,9 @@ impl JsPlugins {
     pub fn is_empty(&self) -> bool {
         let (tx, rx) = channel();
         if self.tx.send(JsCommand::IsEmpty { reply: tx }).is_err() {
-            return true;
+            return false; // unavailable required policies are not an empty configuration
         }
-        rx.recv().unwrap_or(true)
+        rx.recv().unwrap_or(false)
     }
 
     pub fn pre_request(
@@ -660,5 +716,240 @@ mod tests {
         let (messages, block) = p.prompt_filter(&[], "m", "gateway-secret").unwrap();
         assert_eq!(messages, Some(vec![]));
         assert_eq!(block.as_deref(), Some("prompt blocked"));
+    }
+}
+
+
+#[cfg(test)]
+mod security_regression_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn test_load_empty() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let plugins = JsPlugins::load(&[]);
+        assert!(plugins.is_ok());
+        assert!(plugins.unwrap().is_empty());
+    }
+
+    fn write_plugin(source: &str) -> String {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("stoke-js-plugin-{stamp}.js"));
+        std::fs::write(&path, source).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn configured_plugin_without_supported_hook_is_an_error() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let sources = [
+            "",
+            "   \n\t",
+            "module.exports = {};",
+            "const helper = 1;",
+            "module.exports = { unknown(input) { return input; } };",
+        ];
+
+        for source in sources {
+            let path = write_plugin(source);
+            let result = JsPlugins::load(&[path.clone()]);
+            let _ = std::fs::remove_file(&path);
+            assert!(
+                result.is_err(),
+                "configured plugin without a supported hook must fail: {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn second_plugin_can_block_after_first_plugin_updates_input() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let first = write_plugin(
+            r#"module.exports = {
+                pre_request(input) { return { ...input, model: "first-model" }; }
+            };"#,
+        );
+        let second = write_plugin(
+            r#"module.exports = {
+                pre_request(input) { return { ...input, block: "explicit deny" }; }
+            };"#,
+        );
+        let plugins = JsPlugins::load(&[first.clone(), second.clone()]).unwrap();
+        let result = plugins
+            .pre_request("original", "single", &[], "key")
+            .unwrap();
+        assert_eq!(result.0.as_deref(), None);
+        assert_eq!(result.3.as_deref(), Some("explicit deny"));
+        let _ = std::fs::remove_file(first);
+        let _ = std::fs::remove_file(second);
+    }
+
+    #[test]
+    fn later_identity_plugin_preserves_prior_prompt_redaction() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let redact = write_plugin(
+            r#"module.exports = {
+                prompt_filter(input) {
+                    return { ...input, messages: input.messages.map(m => ({ ...m, content: "[REDACTED]" })) };
+                }
+            };"#,
+        );
+        let identity = write_plugin(
+            r#"module.exports = {
+                prompt_filter(input) { return input; }
+            };"#,
+        );
+        let plugins = JsPlugins::load(&[redact.clone(), identity.clone()]).unwrap();
+        let messages = vec![json!({"role":"user", "content":"email@example.com"})];
+        let result = plugins.prompt_filter(&messages, "model", "key").unwrap();
+        assert_eq!(result.0.unwrap()[0]["content"], "[REDACTED]");
+        let _ = std::fs::remove_file(redact);
+        let _ = std::fs::remove_file(identity);
+    }
+
+    #[test]
+    fn hook_exceptions_fail_closed_for_every_policy_stage() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let throwing = write_plugin(
+            r#"module.exports = {
+                pre_request(_input) { throw new Error("pre failure"); },
+                prompt_filter(_input) { throw new Error("filter failure"); },
+                post_response(_input) { throw new Error("post failure"); }
+            };"#,
+        );
+        let later = write_plugin(
+            r#"module.exports = {
+                pre_request(input) { return { ...input, model: "after-error" }; },
+                prompt_filter(input) { return input; },
+                post_response(input) { return input; }
+            };"#,
+        );
+        let plugins = JsPlugins::load(&[throwing.clone(), later.clone()]).unwrap();
+        assert!(plugins.pre_request("original", "single", &[], "key").is_err());
+        assert!(plugins.prompt_filter(&[], "original", "key").is_err());
+        assert!(plugins.post_response("original", &json!({}), 0.0, 0, "key").is_err());
+        let _ = std::fs::remove_file(throwing);
+        let _ = std::fs::remove_file(later);
+    }
+
+    #[test]
+    fn closed_policy_worker_is_not_reported_as_empty() {
+        let (tx, rx) = channel();
+        drop(rx);
+        let plugins = JsPlugins { tx, handle: None };
+        assert!(!plugins.is_empty(), "worker failure must not bypass required hooks");
+        assert!(plugins.pre_request("original", "single", &[], "key").is_err());
+    }
+
+    #[test]
+    fn asynchronous_policy_hooks_are_refused_instead_of_silently_ignored() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let path = write_plugin(
+            r#"module.exports = {
+                async pre_request(_input) { return { block: "deny" }; },
+                async prompt_filter(_input) { return { block: "deny" }; },
+                async post_response(_input) { return { block: "deny" }; }
+            };"#,
+        );
+        let plugins = JsPlugins::load(&[path.clone()]).unwrap();
+        assert!(plugins.pre_request("original", "single", &[], "key").is_err());
+        assert!(plugins.prompt_filter(&[], "original", "key").is_err());
+        assert!(plugins.post_response("original", &json!({}), 0.0, 0, "key").is_err());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn partial_hook_overrides_preserve_context_for_later_policies() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let first = write_plugin(
+            r#"module.exports = {
+                pre_request(_input) { return { model: "guarded" }; },
+                prompt_filter(_input) { return { messages: [{role: "user", content: "clean"}] }; },
+                post_response(_input) { return { response: {safe: true} }; }
+            };"#,
+        );
+        let second = write_plugin(
+            r#"module.exports = {
+                pre_request(input) {
+                    if (input.messages && input.messages[0].content === "secret") return {block: "context deny"};
+                    return input;
+                },
+                prompt_filter(input) {
+                    if (input.model === "guarded") return {block: "model deny"};
+                    return input;
+                },
+                post_response(input) {
+                    if (input.model === "guarded") return {block: "response deny"};
+                    return input;
+                }
+            };"#,
+        );
+        let plugins = JsPlugins::load(&[first.clone(), second.clone()]).unwrap();
+        let messages = vec![json!({"role": "user", "content": "secret"})];
+        let pre = plugins.pre_request("original", "single", &messages, "key").unwrap();
+        assert_eq!(pre.3.as_deref(), Some("context deny"));
+        let filter = plugins.prompt_filter(&messages, "guarded", "key").unwrap();
+        assert_eq!(filter.1.as_deref(), Some("model deny"));
+        assert!(plugins.post_response("guarded", &json!({}), 0.0, 0, "key").is_err());
+        let _ = std::fs::remove_file(first);
+        let _ = std::fs::remove_file(second);
+    }
+
+    #[test]
+    fn empty_configured_plugin_path_is_an_error_not_an_empty_policy_set() {
+        assert!(JsPlugins::load(&[String::new()]).is_err());
+    }
+
+    #[test]
+    fn plugin_load_error_is_returned_to_the_caller() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let invalid = write_plugin("module.exports = { pre_request(;");
+        let result = JsPlugins::load(&[invalid.clone()]);
+        assert!(result.is_err(), "invalid configured plugin must not disappear");
+        let _ = std::fs::remove_file(invalid);
+    }
+
+    #[test]
+    fn pre_only_plugin_preserves_absent_public_post_response() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let path = write_plugin(
+            r#"module.exports = {
+                pre_request(input) { return input; }
+            };"#,
+        );
+        let plugins = JsPlugins::load(&[path.clone()]).unwrap();
+        let response = json!({"id": "response-1", "content": "unchanged"});
+        assert_eq!(
+            plugins
+                .post_response("model", &response, 0.0, 1, "key")
+                .unwrap(),
+            None
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn identity_post_plugin_preserves_absent_public_post_response() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let path = write_plugin(
+            r#"module.exports = {
+                post_response(input) { return input; }
+            };"#,
+        );
+        let plugins = JsPlugins::load(&[path.clone()]).unwrap();
+        let response = json!({"id": "response-2", "content": "unchanged"});
+        assert_eq!(
+            plugins
+                .post_response("model", &response, 0.0, 1, "key")
+                .unwrap(),
+            None
+        );
+        let _ = std::fs::remove_file(path);
     }
 }

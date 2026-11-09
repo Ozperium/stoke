@@ -40,7 +40,7 @@ impl Usage {
         serde_json::json!({
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
-            "total_tokens": self.prompt_tokens + self.completion_tokens,
+            "total_tokens": self.prompt_tokens.saturating_add(self.completion_tokens),
         })
     }
 }
@@ -132,6 +132,7 @@ impl UsageScanner {
         let p = u.get("prompt_tokens").and_then(Value::as_u64);
         let c = u.get("completion_tokens").and_then(Value::as_u64);
         if let (Some(p), Some(c)) = (p, c) {
+            if p.checked_add(c).is_none() { self.lost = true; return; }
             self.prompt_tokens = p;
             self.completion_tokens = c;
             self.seen = true;
@@ -141,6 +142,15 @@ impl UsageScanner {
     }
 
     fn on_anthropic(&mut self, v: &Value) {
+        if let Some(u) = v.pointer("/message/usage").or_else(|| v.get("usage")) {
+            let mut total = 0u64;
+            for k in ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"] {
+                if let Some(n) = u.get(k) {
+                    let Some(n) = n.as_u64().and_then(|n| total.checked_add(n)) else { self.lost = true; return; };
+                    total = n;
+                }
+            }
+        }
         match v.get("type").and_then(Value::as_str) {
             Some("message_start") => {
                 if let Some(u) = v.pointer("/message/usage") {
@@ -151,7 +161,7 @@ impl UsageScanner {
                         self.completion_tokens = out;
                     }
                     // Input tokens are final; the output count is not.
-                    self.seen = true;
+                    self.seen = u.get("input_tokens").and_then(Value::as_u64).is_some();
                 }
             }
             Some("message_delta") => {
@@ -159,8 +169,7 @@ impl UsageScanner {
                     // output_tokens here is cumulative for the message, not a delta.
                     if let Some(out) = u.get("output_tokens").and_then(Value::as_u64) {
                         self.completion_tokens = out;
-                        self.seen = true;
-                        self.final_seen = true;
+                        self.final_seen = self.seen || u.get("input_tokens").and_then(Value::as_u64).is_some();
                     }
                     // Some responses only reveal input token counts at the end.
                     let input = sum_u64(u, &["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]);
@@ -181,6 +190,7 @@ impl UsageScanner {
         let input = usage.get("input_tokens").and_then(Value::as_u64);
         let output = usage.get("output_tokens").and_then(Value::as_u64);
         if let (Some(input), Some(output)) = (input, output) {
+            if input.checked_add(output).is_none() { self.lost = true; return; }
             self.prompt_tokens = input;
             self.completion_tokens = output;
             self.seen = true;
@@ -192,7 +202,7 @@ impl UsageScanner {
     /// a measurement — either the provider never reported, or the stream ended
     /// before the frame carrying the final tally arrived.
     pub fn usage(&self) -> Option<Usage> {
-        self.final_seen.then_some(Usage {
+        (self.final_seen && !self.lost).then_some(Usage {
             prompt_tokens: self.prompt_tokens,
             completion_tokens: self.completion_tokens,
         })
@@ -222,28 +232,23 @@ impl UsageScanner {
 fn sum_u64(v: &Value, keys: &[&str]) -> u64 {
     keys.iter()
         .filter_map(|k| v.get(*k).and_then(Value::as_u64))
-        .sum()
+        .fold(0u64, u64::saturating_add)
 }
 
 /// Ask an OpenAI-compatible provider to report usage on the final stream frame.
 ///
 /// Only worth doing where the answer changes something: a provider on a free
 /// tier costs nothing per token, so we leave its request — and therefore the
-/// bytes its clients receive — exactly as they were. A caller who already asked
-/// for usage keeps their own settings.
+/// bytes its clients receive — exactly as they were. Metered usage cannot be disabled by a caller. Other stream settings are retained.
 pub fn request_stream_usage(body: &Value, tier: &str, provider_type: &str) -> Value {
-    if crate::cost::is_free_tier(tier) || provider_type == "anthropic" {
+    if !crate::cost::global().is_metered(tier, body.get("model").and_then(Value::as_str).unwrap_or("")) || provider_type == "anthropic" {
         return body.clone();
     }
     let mut out = body.clone();
     let Some(obj) = out.as_object_mut() else { return out };
-    if obj.contains_key("stream_options") {
-        return out; // the caller has an opinion; do not override it
-    }
-    obj.insert(
-        "stream_options".into(),
-        serde_json::json!({ "include_usage": true }),
-    );
+    let options = obj.entry("stream_options").or_insert_with(|| serde_json::json!({}));
+    if !options.is_object() { *options = serde_json::json!({}); }
+    options.as_object_mut().unwrap().insert("include_usage".into(), Value::Bool(true));
     out
 }
 
@@ -419,9 +424,36 @@ mod tests {
     }
 
     #[test]
-    fn a_callers_own_stream_options_are_not_overridden() {
+    fn metered_usage_cannot_be_disabled_by_caller() {
         let body = serde_json::json!({"stream_options": {"include_usage": false}});
         let out = request_stream_usage(&body, "cloud", "openai_compatible");
-        assert_eq!(out.pointer("/stream_options/include_usage"), Some(&Value::Bool(false)));
+        assert_eq!(out.pointer("/stream_options/include_usage"), Some(&Value::Bool(true)));
+    }
+}
+
+#[cfg(test)]
+mod security_usage_tests {
+    use super::*;
+    #[test]
+    fn anthropic_output_without_input_is_not_a_final_measurement() {
+        let mut s = UsageScanner::new(Wire::Anthropic);
+        s.feed(b"data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":0}}\n\n");
+        assert!(s.usage().is_none());
+    }
+    #[test]
+    fn malformed_cache_usage_is_not_a_final_measurement() {
+        let mut s = UsageScanner::new(Wire::Anthropic);
+        s.feed(b"data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":0,\"cache_read_input_tokens\":-1}}}\n\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":0}}\n\n");
+        assert!(s.usage().is_none());
+    }
+    #[test]
+    fn overflowing_usage_is_uncertain_instead_of_panicking() {
+        for wire in [Wire::OpenAi, Wire::Responses] {
+            let mut s = UsageScanner::new(wire);
+            let payload = if wire == Wire::OpenAi { serde_json::json!({"usage":{"prompt_tokens":u64::MAX,"completion_tokens":1}}) }
+                else { serde_json::json!({"type":"response.completed","response":{"usage":{"input_tokens":u64::MAX,"output_tokens":1}}}) };
+            s.feed(format!("data: {payload}\n\n").as_bytes());
+            assert!(s.usage().is_none());
+        }
     }
 }

@@ -2,7 +2,7 @@
 
 **A self-hosted gateway for controlling model traffic: hard budget caps, loop detection, and local-first routing.**
 
-Release candidate: `v0.2.2`. See [release notes](docs/releases/v0.2.2.md) for the included fixes and platform limits. Published availability is recorded in [GitHub Releases](https://github.com/Ozperium/stoke/releases); a source checkout alone is not a published binary. MIT licensed. Stoke ships no models or provider credits.
+Release candidate: `v0.2.3`. See [release notes](docs/releases/v0.2.3.md) for the included fixes and platform limits. Published availability is recorded in [GitHub Releases](https://github.com/Ozperium/stoke/releases); a source checkout alone is not a published binary. MIT licensed. Stoke ships no models or provider credits.
 
 ## Why
 
@@ -138,7 +138,7 @@ Because prompts route to your own machines by default, they never leave your inf
 - **Response cache** — exact identity is scoped to the caller and named route, and includes the resolved model plus the complete effective request. The release policy applies only to eligible non-streaming `single` routes; route TTL is capped by the existing global retention and expired entries are lazily removed. It is reuse, not secure erasure, and is not a claim about Responses caching.
 - **Bounded exact coalescing** — an explicitly enabled named route can let concurrent identical cold requests share one provider execution. The registry stores notification state, not response bodies; followers wait at most five seconds, then re-read the cache or dispatch normally. A coalesced decision has follower visibility, while budget/cost receipts remain at dispatch level.
 - **Validated retry hints** — eligible upstream `Retry-After` and `x-should-retry` values are propagated to clients only when their syntax is valid and unambiguous. This is client-facing metadata, not a new internal failover policy.
-- **Cost tracking** — non-streaming responses carry a `stoke_cost` field, and both streamed and non-streamed responses record their spend per key, including every call a fan-out pattern makes. Streamed spend is read from the provider's own usage report as the stream passes; if a metered provider reports none, Stoke bills an estimate and says so (`estimated_usd` in `/v1/budget`) rather than booking $0. Prices come from `[pricing.models]` in your config — Stoke ships none, and refuses to serve a model it cannot price on a metered provider rather than meter it at $0. Before dispatching, Stoke holds the most a request could cost against the key's cap and refuses it if the hold would not fit, so concurrent streams cannot overshoot while none of them has been charged yet. `/v1/budget` shows per-key spend, held money, and the configured prices are at `/v1/pricing`.
+- **Cost tracking** — non-streaming responses carry a `stoke_cost` field, and both streamed and non-streamed responses record their spend per key, including every call a fan-out pattern makes. Streamed spend is read from the provider's own usage report as the stream passes; if a metered provider reports none, Stoke bills an estimate and says so (`estimated_usd` in `/v1/budget`) rather than booking $0. Prices come from `[pricing.models]` in your config — Stoke ships none, and refuses to serve a model it cannot price on a metered provider rather than meter it at $0. Before dispatching, Stoke holds the most a request could cost against the key's cap and refuses it if the hold would not fit, so concurrent streams cannot overshoot while none of them has been charged yet. `/v1/budget` shows per-key spend, held money, and the configured prices are at `/v1/pricing`. Finite-budget keys support single routing with one dispatch attempt; multi-call routing requires an explicitly unlimited key.
 - **Route profiles** — multiple endpoints, each with its own model, routing pattern, plugin chain, and optional `allowed_tiers` egress allowlist. A route set to `["local", "remote"]` refuses cloud fallback before any provider is called.
 - **Plugins** — webhook hooks (`pre_request`, `prompt_filter`, `post_response`) in any language; JS/TS plugins behind a compile-time feature flag (`--features js-plugins`); built-in PII redaction and JSONL audit log.
 - **OpenAI-compatible** — `/v1/chat/completions` passthrough including SSE streaming and `tool_calls`. Works with any OpenAI-compatible client or agent.
@@ -163,10 +163,10 @@ The ledger path follows the gateway's: `STOKE_LEDGER_PATH`, else `~/.stoke/ledge
 
 The product boundary and the answer to “where do the models come from?” are recorded in [`docs/control-plane-positioning.md`](docs/control-plane-positioning.md). Stoke is a control plane for capacity you attach; it does not ship a hidden model catalogue or provider credits.
 
-This checkout prepares `v0.2.2`. Verify its publication in GitHub Releases and the downloaded asset's checksum before treating it as a deployment artifact. The rolling `nightly` channel is a prerelease, not stable.
+This checkout prepares `v0.2.3`. Verify its publication in GitHub Releases and the downloaded asset's checksum before treating it as a deployment artifact. The rolling `nightly` channel is a prerelease, not stable.
 
 ```bash
-curl -sSf https://stokegate.com/install | sh -s -- --version v0.2.2
+curl -sSf https://stokegate.com/install | sh -s -- --version v0.2.3
 ```
 
 For main/nightly behavior, use the explicit `--version nightly` channel. To build the checked-out source yourself:
@@ -344,7 +344,9 @@ Subscription traffic (e.g. Claude Max/Pro seats) is quota-world, not dollar-worl
 
 ## Stable and nightly scope
 
-The `v0.2.2` release notes identify this candidate's included changes; the published release manifest identifies the exact source revision. Nightly remains a separate prerelease channel. Model IDs are discovered or explicitly configured; Stoke ships no model defaults. Cache identity/policy, bounded exact coalescing, validated retry hints, native Responses/Codex authentication, and optional Headroom are documented source capabilities, but verify the target artifact before deployment. Headroom is disabled by default and only filters eligible Responses function outputs; it does not compress streamed responses or promise general savings. See the [optional Headroom guide](docs/guides/optional-headroom.md).
+The [`v0.2.3` security release notes](docs/releases/v0.2.3.md) identify this candidate's included changes; the published release manifest identifies the exact source revision. Nightly remains a separate prerelease channel. Model IDs are discovered or explicitly configured; Stoke ships no model defaults. Cache identity/policy, bounded exact coalescing, validated retry hints, native Responses/Codex authentication, and optional Headroom are documented source capabilities, but verify the target artifact before deployment. Headroom is disabled by default and only filters eligible Responses function outputs; it does not compress streamed responses or promise general savings. See the [optional Headroom guide](docs/guides/optional-headroom.md).
+
+Security-release migration: configure `STOKE_ADMIN_KEY` separately from `STOKE_API_KEYS` for the operator dashboard (`/ui`, including its event stream). Inference keys no longer grant that global view; dashboard demo inference additionally requires an explicit `x-stoke-key`. Nonzero route `budget_usd`/`rate_limit` settings are rejected rather than silently ignored; move these policies to `[[keys]]` (`budget_usd`, `rate_limit_rpm`). Metered finite-budget keys use single routing and enforced output limits; unsupported media/remote-content workloads or mandatory policy paths fail closed. Pattern-based PII redaction remains opt-in and route-scoped, not comprehensive DLP.
 
 ## Verification
 

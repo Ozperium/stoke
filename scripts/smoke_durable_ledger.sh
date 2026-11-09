@@ -56,12 +56,21 @@ output_per_1m = 25.0
 EOF
 
 start_stoke() {
+  if [ -n "${STOKE_PID:-}" ] && kill -0 "$STOKE_PID" 2>/dev/null; then stop_stoke; fi
   ( cd "$FIXTURE_HOME" && exec env HOME="$FIXTURE_HOME" STOKE_API_KEYS="$KEY" \
       STOKE_LEDGER_PATH="$FIXTURE_HOME/ledger.db" \
       "$REPO_DIR/target/debug/stoke" > "$WORK_DIR/stoke.log" 2>&1 ) &
+  STOKE_PID=$!
   sleep 3
 }
-stop_stoke() { pkill -f "$REPO_DIR/target/debug/stoke" 2>/dev/null || true; sleep 1; }
+stop_stoke() {
+  if [ -n "${STOKE_PID:-}" ]; then
+    kill "$STOKE_PID" 2>/dev/null || true
+    wait "$STOKE_PID" 2>/dev/null || true
+    unset STOKE_PID
+  fi
+  sleep 1
+}
 
 post() {
   curl -s -o "$WORK_DIR/resp.json" -w '%{http_code}' --max-time 20 \
@@ -73,7 +82,7 @@ post() {
 # ── 1. spend survives a normal restart ────────────────────────────────
 echo "==> assert: spend persists across a clean restart"
 start_stoke
-CODE=$(post '{"model":"priced-model","temperature":0,"messages":[{"role":"user","content":"spend me"}]}')
+CODE=$(post '{"model":"priced-model","temperature":0,"max_tokens":100,"messages":[{"role":"user","content":"spend me"}]}')
 [ "$CODE" = "200" ] || fail "baseline request failed: got $CODE"
 stop_stoke
 
@@ -133,7 +142,7 @@ done
 grep -q "Request: model=slow-model" "$WORK_DIR/stoke.log" \
     || fail "slow request never reached the gateway before the kill"
 sleep 0.5
-kill -9 $(pgrep -f "$REPO_DIR/target/debug/stoke") 2>/dev/null || true
+kill -9 "$STOKE_PID" 2>/dev/null || true
 wait $CURL_PID 2>/dev/null || true
 sleep 1
 # Restart over the same ledger; the hold must still be open (fail-closed).
