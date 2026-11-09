@@ -7,14 +7,12 @@
 
 #![cfg(feature = "js-plugins")]
 
-use deno_core::serde_v8;
 use deno_core::v8;
 use deno_core::JsRuntime;
 use deno_core::RuntimeOptions;
 use serde_json::{json, Value};
 use std::path::Path;
 use std::sync::mpsc::{channel, Sender};
-use std::sync::Barrier;
 use std::thread;
 
 /// Commands sent to the JS thread. Each carries a reply sender.
@@ -52,7 +50,7 @@ struct JsPlugin {
 
 /// Public API. Send + Sync (the Sender is Send + Sync).
 pub struct JsPlugins {
-    tx: Sender<JsCommand>,
+    tx: Option<Sender<JsCommand>>,
     handle: Option<thread::JoinHandle<()>>,
 }
 
@@ -108,9 +106,7 @@ impl JsPlugins {
             plugin_codes.push((name, code));
         }
 
-        // Barrier ensures the thread has finished loading before is_empty() returns.
-        let barrier = std::sync::Arc::new(Barrier::new(2));
-        let barrier_clone = barrier.clone();
+        let (startup_tx, startup_rx) = channel::<Result<(), String>>();
 
         let handle = thread::spawn(move || {
             let mut plugins: Vec<JsPlugin> = Vec::new();
@@ -122,13 +118,16 @@ impl JsPlugins {
                         plugins.push(p);
                     }
                     Err(e) => {
-                        tracing::error!("Failed to load JS plugin {}: {}", name, e);
+                        let error = format!("Failed to load JS plugin {}: {}", name, e);
+                        tracing::error!("{}", error);
+                        while plugins.pop().is_some() {}
+                        let _ = startup_tx.send(Err(error));
+                        return;
                     }
                 }
             }
 
-            // Signal that loading is complete.
-            barrier_clone.wait();
+            let _ = startup_tx.send(Ok(()));
 
             while let Ok(cmd) = rx.recv() {
                 match cmd {
@@ -149,12 +148,22 @@ impl JsPlugins {
                     }
                 }
             }
+
+            // V8 isolates must be dropped in reverse creation order.
+            while plugins.pop().is_some() {}
         });
 
-        // Wait for the JS thread to finish loading plugins before returning.
-        barrier.wait();
-
-        Ok(Self { tx, handle: Some(handle) })
+        match startup_rx.recv() {
+            Ok(Ok(())) => Ok(Self { tx: Some(tx), handle: Some(handle) }),
+            Ok(Err(error)) => {
+                let _ = handle.join();
+                Err(error)
+            }
+            Err(error) => {
+                let _ = handle.join();
+                Err(format!("JS plugin startup channel error: {}", error))
+            }
+        }
     }
 
     fn create_plugin(name: &str, user_code: &str) -> Result<JsPlugin, String> {
@@ -209,63 +218,70 @@ impl JsPlugins {
 
     // --- Internal handlers (run on JS thread) ---
 
+    fn blocked_reason(result: &Value) -> Option<String> {
+        if result.get("__blocked").and_then(|v| v.as_bool()) == Some(true) {
+            return Some(
+                result
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("blocked")
+                    .to_string(),
+            );
+        }
+        None
+    }
+
     fn handle_pre_request(plugins: &mut [JsPlugin], model: &str, routing: &str, messages: &[Value], api_key: &str) -> Result<(Option<String>, Option<String>, Option<Vec<String>>, Option<String>), String> {
-        let input = json!({ "model": model, "routing": routing, "messages": messages, "api_key": api_key });
+        let mut input = json!({ "model": model, "routing": routing, "messages": messages, "api_key": api_key });
         for plugin in plugins {
             let result_str = Self::run_hook(plugin, "pre_request", &input)?;
             let result: Value = serde_json::from_str(&result_str)
                 .map_err(|e| format!("JS plugin returned invalid JSON: {}", e))?;
 
-            if let Some(block) = result.get("__blocked").and_then(|v| v.as_str()) {
-                return Ok((None, None, None, Some(block.to_string())));
+            if let Some(block) = Self::blocked_reason(&result) {
+                return Ok((None, None, None, Some(block)));
             }
-
-            return Ok((
-                result.get("model").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                result.get("routing").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                result.get("vote_models").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()),
-                result.get("block").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            ));
+            input = result;
         }
-        Ok((None, None, None, None))
+        Ok((
+            input.get("model").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            input.get("routing").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            input.get("vote_models").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()),
+            input.get("block").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        ))
     }
 
     fn handle_prompt_filter(plugins: &mut [JsPlugin], messages: &[Value], model: &str, api_key: &str) -> Result<(Option<Vec<Value>>, Option<String>), String> {
-        let input = json!({ "messages": messages, "model": model, "api_key": api_key });
-        let mut current_messages = None;
+        let mut input = json!({ "messages": messages, "model": model, "api_key": api_key });
 
         for plugin in plugins {
             let result_str = Self::run_hook(plugin, "prompt_filter", &input)?;
             let result: Value = serde_json::from_str(&result_str)
                 .map_err(|e| format!("JS plugin returned invalid JSON: {}", e))?;
 
-            if let Some(block) = result.get("__blocked").and_then(|v| v.as_str()) {
-                return Ok((current_messages, Some(block.to_string())));
+            if let Some(block) = Self::blocked_reason(&result) {
+                let current_messages = input.get("messages").and_then(|v| v.as_array()).cloned();
+                return Ok((current_messages, Some(block)));
             }
-            if let Some(msgs) = result.get("messages").and_then(|v| v.as_array()) {
-                current_messages = Some(msgs.clone());
-            }
-            if let Some(block) = result.get("block").and_then(|v| v.as_str()) {
-                return Ok((current_messages, Some(block.to_string())));
-            }
+            input = result;
         }
-        Ok((current_messages, None))
+        Ok((input.get("messages").and_then(|v| v.as_array()).cloned(), input.get("block").and_then(|v| v.as_str()).map(|s| s.to_string())))
     }
 
     fn handle_post_response(plugins: &mut [JsPlugin], model: &str, response: &Value, cost_usd: f64, elapsed_ms: u64, api_key: &str) -> Result<Option<Value>, String> {
-        let input = json!({ "model": model, "response": response, "cost_usd": cost_usd, "elapsed_ms": elapsed_ms, "api_key": api_key });
-        let mut current = None;
+        let mut input = json!({ "model": model, "response": response, "cost_usd": cost_usd, "elapsed_ms": elapsed_ms, "api_key": api_key });
 
         for plugin in plugins {
             let result_str = Self::run_hook(plugin, "post_response", &input)?;
             let result: Value = serde_json::from_str(&result_str)
                 .map_err(|e| format!("JS plugin returned invalid JSON: {}", e))?;
 
-            if let Some(resp) = result.get("response") {
-                current = Some(resp.clone());
+            if let Some(block) = Self::blocked_reason(&result) {
+                return Err(format!("post_response blocked: {}", block));
             }
+            input = result;
         }
-        Ok(current)
+        Ok(input.get("response").cloned())
     }
 
     // --- Encoders for channel serialization ---
@@ -305,7 +321,7 @@ impl JsPlugins {
 
     pub fn is_empty(&self) -> bool {
         let (tx, rx) = channel();
-        if self.tx.send(JsCommand::IsEmpty { reply: tx }).is_err() {
+        if self.tx.as_ref().and_then(|sender| sender.send(JsCommand::IsEmpty { reply: tx }).ok()).is_none() {
             return true;
         }
         rx.recv().unwrap_or(true)
@@ -313,7 +329,7 @@ impl JsPlugins {
 
     pub fn pre_request(&self, model: &str, routing: &str, messages: &[Value], api_key: &str) -> Result<(Option<String>, Option<String>, Option<Vec<String>>, Option<String>), String> {
         let (tx, rx) = channel();
-        self.tx.send(JsCommand::PreRequest {
+        self.tx.as_ref().ok_or_else(|| "JS thread is closed".to_string())?.send(JsCommand::PreRequest {
             model: model.to_string(),
             routing: routing.to_string(),
             messages: messages.to_vec(),
@@ -338,7 +354,7 @@ impl JsPlugins {
 
     pub fn prompt_filter(&self, messages: &[Value], model: &str, api_key: &str) -> Result<(Option<Vec<Value>>, Option<String>), String> {
         let (tx, rx) = channel();
-        self.tx.send(JsCommand::PromptFilter {
+        self.tx.as_ref().ok_or_else(|| "JS thread is closed".to_string())?.send(JsCommand::PromptFilter {
             messages: messages.to_vec(),
             model: model.to_string(),
             api_key: api_key.to_string(),
@@ -360,7 +376,7 @@ impl JsPlugins {
 
     pub fn post_response(&self, model: &str, response: &Value, cost_usd: f64, elapsed_ms: u64, api_key: &str) -> Result<Option<Value>, String> {
         let (tx, rx) = channel();
-        self.tx.send(JsCommand::PostResponse {
+        self.tx.as_ref().ok_or_else(|| "JS thread is closed".to_string())?.send(JsCommand::PostResponse {
             model: model.to_string(),
             response: response.clone(),
             cost_usd,
@@ -382,18 +398,112 @@ impl JsPlugins {
 
 impl Drop for JsPlugins {
     fn drop(&mut self) {
-        drop(self.handle.take());
+        self.tx.take();
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_load_empty() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let plugins = JsPlugins::load(&[]);
         assert!(plugins.is_ok());
         assert!(plugins.unwrap().is_empty());
+    }
+
+    fn write_plugin(source: &str) -> String {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("stoke-js-plugin-{stamp}.js"));
+        std::fs::write(&path, source).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn second_plugin_can_block_after_first_plugin_updates_input() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let first = write_plugin(
+            r#"module.exports = {
+                pre_request(input) { return { ...input, model: "first-model" }; }
+            };"#,
+        );
+        let second = write_plugin(
+            r#"module.exports = {
+                pre_request(input) { return { ...input, block: "explicit deny" }; }
+            };"#,
+        );
+        let plugins = JsPlugins::load(&[first.clone(), second.clone()]).unwrap();
+        let result = plugins
+            .pre_request("original", "single", &[], "key")
+            .unwrap();
+        assert_eq!(result.0.as_deref(), None);
+        assert_eq!(result.3.as_deref(), Some("explicit deny"));
+        let _ = std::fs::remove_file(first);
+        let _ = std::fs::remove_file(second);
+    }
+
+    #[test]
+    fn later_identity_plugin_preserves_prior_prompt_redaction() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let redact = write_plugin(
+            r#"module.exports = {
+                prompt_filter(input) {
+                    return { ...input, messages: input.messages.map(m => ({ ...m, content: "[REDACTED]" })) };
+                }
+            };"#,
+        );
+        let identity = write_plugin(
+            r#"module.exports = {
+                prompt_filter(input) { return input; }
+            };"#,
+        );
+        let plugins = JsPlugins::load(&[redact.clone(), identity.clone()]).unwrap();
+        let messages = vec![json!({"role":"user", "content":"email@example.com"})];
+        let result = plugins.prompt_filter(&messages, "model", "key").unwrap();
+        assert_eq!(result.0.unwrap()[0]["content"], "[REDACTED]");
+        let _ = std::fs::remove_file(redact);
+        let _ = std::fs::remove_file(identity);
+    }
+
+    #[test]
+    fn hook_exception_is_logged_and_later_hook_still_runs() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let throwing = write_plugin(
+            r#"module.exports = {
+                pre_request(_input) { throw new Error("hook failure"); }
+            };"#,
+        );
+        let later = write_plugin(
+            r#"module.exports = {
+                pre_request(input) { return { ...input, model: "after-error" }; }
+            };"#,
+        );
+        let plugins = JsPlugins::load(&[throwing.clone(), later.clone()]).unwrap();
+        let result = plugins
+            .pre_request("original", "single", &[], "key")
+            .unwrap();
+        assert_eq!(result.0.as_deref(), Some("after-error"));
+        let _ = std::fs::remove_file(throwing);
+        let _ = std::fs::remove_file(later);
+    }
+
+    #[test]
+    fn plugin_load_error_is_returned_to_the_caller() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let invalid = write_plugin("module.exports = { pre_request(;");
+        let result = JsPlugins::load(&[invalid.clone()]);
+        assert!(result.is_err(), "invalid configured plugin must not disappear");
+        let _ = std::fs::remove_file(invalid);
     }
 }

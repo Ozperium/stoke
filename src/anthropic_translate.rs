@@ -14,6 +14,30 @@
 
 use serde_json::{json, Value};
 
+const MAX_SSE_FRAME_BYTES: usize = 64 * 1024;
+const MAX_TOOL_INDEX: u64 = 64;
+const MAX_TOOL_BLOCKS: usize = 64;
+const MAX_TOOL_ARGUMENT_BYTES: usize = 1024 * 1024;
+const MAX_TEXT_BLOCK_BYTES: usize = 1024 * 1024;
+
+fn sse_delimiter(bytes: &[u8]) -> Option<(usize, usize)> {
+    let lf = bytes.windows(2).position(|window| window == b"\n\n");
+    let crlf = bytes.windows(4).position(|window| window == b"\r\n\r\n");
+    match (lf, crlf) {
+        (Some(lf), Some(crlf)) if crlf < lf => Some((crlf, 4)),
+        (Some(lf), _) => Some((lf, 2)),
+        (None, Some(crlf)) => Some((crlf, 4)),
+        (None, None) => None,
+    }
+}
+
+fn sse_error(message: &str) -> String {
+    format!(
+        "event: error\ndata: {}\n\n",
+        json!({"type":"error","error":{"type":"stream_error","message":message}})
+    )
+}
+
 /// Translate an Anthropic Messages request body into an OpenAI
 /// chat/completions request body.
 ///
@@ -428,6 +452,7 @@ pub struct ResponsesStreamTranslator {
     input_tokens: u64,
     output_tokens: u64,
     used_tool: bool,
+    failed: Option<String>,
 }
 
 impl ResponsesStreamTranslator {
@@ -443,30 +468,67 @@ impl ResponsesStreamTranslator {
             input_tokens: 0,
             output_tokens: 0,
             used_tool: false,
+            failed: None,
         }
     }
 
+    fn fail(&mut self, message: impl Into<String>) -> Vec<String> {
+        if self.failed.is_some() {
+            return Vec::new();
+        }
+        let message = message.into();
+        self.partial.clear();
+        self.failed = Some(message.clone());
+        vec![sse_error(&message)]
+    }
+
     pub fn feed_bytes(&mut self, bytes: &[u8]) -> Vec<String> {
+        if self.failed.is_some() {
+            return Vec::new();
+        }
         self.partial.extend_from_slice(bytes);
         let mut events = Vec::new();
-        while let Some(end) = self.partial.windows(2).position(|window| window == b"\n\n") {
-            let frame: Vec<u8> = self.partial.drain(..end + 2).collect();
-            let frame = String::from_utf8_lossy(&frame);
+        while let Some((end, delimiter_len)) = sse_delimiter(&self.partial) {
+            if end > MAX_SSE_FRAME_BYTES {
+                events.extend(self.fail(format!("SSE frame exceeds {} bytes", MAX_SSE_FRAME_BYTES)));
+                return events;
+            }
+            let frame: Vec<u8> = self.partial.drain(..end + delimiter_len).collect();
+            let frame = match std::str::from_utf8(&frame) {
+                Ok(frame) => frame,
+                Err(_) => {
+                    events.extend(self.fail("SSE frame is not valid UTF-8"));
+                    return events;
+                }
+            };
             for line in frame.lines() {
-                if let Some(data) = line.strip_prefix("data: ") {
+                if let Some(data) = line.strip_prefix("data:") {
+                    let data = data.trim();
                     if data == "[DONE]" {
                         continue;
                     }
                     if let Ok(value) = serde_json::from_str::<Value>(data) {
                         self.translate_event(&value, &mut events);
                     }
+                    if self.failed.is_some() {
+                        return events;
+                    }
                 }
             }
+        }
+        if self.partial.len() > MAX_SSE_FRAME_BYTES {
+            events.extend(self.fail(format!("SSE buffer exceeds {} bytes", MAX_SSE_FRAME_BYTES)));
         }
         events
     }
 
     pub fn finish_response(&self) -> Value {
+        if let Some(error) = &self.failed {
+            return json!({
+                "type": "error",
+                "error": {"type": "stream_error", "message": error},
+            });
+        }
         json!({
             "id": self.id,
             "type": "message",
@@ -483,6 +545,9 @@ impl ResponsesStreamTranslator {
     }
 
     fn translate_event(&mut self, event: &Value, out: &mut Vec<String>) {
+        if self.failed.is_some() {
+            return;
+        }
         match event.get("type").and_then(Value::as_str).unwrap_or("") {
             "response.created" => {
                 if let Some(id) = event.pointer("/response/id").and_then(Value::as_str) {
@@ -494,6 +559,18 @@ impl ResponsesStreamTranslator {
                 self.start(out);
                 self.ensure_text(out);
                 let delta = event.get("delta").and_then(Value::as_str).unwrap_or("");
+                let text_too_large = matches!(
+                    self.open.as_ref(),
+                    Some(ResponsesOpenBlock::Text { text, .. })
+                        if text.len().saturating_add(delta.len()) > MAX_TEXT_BLOCK_BYTES
+                );
+                if text_too_large {
+                    out.extend(self.fail(format!(
+                        "text block exceeds {} bytes",
+                        MAX_TEXT_BLOCK_BYTES
+                    )));
+                    return;
+                }
                 if let Some(ResponsesOpenBlock::Text { index, text }) = self.open.as_mut() {
                     text.push_str(delta);
                     out.push(sse_event(
@@ -505,6 +582,13 @@ impl ResponsesStreamTranslator {
             "response.output_item.added"
                 if event.pointer("/item/type").and_then(Value::as_str) == Some("function_call") =>
             {
+                if self.next_index >= MAX_TOOL_BLOCKS {
+                    out.extend(self.fail(format!(
+                        "stream contains more than {} content blocks",
+                        MAX_TOOL_BLOCKS
+                    )));
+                    return;
+                }
                 self.start(out);
                 self.close_open(out);
                 let index = self.next_index;
@@ -533,6 +617,18 @@ impl ResponsesStreamTranslator {
             }
             "response.function_call_arguments.delta" => {
                 let delta = event.get("delta").and_then(Value::as_str).unwrap_or("");
+                let arguments_too_large = matches!(
+                    self.open.as_ref(),
+                    Some(ResponsesOpenBlock::Tool { arguments, .. })
+                        if arguments.len().saturating_add(delta.len()) > MAX_TOOL_ARGUMENT_BYTES
+                );
+                if arguments_too_large {
+                    out.extend(self.fail(format!(
+                        "tool arguments exceed {} bytes",
+                        MAX_TOOL_ARGUMENT_BYTES
+                    )));
+                    return;
+                }
                 if let Some(ResponsesOpenBlock::Tool {
                     index, arguments, ..
                 }) = self.open.as_mut()
@@ -578,6 +674,13 @@ impl ResponsesStreamTranslator {
 
     fn ensure_text(&mut self, out: &mut Vec<String>) {
         if matches!(self.open, Some(ResponsesOpenBlock::Text { .. })) {
+            return;
+        }
+        if self.next_index >= MAX_TOOL_BLOCKS {
+            out.extend(self.fail(format!(
+                "stream contains more than {} content blocks",
+                MAX_TOOL_BLOCKS
+            )));
             return;
         }
         self.close_open(out);
@@ -747,11 +850,14 @@ pub struct StreamTranslator {
     /// Anthropic block index per OpenAI tool-call index, so continuation
     /// fragments append to the right block instead of opening a duplicate.
     tool_blocks: Vec<Option<usize>>,
+    tool_argument_bytes: Vec<usize>,
+    text_bytes: usize,
     finished: bool,
     input_tokens: u64,
     output_tokens: u64,
     stop_reason: Option<String>,
     partial: Vec<u8>,
+    failed: Option<String>,
 }
 
 impl StreamTranslator {
@@ -767,12 +873,25 @@ impl StreamTranslator {
             block_open: None,
             next_index: 0,
             tool_blocks: Vec::new(),
+            tool_argument_bytes: Vec::new(),
+            text_bytes: 0,
             finished: false,
             input_tokens: 0,
             output_tokens: 0,
             stop_reason: None,
             partial: Vec::new(),
+            failed: None,
         }
+    }
+
+    fn fail(&mut self, message: impl Into<String>) -> Vec<String> {
+        if self.failed.is_some() {
+            return Vec::new();
+        }
+        let message = message.into();
+        self.partial.clear();
+        self.failed = Some(message.clone());
+        vec![sse_error(&message)]
     }
 
     /// Feed raw upstream bytes; returns complete Anthropic SSE event frames.
@@ -781,15 +900,24 @@ impl StreamTranslator {
     /// multi-byte character split across chunk boundaries is not corrupted
     /// into U+FFFD replacement garbage mid-stream.
     pub fn feed_bytes(&mut self, bytes: &[u8]) -> Vec<String> {
+        if self.failed.is_some() {
+            return Vec::new();
+        }
         self.partial.extend_from_slice(bytes);
         let mut events = Vec::new();
         while let Some(pos) = self.partial.iter().position(|&b| b == b'\n') {
             let line: Vec<u8> = self.partial.drain(..=pos).collect();
-            let Ok(line) = std::str::from_utf8(&line) else {
-                // A newline always terminates an SSE frame, so an invalid
-                // line cannot be part of a split character — skip it.
-                continue;
+            let line = match std::str::from_utf8(&line) {
+                Ok(line) => line,
+                Err(_) => {
+                    events.extend(self.fail("SSE line is not valid UTF-8"));
+                    return events;
+                }
             };
+            if line.len() > MAX_SSE_FRAME_BYTES {
+                events.extend(self.fail(format!("SSE line exceeds {} bytes", MAX_SSE_FRAME_BYTES)));
+                return events;
+            }
             if let Some(payload) = line.trim_end().strip_prefix("data:") {
                 let payload = payload.trim();
                 if payload == "[DONE]" {
@@ -797,7 +925,13 @@ impl StreamTranslator {
                 } else if let Ok(v) = serde_json::from_str::<Value>(payload) {
                     events.extend(self.on_chunk(&v));
                 }
+                if self.failed.is_some() {
+                    return events;
+                }
             }
+        }
+        if self.partial.len() > MAX_SSE_FRAME_BYTES {
+            events.extend(self.fail(format!("SSE buffer exceeds {} bytes", MAX_SSE_FRAME_BYTES)));
         }
         events
     }
@@ -846,6 +980,9 @@ impl StreamTranslator {
     /// opens a fresh text block — a `tool_use` block must never receive
     /// `text_delta` events.
     fn text_delta(&mut self, text: &str) -> Vec<String> {
+        if self.text_bytes.saturating_add(text.len()) > MAX_TEXT_BLOCK_BYTES {
+            return self.fail(format!("text block exceeds {} bytes", MAX_TEXT_BLOCK_BYTES));
+        }
         let mut events = Vec::new();
         if let Some(open) = self.block_open {
             // A tool block is open: close it before starting text. Text
@@ -862,6 +999,12 @@ impl StreamTranslator {
         let index = match self.block_open {
             Some(i) => i,
             None => {
+                if self.next_index >= MAX_TOOL_BLOCKS {
+                    return self.fail(format!(
+                        "stream contains more than {} content blocks",
+                        MAX_TOOL_BLOCKS
+                    ));
+                }
                 let i = self.next_index;
                 self.next_index += 1;
                 self.block_open = Some(i);
@@ -884,6 +1027,7 @@ impl StreamTranslator {
                 "delta": { "type": "text_delta", "text": text },
             }),
         ));
+        self.text_bytes += text.len();
         events
     }
 
@@ -895,15 +1039,25 @@ impl StreamTranslator {
     /// `input_json_delta` partial-JSON fragments.
     fn tool_call_delta(&mut self, call: &Value) -> Vec<String> {
         let oa_index = call.get("index").and_then(Value::as_u64).unwrap_or(0);
+        if oa_index > MAX_TOOL_INDEX || oa_index as usize >= MAX_TOOL_BLOCKS {
+            return self.fail(format!("tool-call index {} exceeds the stream limit", oa_index));
+        }
         let mut events = Vec::new();
         // Every block (text or tool) is allocated from one monotonic
         // counter, so parallel tool calls never collide or reuse indexes.
         if self.tool_blocks.len() <= oa_index as usize {
             self.tool_blocks.resize(oa_index as usize + 1, None);
+            self.tool_argument_bytes.resize(oa_index as usize + 1, 0);
         }
         let index = match self.tool_blocks[oa_index as usize] {
             Some(index) => index,
             None => {
+                if self.next_index >= MAX_TOOL_BLOCKS {
+                    return self.fail(format!(
+                        "stream contains more than {} content blocks",
+                        MAX_TOOL_BLOCKS
+                    ));
+                }
                 let index = self.next_index;
                 self.next_index += 1;
                 self.tool_blocks[oa_index as usize] = Some(index);
@@ -952,6 +1106,14 @@ impl StreamTranslator {
         };
         if let Some(args) = call.pointer("/function/arguments").and_then(Value::as_str) {
             if !args.is_empty() {
+                let slot = oa_index as usize;
+                if self.tool_argument_bytes[slot].saturating_add(args.len()) > MAX_TOOL_ARGUMENT_BYTES {
+                    return self.fail(format!(
+                        "tool arguments exceed {} bytes",
+                        MAX_TOOL_ARGUMENT_BYTES
+                    ));
+                }
+                self.tool_argument_bytes[slot] += args.len();
                 events.push(self.event(
                     "content_block_delta",
                     json!({
@@ -989,7 +1151,7 @@ impl StreamTranslator {
     }
 
     fn finish(&mut self) -> Vec<String> {
-        if self.finished {
+        if self.finished || self.failed.is_some() {
             return Vec::new();
         }
         self.finished = true;
@@ -1773,5 +1935,67 @@ mod tests {
         assert_eq!(resp["content"][0]["text"], "reply");
         assert_eq!(resp["usage"]["input_tokens"], 9);
         assert_eq!(resp["usage"]["output_tokens"], 4);
+    }
+
+    #[test]
+    fn chat_stream_rejects_an_oversized_unterminated_frame() {
+        let mut translator = StreamTranslator::new("m");
+        let mut frame = b"data: ".to_vec();
+        frame.extend(std::iter::repeat_n(b'x', 70_000));
+        let events = translator.feed_bytes(&frame);
+        assert!(events.iter().any(|event| event.starts_with("event: error")));
+        assert!(translator.feed_bytes(b"data: [DONE]\n\n").is_empty());
+    }
+
+    #[test]
+    fn chat_stream_rejects_sparse_tool_indexes_without_large_allocation() {
+        let mut translator = StreamTranslator::new("m");
+        let frame = json!({
+            "choices": [{"delta": {"tool_calls": [{
+                "index": 100_000,
+                "id": "call_sparse",
+                "function": {"name": "f", "arguments": "{}"}
+            }]}}]
+        });
+        let events = translator.feed_bytes(format!("data: {frame}\n\n").as_bytes());
+        assert!(events.iter().any(|event| event.starts_with("event: error")));
+        assert!(translator.feed_bytes(b"data: [DONE]\n\n").is_empty());
+    }
+
+    #[test]
+    fn responses_stream_accepts_crlf_frames_split_across_chunks() {
+        let mut translator = ResponsesStreamTranslator::new("m");
+        let mut events = translator.feed_bytes(
+            b"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\r\n\r",
+        );
+        events.extend(translator.feed_bytes(
+            b"\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\r\n\r\n",
+        ));
+        assert!(events.iter().any(|event| event.contains("text_delta")));
+    }
+
+    #[test]
+    fn responses_stream_rejects_an_oversized_unterminated_frame() {
+        let mut translator = ResponsesStreamTranslator::new("m");
+        let mut frame = b"data: ".to_vec();
+        frame.extend(std::iter::repeat_n(b'x', 70_000));
+        let events = translator.feed_bytes(&frame);
+        assert!(events.iter().any(|event| event.starts_with("event: error")));
+        assert!(translator.feed_bytes(b"data: [DONE]\n\n").is_empty());
+    }
+
+    #[test]
+    fn responses_stream_rejects_too_many_output_blocks() {
+        let mut translator = ResponsesStreamTranslator::new("m");
+        let mut events = Vec::new();
+        for index in 0..65 {
+            let frame = json!({
+                "type": "response.output_item.added",
+                "item": {"type": "function_call", "call_id": format!("call_{index}"), "name": "f"}
+            });
+            events.extend(translator.feed_bytes(format!("data: {frame}\n\n").as_bytes()));
+        }
+        assert!(events.iter().any(|event| event.starts_with("event: error")));
+        assert!(translator.feed_bytes(b"data: [DONE]\n\n").is_empty());
     }
 }

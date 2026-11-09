@@ -6,8 +6,6 @@
 use regex::Regex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Instant;
 
 /// Configuration for built-in plugins.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -234,20 +232,8 @@ impl Builtins {
 
         for msg in messages {
             let mut new_msg = msg.clone();
-            if let Some(content) = new_msg.get_mut("content").and_then(|c| c.as_str().map(|s| s.to_string())) {
-                let mut redacted = content;
-                for (re, label_repl) in &self.pii_patterns {
-                    let parts: Vec<&str> = label_repl.splitn(2, ':').collect();
-                    let repl = if parts.len() == 2 { parts[1] } else { "[REDACTED]" };
-                    let new_val = re.replace_all(&redacted, repl).to_string();
-                    if new_val != redacted {
-                        modified = true;
-                        redacted = new_val;
-                    }
-                }
-                if let Some(obj) = new_msg.as_object_mut() {
-                    obj.insert("content".to_string(), json!(redacted));
-                }
+            if let Some(content) = new_msg.get_mut("content") {
+                modified |= self.redact_content_value(content);
             }
             new_messages.push(new_msg);
         }
@@ -256,6 +242,92 @@ impl Builtins {
             Ok(Some(new_messages))
         } else {
             Ok(None)
+        }
+    }
+
+    fn redact_string(&self, value: &str) -> String {
+        self.pii_patterns.iter().fold(value.to_string(), |current, (re, label_repl)| {
+            let replacement = label_repl
+                .split_once(':')
+                .map(|(_, replacement)| replacement)
+                .unwrap_or("[REDACTED]");
+            re.replace_all(&current, replacement).to_string()
+        })
+    }
+
+    /// Redact only data-bearing fields below a message's `content` value.
+    /// Structural metadata (roles, ids, schemas, and URLs) is not prompt text.
+    fn redact_content_value(&self, value: &mut Value) -> bool {
+        match value {
+            Value::String(text) => {
+                let redacted = self.redact_string(text);
+                let changed = redacted != *text;
+                if changed {
+                    *text = redacted;
+                }
+                changed
+            }
+            Value::Array(items) => items
+                .iter_mut()
+                .map(|item| self.redact_content_value(item))
+                .any(|changed| changed),
+            Value::Object(object) => {
+                let mut changed = false;
+                for key in ["text", "content", "output", "arguments"] {
+                    if let Some(child) = object.get_mut(key) {
+                        changed |= self.redact_content_value(child);
+                    }
+                }
+                if let Some(input) = object.get_mut("input") {
+                    changed |= self.redact_tool_data(input);
+                }
+                changed
+            }
+            _ => false,
+        }
+    }
+
+    fn redact_tool_data(&self, value: &mut Value) -> bool {
+        match value {
+            Value::String(text) => {
+                let redacted = self.redact_string(text);
+                let changed = redacted != *text;
+                if changed {
+                    *text = redacted;
+                }
+                changed
+            }
+            Value::Array(items) => items
+                .iter_mut()
+                .map(|item| self.redact_tool_data(item))
+                .any(|changed| changed),
+            Value::Object(object) => {
+                let mut changed = false;
+                for (key, child) in object.iter_mut() {
+                    if matches!(
+                        key.as_str(),
+                        "url"
+                            | "uri"
+                            | "id"
+                            | "name"
+                            | "type"
+                            | "role"
+                            | "tool_use_id"
+                            | "call_id"
+                            | "schema"
+                            | "input_schema"
+                            | "description"
+                            | "properties"
+                            | "required"
+                            | "enum"
+                    ) {
+                        continue;
+                    }
+                    changed |= self.redact_tool_data(child);
+                }
+                changed
+            }
+            _ => false,
         }
     }
 
@@ -467,4 +539,96 @@ pub struct RoutesConfig {
 /// Resolve a route profile by path.
 pub fn find_profile<'a>(profiles: &'a [RouteProfile], path: &str) -> Option<&'a RouteProfile> {
     profiles.iter().find(|p| p.path == path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pii_builtins() -> Builtins {
+        Builtins::new(BuiltinConfig {
+            pii_redact: Some(PiiConfig {
+                replacement: "[REDACTED]".to_string(),
+                ..PiiConfig::default()
+            }),
+            ..BuiltinConfig::default()
+        })
+    }
+
+    #[tokio::test]
+    async fn redacts_email_in_string_message_content() {
+        let builtins = pii_builtins();
+        let messages = vec![json!({"role": "user", "content": "email@example.com"})];
+        let filtered = builtins
+            .prompt_filter(&messages, "model", "key")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(filtered[0]["content"], "[REDACTED]");
+    }
+
+    #[tokio::test]
+    async fn redacts_email_in_openai_text_content_parts() {
+        let builtins = pii_builtins();
+        let messages = vec![json!({
+            "role": "user",
+            "content": [{"type": "text", "text": "email@example.com"}]
+        })];
+        let filtered = builtins
+            .prompt_filter(&messages, "model", "key")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(filtered[0]["content"][0]["type"], "text");
+        assert_eq!(filtered[0]["content"][0]["text"], "[REDACTED]");
+    }
+
+    #[tokio::test]
+    async fn redacts_nested_tool_content_and_string_arguments() {
+        let builtins = pii_builtins();
+        let messages = vec![json!({
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": "toolu_1",
+                "content": [{"type": "text", "text": "email@example.com"}],
+                "arguments": "{\"email\":\"email@example.com\"}"
+            }]
+        })];
+        let filtered = builtins
+            .prompt_filter(&messages, "model", "key")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(filtered[0]["content"][0]["content"][0]["text"], "[REDACTED]");
+        assert_eq!(filtered[0]["content"][0]["arguments"], "{\"email\":\"[REDACTED]\"}");
+    }
+
+    #[tokio::test]
+    async fn does_not_redact_roles_schema_metadata_or_urls() {
+        let builtins = pii_builtins();
+        let messages = vec![json!({
+            "role": "user",
+            "content": [{
+                "type": "text",
+                "text": "send to email@example.com",
+                "name": "name@example.com",
+                "id": "id@example.com",
+                "url": "https://email@example.com/path",
+                "schema": {"description": "schema@example.com"}
+            }]
+        })];
+        let filtered = builtins
+            .prompt_filter(&messages, "model", "key")
+            .await
+            .unwrap()
+            .unwrap();
+        let part = &filtered[0]["content"][0];
+        assert_eq!(filtered[0]["role"], "user");
+        assert_eq!(part["text"], "send to [REDACTED]");
+        assert_eq!(part["name"], "name@example.com");
+        assert_eq!(part["id"], "id@example.com");
+        assert_eq!(part["url"], "https://email@example.com/path");
+        assert_eq!(part["schema"]["description"], "schema@example.com");
+    }
 }
