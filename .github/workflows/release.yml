@@ -4,7 +4,7 @@ name: release
 #   - workflow_dispatch promotion -> a real GitHub Release (this is what
 #                     `latest` resolves to, and therefore what the one-line
 #                     installer downloads)
-#   - push to main -> a rolling `nightly` prerelease, rebuilt every commit.
+#   - native changes on main -> a rolling `nightly` prerelease.
 #                     Prereleases are excluded from `latest`, so nightly never
 #                     hijacks the stable install path. Get it with:
 #                       curl -sSf https://stokegate.com/install | sh -s -- --version nightly
@@ -26,6 +26,7 @@ jobs:
 
   build:
     needs: verify
+    if: needs.verify.outputs.native == 'true'
     name: build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -93,7 +94,7 @@ jobs:
             ${{ matrix.name }}.tar.gz.sha256
 
 
-  # Every commit on main refreshes a rolling `nightly` prerelease. The old tag
+  # Native changes on main refresh a rolling `nightly` prerelease. The old tag
   # is deleted first so the tag actually moves to the new commit.
   nightly:
     needs: build
@@ -130,7 +131,7 @@ jobs:
           tag_name: nightly
           name: "nightly (${{ github.sha }})"
           body: |
-            Rolling build of `main` — unstable, rebuilt on every commit.
+            Rolling build of `main` — unstable, refreshed for native changes.
             Install: `curl -sSf https://stokegate.com/install | sh -s -- --version nightly`
           prerelease: true
           files: dist/*
