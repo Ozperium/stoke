@@ -58,7 +58,7 @@ jobs:
           PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "stoke") | .version')"
           test "v$PACKAGE_VERSION" = "$VERSION"
           CHECKS="$(gh api "repos/$GITHUB_REPOSITORY/commits/$REQUESTED_SHA/check-runs?per_page=100")"
-          for NAME in "build + test + smoke" "optional Headroom — macOS arm64"; do
+          for NAME in "verify / build + test + smoke" "verify / optional Headroom — macOS arm64" "verify / JS plugin chains (V8 feature)"; do
             jq -e --arg name "$NAME" '.check_runs[] | select(.name == $name and .status == "completed" and .conclusion == "success")' >/dev/null <<<"$CHECKS"
           done
           echo "SOURCE_SHA=$REQUESTED_SHA" >> "$GITHUB_ENV"

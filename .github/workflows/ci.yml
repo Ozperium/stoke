@@ -1,10 +1,8 @@
 name: ci
 
-# Every push and PR: build, unit tests, and the end-to-end smoke harnesses.
+# PRs, manual runs, and the release caller: one complete verification per main push.
 # The smokes need no Ollama — they run against stdlib mock nodes.
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -19,6 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      - name: Check CI and promotion contracts
+        run: python3 -m unittest scripts.test_ci_workflows -v
 
       - uses: dtolnay/rust-toolchain@stable
 
