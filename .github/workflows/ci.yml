@@ -6,20 +6,68 @@ on:
   pull_request:
   workflow_dispatch:
   workflow_call:
+    outputs:
+      native:
+        description: Whether native checks and release archives are required
+        value: ${{ jobs.changes.outputs.native }}
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: CI selection and workflow contracts
+    runs-on: ubuntu-latest
+    outputs:
+      native: ${{ steps.filter.outputs.native }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select native work against PR merge-base or published nightly
+        id: filter
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            # Select work before executing PR code, using only the reviewed base.
+            [[ "$PR_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+            selector="$RUNNER_TEMP/stoke-ci-changes.py"
+            if ! git show "$PR_BASE_SHA:scripts/ci_changes.py" > "$selector"; then
+              # Bootstrapping this gate must run every native check.
+              echo 'native=true' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            python3 -I "$selector"
+          else
+            python3 -I scripts/ci_changes.py
+          fi
+      - name: Check CI selection and promotion contracts
+        run: python3 -m unittest scripts.test_ci_workflows scripts.test_ci_changes -v
+
+  website:
+    name: website and installer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Landing build, links, sitemap, and installer syntax
+        run: |
+          python3 scripts/build_guides.py
+          python3 scripts/check_landing.py
+          sh -n landing/install.sh
+
   test:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     name: build + test + smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      - name: Check CI and promotion contracts
-        run: python3 -m unittest scripts.test_ci_workflows -v
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -72,13 +120,9 @@ jobs:
           STOKE_BIN="$PWD/target/debug/stoke" python3 tests/security_routing_integration.py
           STOKE_BIN="$PWD/target/debug/stoke" python3 tests/security_webhook_integration.py
 
-      - name: Landing build, links, sitemap, and installer syntax
-        run: |
-          python3 scripts/build_guides.py
-          python3 scripts/check_landing.py
-          sh -n landing/install.sh
-
   headroom:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     name: optional Headroom — macOS arm64
     runs-on: macos-15
     steps:
@@ -102,6 +146,8 @@ jobs:
           python scripts/smoke_headroom_package.py --binary target/release/stoke --worker-python "$(command -v python)"
 
   js-plugins:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     name: JS plugin chains (V8 feature)
     runs-on: ubuntu-latest
     steps:
