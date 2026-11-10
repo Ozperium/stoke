@@ -63,7 +63,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("value: ${{ jobs.changes.outputs.native }}", ci)
         self.assertIn("native: ${{ steps.filter.outputs.native }}", ci)
         self.assertIn("fetch-depth: 0", ci)
-        self.assertIn("run: python3 scripts/ci_changes.py", ci)
+        self.assertIn('git show "$PR_BASE_SHA:scripts/ci_changes.py"', ci)
+        self.assertIn('python3 -I "$selector"', ci)
+        self.assertIn("python3 -I scripts/ci_changes.py", ci)
+        self.assertLess(ci.index("id: filter"), ci.index("      - name: Check CI selection and promotion contracts"))
         self.assertIn("scripts.test_ci_workflows scripts.test_ci_changes", ci)
         for name in ("test", "headroom", "js-plugins"):
             match = re.search(rf"^  {name}:\n(.*?)(?=^  [\w-]+:|\Z)", ci, re.M | re.S)

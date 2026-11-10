@@ -18,7 +18,7 @@ def commit_id(value):
     return value
 
 
-def native_required(event_name, event, repo="."):
+def native_required(event_name, event, repo=Path(".")):
     if event_name == "pull_request":
         pull = event["pull_request"]
         base = commit_id(pull["base"]["sha"])

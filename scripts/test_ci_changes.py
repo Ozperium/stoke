@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 
 from scripts.ci_changes import native_required, website_only
@@ -20,6 +21,7 @@ class ChangeSelectionTests(unittest.TestCase):
         self.git("init", "-q", "-b", "main")
         self.write("src/main.rs", "fn main() {}\n")
         self.write("landing/index.html", "hello\n")
+        self.write("scripts/ci_changes.py", (ROOT / "scripts/ci_changes.py").read_text())
         self.baseline = self.commit()
         self.git("tag", "nightly")
 
@@ -106,6 +108,33 @@ class ChangeSelectionTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(ROOT / "scripts/ci_changes.py")], cwd=self.repo, env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(output.read_text(), "native=false\n")
+
+    def select_with_workflow_shell(self, base, head):
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        body = workflow.split("        id: filter\n", 1)[1].split("        run: |\n", 1)[1].split("\n      - ", 1)[0]
+        event = self.repo / "event.json"
+        output = self.repo / "output"
+        event.write_text(json.dumps({"pull_request": {"base": {"sha": base}, "head": {"sha": head}}}))
+        env = dict(os.environ, GITHUB_EVENT_NAME="pull_request", GITHUB_EVENT_PATH=str(event), GITHUB_OUTPUT=str(output), PR_BASE_SHA=base, RUNNER_TEMP=str(self.repo / "runner-temp"))
+        Path(env["RUNNER_TEMP"]).mkdir()
+        result = subprocess.run(["bash", "-euo", "pipefail", "-c", textwrap.dedent(body)], cwd=self.repo, env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return output.read_text()
+
+    def test_pr_cannot_disable_native_checks_by_replacing_its_selector(self):
+        self.write("src/main.rs", "untrusted native change\n")
+        self.write("scripts/ci_changes.py", 'import os\nwith open(os.environ["GITHUB_OUTPUT"], "a") as output:\n    output.write("native=false\\n")\n')
+        self.assertEqual(self.select_with_workflow_shell(self.baseline, self.commit()), "native=true\n")
+
+    def test_trusted_selector_allows_docs_and_bootstraps_missing_base_safely(self):
+        self.write("docs/ci.md", "docs\n")
+        self.assertEqual(self.select_with_workflow_shell(self.baseline, self.commit()), "native=false\n")
+
+    def test_base_without_selector_forces_all_native_checks(self):
+        self.git("rm", "scripts/ci_changes.py")
+        base = self.commit()
+        self.write("docs/ci.md", "docs\n")
+        self.assertEqual(self.select_with_workflow_shell(base, self.commit()), "native=true\n")
 
 
 if __name__ == "__main__":

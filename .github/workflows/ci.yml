@@ -29,11 +29,26 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Check CI selection and promotion contracts
-        run: python3 -m unittest scripts.test_ci_workflows scripts.test_ci_changes -v
       - name: Select native work against PR merge-base or published nightly
         id: filter
-        run: python3 scripts/ci_changes.py
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            # Select work before executing PR code, using only the reviewed base.
+            [[ "$PR_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+            selector="$RUNNER_TEMP/stoke-ci-changes.py"
+            if ! git show "$PR_BASE_SHA:scripts/ci_changes.py" > "$selector"; then
+              # Bootstrapping this gate must run every native check.
+              echo 'native=true' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            python3 -I "$selector"
+          else
+            python3 -I scripts/ci_changes.py
+          fi
+      - name: Check CI selection and promotion contracts
+        run: python3 -m unittest scripts.test_ci_workflows scripts.test_ci_changes -v
 
   website:
     name: website and installer
