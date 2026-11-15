@@ -185,4 +185,10 @@ assert struct.unpack(">II", image[16:24]) == (1200, 630), "actual OG image dimen
 image_headers = (LANDING / "_headers").read_text().split("/og-image.png", 1)[1]
 assert "immutable" not in image_headers, "stable OG filename must be revalidatable"
 
-print("Retained regressions passed: capability inventory, event allowlist, installer rollback, escaping, schema/SEO and actual social image bytes")
+join_html = (LANDING / "join" / "index.html").read_text()
+assert "Cloud's on us." in join_html
+assert "Be one of our first 10 founding users and get free Cloud access." in join_html
+assert "Compute and AI provider usage billed separately." in join_html
+assert "30 days" not in join_html and "30-day" not in join_html
+
+print("Retained regressions passed: join offer text, capability inventory, event allowlist, installer rollback, escaping, schema/SEO and actual social image bytes")

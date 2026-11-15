@@ -107,6 +107,7 @@ def main():
     check('name="email"' in join and 'type="email"' in join and 'name="persona"' in join and 'value="solo"' in join and 'value="team"' in join, "join identity/persona fields missing")
     check('name="use_case"' in join and 'maxlength="800"' in join and 'name="consent"' in join and 'value="yes"' in join and 'name="notice_version"' in join and 'value="waitlist-v2"' in join, "join consent/use-case contract missing")
     check('name="website"' in join and 'class="honeypot"' in join and 'href="/api/waitlist"' in join and "<noscript>" in join, "join privacy/no-JS contract missing")
+    check("Cloud's on us." in join, "join page offer text drifted")
     check('meta name="robots" content="noindex, follow"' in join, "join must be noindex")
     waitlist_js = (ROOT / "newwaitlist.js").read_text()
     check("?format=json" in waitlist_js and "config.open === true" in waitlist_js and "fields.disabled = true" in waitlist_js, "waitlist must fail closed")
