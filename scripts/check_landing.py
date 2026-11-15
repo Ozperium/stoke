@@ -86,6 +86,7 @@ assert len(main_copy.split()) < 90, "homepage body copy exceeds the sparse-copy 
 assert not any(tag == "form" for tag, _ in home.tags + cloud.tags), "marketing pages must not embed the signup form"
 assert "preparing" not in (home_path.read_text() + cloud_path.read_text()).lower()
 assert "prelaunch" not in (home_path.read_text() + cloud_path.read_text()).lower()
+assert "Cloud's on us." in join_path.read_text(), "join page offer text drifted"
 
 assert not tags(home, "video"), "rejected film must not remain promoted"
 assert any("data-product-visual" in a for _, a in home.tags), "approved visual missing"

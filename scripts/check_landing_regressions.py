@@ -185,4 +185,4 @@ assert struct.unpack(">II", image[16:24]) == (1200, 630), "actual OG image dimen
 image_headers = (LANDING / "_headers").read_text().split("/og-image.png", 1)[1]
 assert "immutable" not in image_headers, "stable OG filename must be revalidatable"
 
-print("Retained regressions passed: capability inventory, event allowlist, installer rollback, escaping, schema/SEO and actual social image bytes")
+print(f"Retained regressions passed: join offer text, capability inventory, event allowlist, installer rollback, escaping, schema/SEO and actual social image bytes")
