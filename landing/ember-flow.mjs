@@ -42,7 +42,7 @@ export function mountEmberFlow(root) {
   const halo = element('circle', {r: 10, fill: '#F15332', opacity: 0}, overlay);
   const head = element('circle', {r: 3.5, fill: '#F15332', opacity: 0}, overlay);
   const outline = basePath.cloneNode(false);
-  for (const [key, value] of Object.entries({class: 'ember-flow__outline', fill: '#F15332', 'fill-opacity': '.02', stroke: '#F15332', 'stroke-width': 2, opacity: 0})) outline.setAttribute(key, value);
+  for (const [key, value] of Object.entries({class: 'ember-flow__outline', fill: 'none', stroke: '#F15332', 'stroke-width': 2, opacity: 0})) outline.setAttribute(key, value);
   surface.append(outline);
 
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -88,10 +88,10 @@ export function mountEmberFlow(root) {
     state = readState();
     hide();
     if (reduced.matches) return;
-    const working = state.policy === 'allowed' && !['ingress', 'connection-failed', 'complete'].includes(state.phase);
-    const pulse = working ? Math.pow(Math.max(0, Math.sin((state.elapsed - 850) / 1500 * Math.PI)), 4) : 0;
-    outline.setAttribute('opacity', String(pulse * .65));
-    outline.setAttribute('transform', `translate(50 50) scale(${1 + pulse * .016}) translate(-50 -50)`);
+    const working = !['ingress', 'stopped', 'connection-failed', 'complete'].includes(state.phase);
+    const pulse = working ? .25 + .65 * Math.pow(Math.sin((state.elapsed - 850) / 1250 * Math.PI), 2) : 0;
+    // Heat the exact border, never scale the panel or wash over its content.
+    outline.setAttribute('opacity', String(pulse));
     const packet = state.packet;
     const route = packet && routes[packet.path];
     if (!packet || !route || !state.visiblePaths.includes(packet.path)) return;
