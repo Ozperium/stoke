@@ -2,4 +2,5 @@
 [data-ember-ready] .product-visual__routes [data-packet]{opacity:0!important}
 .brand-presentation-page .brand-mark::after{animation:none!important;opacity:.35}
 .ember-flow__overlay,.ember-flow__outline{pointer-events:none}
+.ember-flow__outline{filter:drop-shadow(0 0 3px rgba(241,83,50,.7)) drop-shadow(0 0 10px rgba(241,83,50,.3))}
 @media(prefers-reduced-motion:reduce){.ember-flow__overlay,.ember-flow__outline{opacity:0!important}}
