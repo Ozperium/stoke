@@ -146,7 +146,7 @@ test('browser smoke covers visible startup, automatic scene flow, pause, and rou
     }
     try {
       const body = readFileSync(file);
-      const type = file.endsWith('.html') ? 'text/html' : file.endsWith('.css') ? 'text/css' : file.endsWith('.mjs') || file.endsWith('.js') ? 'text/javascript' : 'application/octet-stream';
+      const type = file.endsWith('.html') ? 'text/html' : file.endsWith('.css') ? 'text/css' : file.endsWith('.svg') ? 'image/svg+xml' : file.endsWith('.mjs') || file.endsWith('.js') ? 'text/javascript' : 'application/octet-stream';
       response.writeHead(200, {'content-type': type}).end(body);
     } catch {
       response.writeHead(404).end();
@@ -160,10 +160,20 @@ test('browser smoke covers visible startup, automatic scene flow, pause, and rou
     await page.goto(`http://127.0.0.1:${address.port}/`, {waitUntil: 'networkidle'});
     const root = page.locator('[data-product-visual]');
     const canvas = page.locator('[data-visual-canvas]');
+    const logo = page.locator('.product-visual__logo');
+    const logoStyle = (property) => logo.evaluate((image, key) => getComputedStyle(image)[key], property);
+    assert.equal(await logo.getAttribute('src'), '/stoke-mark.svg', 'reuse the canonical Stoke mark');
+    assert.ok(await logo.evaluate(image => image.complete && image.naturalWidth > 0), 'logo loads');
+    assert.equal(await logoStyle('animationName'), 'none', 'idle logo stays still');
     assert.equal(await root.getAttribute('data-phase'), 'complete', 'startup preserves completed output');
     await canvas.scrollIntoViewIfNeeded();
     await page.waitForFunction(() => document.querySelector('[data-product-visual]')?.dataset.playing === 'true');
     assert.notEqual(await root.getAttribute('data-phase'), 'complete', 'visible canvas starts the causal narrative');
+    assert.equal(await logoStyle('animationPlayState'), 'running');
+    const movingLogo = await logoStyle('transform');
+    await page.waitForTimeout(180);
+    assert.notEqual(await logoStyle('transform'), movingLogo, 'traffic animates the logo');
+    assert.equal(await page.locator('.product-visual__mark').evaluate(el => getComputedStyle(el).transform), 'none', 'wordmark stays readable');
     assert.match(await page.locator('[data-route="ingress"]').getAttribute('d'), /^M/);
     assert.ok(await page.locator('[data-route="ingress"]').evaluate((path) => path.getTotalLength() > 0));
 
@@ -171,20 +181,48 @@ test('browser smoke covers visible startup, automatic scene flow, pause, and rou
     const pausedElapsed = await root.getAttribute('data-elapsed');
     assert.equal(await root.getAttribute('data-paused'), 'true');
     assert.equal(await root.getAttribute('data-playing'), 'false');
+    await logo.evaluate(async image => {
+      await Promise.all(image.getAnimations().map(animation => animation.ready));
+      await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
+    });
+    assert.equal(await logoStyle('animationPlayState'), 'paused');
+    const frozenLogo = await logoStyle('transform');
     await page.waitForTimeout(120);
+    assert.equal(await logoStyle('transform'), frozenLogo, 'pause freezes the same logo frame');
     assert.equal(await root.getAttribute('data-elapsed'), pausedElapsed, 'paused animation does not advance');
     await page.locator('[data-role="visual-play"]').click();
     assert.equal(await root.getAttribute('data-playing'), 'true', 'resume restarts the same run');
+    await page.waitForTimeout(120);
+    assert.notEqual(await logoStyle('transform'), frozenLogo, 'resume animates again');
+
+    await page.waitForFunction(() => document.querySelector('[data-product-visual]')?.dataset.phase === 'complete');
+    assert.equal(await logoStyle('animationName'), 'none', 'finished flow stops the logo');
 
     await page.locator('[data-scenario="budget"]').click();
     assert.equal(await root.getAttribute('data-scenario'), 'budget');
     await page.waitForFunction(() => document.querySelector('[data-product-visual]')?.dataset.phase !== 'complete');
     assert.ok(Number(await root.getAttribute('data-elapsed')) < DURATIONS.budget);
     assert.ok(await page.locator('[data-route="ingress"]').evaluate((path) => path.getTotalLength() > 0), 'scene switch keeps ingress geometry');
+    await page.waitForFunction(() => document.querySelector('[data-product-visual]')?.dataset.phase === 'stopped');
+    assert.equal(await logoStyle('animationName'), 'none', 'blocked traffic does not keep the logo working');
+    await page.locator('[role="tab"][data-scenario="local"]').click();
+    await page.waitForFunction(() => document.querySelector('[data-product-visual]')?.dataset.phase === 'connection-failed');
+    assert.equal(await logoStyle('animationName'), 'none', 'failed connection stops the logo');
+    await page.waitForFunction(() => document.querySelector('[data-product-visual]')?.dataset.phase === 'permitted-retry');
+    assert.equal(await logoStyle('animationPlayState'), 'running', 'permitted retry wakes the logo');
     await page.setViewportSize({width: 390, height: 1500});
     await page.emulateMedia({reducedMotion: 'reduce'});
     await page.locator('[role="tab"][data-scenario="privacy"]').click();
     await page.evaluate(() => document.fonts.ready);
+    assert.equal(await logoStyle('animationName'), 'none', 'reduced motion disables the effect');
+    for (const width of [320, 390, 768, 1024, 1280]) {
+      await page.setViewportSize({width, height: 1500});
+      const markBox = await page.locator('.product-visual__mark').boundingBox();
+      const decisionBox = await page.locator('.product-visual__decision').boundingBox();
+      assert.ok(markBox.x + markBox.width <= decisionBox.x, `logo must not overlap the decision at ${width}px`);
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `no horizontal overflow at ${width}px`);
+    }
+    await page.setViewportSize({width: 390, height: 1500});
     const labelHits = await page.evaluate(() => {
       const canvas = document.querySelector('[data-visual-canvas]').getBoundingClientRect();
       const boxes = [];
