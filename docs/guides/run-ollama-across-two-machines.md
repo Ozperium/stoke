@@ -29,13 +29,13 @@ Only one network port is open on the workstation: its Stoke on `:8787`, and it r
 
 ## Install Stoke on both machines
 
-There is no tagged stable release yet, so pin the nightly build — a bare `| sh` resolves `latest` and compiles from source. Run this on the laptop and the workstation:
+Install the latest stable release on the laptop and the workstation:
 
 ```bash
-curl -sSf https://stokegate.com/install | sh -s -- --version nightly
+curl -sSf https://stokegate.com/install | sh
 ```
 
-That fetches a checksum-verified static binary for macOS (arm64/x64) or Linux (x64/arm64) and falls back to a source build on anything else. You get two binaries: `stoke` (the server) and `stoke-cli` (config + client helpers).
+That fetches a checksum-verified static binary for macOS (arm64/x64) or Linux (x64/arm64) and falls back to a source build on anything else. You get two binaries: `stoke` (the server) and `stoke-cli` (config + client helpers). Use `sh -s -- --version nightly` only if you want the rolling prerelease.
 
 ## Configure the workstation (the GPU machine)
 

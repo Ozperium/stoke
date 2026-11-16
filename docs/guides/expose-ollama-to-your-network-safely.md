@@ -177,7 +177,7 @@ Stoke imports the peer's models, warm state, and live load through its authentic
 Install Stoke and try the pattern on two machines:
 
 ```bash
-curl -sSf https://stokegate.com/install | sh -s -- --version nightly
+curl -sSf https://stokegate.com/install | sh
 ```
 
-There's no stable tag yet — a bare `| sh` resolves `latest` and compiles from source, so pin `--version nightly` for the checksum-verified static binary (macOS arm64/x64, Linux x64/arm64). Source and full config reference: https://github.com/Ozperium/stoke
+The default installer selects the latest stable release, with checksum-verified prebuilt binaries for macOS arm64/x64 and Linux x64/arm64. Use `sh -s -- --version nightly` only if you want the rolling prerelease. Source and full config reference: https://github.com/Ozperium/stoke
